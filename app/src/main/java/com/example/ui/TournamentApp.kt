@@ -25,7 +25,10 @@ fun TournamentApp(tournamentRepository: TournamentRepositoryImpl) {
         composable("login") {
             LoginScreen(
                 supabaseClient = tournamentRepository.supabase,
-                onLoginSuccess = {
+                onLoginSuccess = { userEmail ->
+                    if (userEmail != null) {
+                        viewModel.setManualLoginEmail(userEmail)
+                    }
                     navController.navigate("dashboard") {
                         popUpTo("login") { inclusive = true }
                     }

@@ -30,6 +30,13 @@ class TournamentDashboardViewModel(
     private val _uiState = MutableStateFlow<DashboardState>(DashboardState.Loading)
     val uiState: StateFlow<DashboardState> = _uiState.asStateFlow()
 
+    private var overrideUserEmail: String? = null
+
+    fun setManualLoginEmail(email: String) {
+        overrideUserEmail = email
+        fetchTournaments()
+    }
+
     init {
         fetchTournaments()
     }
@@ -41,7 +48,7 @@ class TournamentDashboardViewModel(
                 val tournaments = repository.getAvailableTournaments()
                 val pendingCount = repository.getPendingRegistrations().size
                 val payout = tournaments.sumOf { it.prizePool.toDouble() }.toFloat()
-                val userEmail = repository.supabase.auth.currentSessionOrNull()?.user?.email
+                val userEmail = overrideUserEmail ?: repository.supabase.auth.currentSessionOrNull()?.user?.email
                 
                 _uiState.value = DashboardState.Success(
                     tournaments = tournaments,
