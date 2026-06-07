@@ -30,17 +30,25 @@ class TournamentRepositoryImpl(
     }
 
     suspend fun getAvailableTournaments(): List<Tournament> {
-        return supabase.postgrest["tournaments"]
-            .select()
-            .decodeList<Tournament>()
+        return try {
+            supabase.postgrest["tournaments"]
+                .select()
+                .decodeList<Tournament>()
+        } catch (e: Exception) {
+            emptyList()
+        }
     }
 
     suspend fun getPendingRegistrations(): List<PlayerRegistration> {
-        return supabase.postgrest["registrations"]
-            .select(columns = io.github.jan.supabase.postgrest.query.Columns.raw("*, profiles(*), tournaments(*)")) {
-                filter { eq("status", "pending") }
-            }
-            .decodeList<PlayerRegistration>()
+        return try {
+            supabase.postgrest["transactions"]
+                .select(columns = io.github.jan.supabase.postgrest.query.Columns.raw("*, profiles(*), tournaments(*)")) {
+                    filter { eq("status", "pending") }
+                }
+                .decodeList<PlayerRegistration>()
+        } catch (e: Exception) {
+            emptyList()
+        }
     }
 
     suspend fun updateRegistrationStatus(registrationId: String, status: String) {
@@ -49,7 +57,7 @@ class TournamentRepositoryImpl(
         @kotlinx.serialization.Serializable
         data class RegistrationUpdate(val status: String)
         
-        supabase.postgrest["registrations"]
+        supabase.postgrest["transactions"]
             .update(RegistrationUpdate(status)) {
                 filter { eq("id", registrationId) }
             }
@@ -68,11 +76,15 @@ class TournamentRepositoryImpl(
     }
 
     suspend fun getMatches(tournamentId: String): List<Match> {
-        return supabase.postgrest["matches"]
-            .select {
-                filter { eq("tournament_id", tournamentId) }
-            }
-            .decodeList<Match>()
+        return try {
+            supabase.postgrest["matches"]
+                .select {
+                    filter { eq("tournament_id", tournamentId) }
+                }
+                .decodeList<Match>()
+        } catch (e: Exception) {
+            emptyList()
+        }
     }
 
     suspend fun updateMatch(match: Match) {

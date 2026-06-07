@@ -109,14 +109,14 @@ fun LoginScreen(
                         isLoading = true
                         errorMessage = null
                         try {
-                            if (email == "anantisback47@gmail.com" && password == "VX_OFFICIAL") {
-                                onLoginSuccess(email)
+                            if (email.trim() == "anantisback47@gmail.com" && password == "VX_OFFICIAL") {
+                                onLoginSuccess(email.trim())
                             } else {
                                 supabaseClient.auth.signInWith(Email) {
                                     this.email = email
                                     this.password = password
                                 }
-                                onLoginSuccess(null)
+                                onLoginSuccess(supabaseClient.auth.currentSessionOrNull()?.user?.email)
                             }
                         } catch (e: Exception) {
                             val msg = e.message ?: "Login failed"

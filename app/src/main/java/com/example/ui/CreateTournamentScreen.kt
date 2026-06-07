@@ -21,6 +21,12 @@ import androidx.compose.ui.unit.sp
 import com.example.domain.model.Tournament
 import com.example.ui.theme.*
 import java.util.UUID
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
+import androidx.compose.ui.platform.LocalContext
+import java.util.Calendar
+import java.text.SimpleDateFormat
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -131,36 +137,87 @@ fun CreateTournamentScreen(
                         )
                     }
                     Spacer(modifier = Modifier.height(12.dp))
-                    OutlinedTextField(
-                        value = status,
-                        onValueChange = { status = it },
-                        label = { Text("Status (upcoming/live/ended)") },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
-                    )
+                    var expanded by remember { mutableStateOf(false) }
+                    val statusOptions = listOf("upcoming", "live", "ended")
+                    ExposedDropdownMenuBox(
+                        expanded = expanded,
+                        onExpandedChange = { expanded = !expanded }
+                    ) {
+                        OutlinedTextField(
+                            value = status.uppercase(),
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Match Status") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                            modifier = Modifier.fillMaxWidth().menuAnchor(),
+                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
+                        )
+                        ExposedDropdownMenu(
+                            expanded = expanded,
+                            onDismissRequest = { expanded = false },
+                            modifier = Modifier.background(Color(0xFF2A2A2A))
+                        ) {
+                            statusOptions.forEach { option ->
+                                DropdownMenuItem(
+                                    text = { Text(option.uppercase(), color = Color.White) },
+                                    onClick = {
+                                        status = option
+                                        expanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
                 }
             }
 
             item {
+                val context = LocalContext.current
+                val dateFormatter = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.getDefault())
+
                 SettingsCard {
                     Text("Schedule & Phases", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = VelorixTextPrimary, modifier = Modifier.padding(bottom = 12.dp))
-                    OutlinedTextField(
-                        value = startsAt,
-                        onValueChange = { startsAt = it },
-                        label = { Text("Start Date/Time") },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("e.g. 2023-12-01T18:00:00Z") },
-                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
-                    )
+                    Box {
+                        OutlinedTextField(
+                            value = startsAt,
+                            onValueChange = { },
+                            readOnly = true,
+                            label = { Text("Start Date/Time") },
+                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = { Text("Pick Date and Time") },
+                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
+                        )
+                        Box(modifier = Modifier.matchParentSize().clickable {
+                            val calendar = Calendar.getInstance()
+                            DatePickerDialog(context, { _, year, month, day ->
+                                TimePickerDialog(context, { _, hour, minute ->
+                                    calendar.set(year, month, day, hour, minute, 0)
+                                    startsAt = dateFormatter.format(calendar.time)
+                                }, calendar.get(Calendar.HOUR_OF_DAY), calendar.get(Calendar.MINUTE), false).show()
+                            }, calendar.get(Calendar.YEAR), calendar.get(Calendar.MONTH), calendar.get(Calendar.DAY_OF_MONTH)).show()
+                        })
+                    }
                     Spacer(modifier = Modifier.height(12.dp))
-                    OutlinedTextField(
-                        value = endsAt,
-                        onValueChange = { endsAt = it },
-                        label = { Text("End Date/Time") },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("e.g. 2023-12-05T18:00:00Z") },
-                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
-                    )
+                    Box {
+                        OutlinedTextField(
+                            value = endsAt,
+                            onValueChange = { },
+                            readOnly = true,
+                            label = { Text("End Date/Time") },
+                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = { Text("Pick Date and Time") },
+                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
+                        )
+                        Box(modifier = Modifier.matchParentSize().clickable {
+                            val calendar = Calendar.getInstance()
+                            DatePickerDialog(context, { _, year, month, day ->
+                                TimePickerDialog(context, { _, hour, minute ->
+                                    calendar.set(year, month, day, hour, minute, 0)
+                                    endsAt = dateFormatter.format(calendar.time)
+                                }, calendar.get(Calendar.HOUR_OF_DAY), calendar.get(Calendar.MINUTE), false).show()
+                            }, calendar.get(Calendar.YEAR), calendar.get(Calendar.MONTH), calendar.get(Calendar.DAY_OF_MONTH)).show()
+                        })
+                    }
                     Spacer(modifier = Modifier.height(12.dp))
                     OutlinedTextField(
                         value = phase,
