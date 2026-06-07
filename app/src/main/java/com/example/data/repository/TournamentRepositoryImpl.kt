@@ -3,6 +3,7 @@ package com.example.data.repository
 import com.example.domain.model.LeaderboardEntry
 import com.example.domain.model.PlayerRegistration
 import com.example.domain.model.Tournament
+import com.example.domain.model.Match
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Columns
@@ -13,8 +14,21 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
 class TournamentRepositoryImpl(
-    private val supabase: SupabaseClient
+    val supabase: SupabaseClient
 ) {
+    suspend fun getLiveTournamentsStream(): Flow<List<Tournament>> {
+        val channel = supabase.channel("public:tournaments")
+        val changes = channel.postgresChangeFlow<PostgresAction>(schema = "public") {
+            table = "tournaments"
+        }
+        
+        channel.subscribe()
+        
+        return changes.map {
+            getAvailableTournaments()
+        }
+    }
+
     suspend fun getAvailableTournaments(): List<Tournament> {
         return supabase.postgrest["tournaments"]
             .select()
@@ -41,11 +55,45 @@ class TournamentRepositoryImpl(
             }
     }
 
+    suspend fun createTournament(tournament: Tournament) {
+        supabase.postgrest["tournaments"]
+            .insert(tournament)
+    }
+
     suspend fun updateTournament(tournament: Tournament) {
         supabase.postgrest["tournaments"]
             .update(tournament) {
                 filter { eq("id", tournament.id) }
             }
+    }
+
+    suspend fun getMatches(tournamentId: String): List<Match> {
+        return supabase.postgrest["matches"]
+            .select {
+                filter { eq("tournament_id", tournamentId) }
+            }
+            .decodeList<Match>()
+    }
+
+    suspend fun updateMatch(match: Match) {
+        supabase.postgrest["matches"]
+            .update(match) {
+                filter { eq("id", match.id) }
+            }
+    }
+
+    suspend fun getLiveMatchesStream(tournamentId: String): Flow<List<Match>> {
+        val channel = supabase.channel("public:matches")
+        val changes = channel.postgresChangeFlow<PostgresAction>(schema = "public") {
+            table = "matches"
+            filter("tournament_id", io.github.jan.supabase.postgrest.query.filter.FilterOperator.EQ, tournamentId)
+        }
+        
+        channel.subscribe()
+        
+        return changes.map {
+            getMatches(tournamentId)
+        }
     }
 
     suspend fun getLiveLeaderboardStream(tournamentId: String): Flow<List<LeaderboardEntry>> {

@@ -148,17 +148,27 @@ fun RegistrationCard(
                     color = VelorixTextSecondary
                 )
             }
-            Box(
-                modifier = Modifier
-                    .background(VelorixAccentLight, RoundedCornerShape(8.dp))
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
-            ) {
-                Text(
-                    text = registration.tournament?.game ?: "Unknown Game",
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = VelorixAccentDark
-                )
+            Column(horizontalAlignment = Alignment.End) {
+                Box(
+                    modifier = Modifier
+                        .background(VelorixAccentLight, RoundedCornerShape(8.dp))
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = registration.tournament?.game ?: "Unknown Game",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = VelorixAccentDark
+                    )
+                }
+                if (registration.tournament?.eligibilityCriteria?.isNotEmpty() == true) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Req: ${registration.tournament.eligibilityCriteria}",
+                        fontSize = 10.sp,
+                        color = Color(0xFFFFB74D) // Warning-like color for attention
+                    )
+                }
             }
         }
 

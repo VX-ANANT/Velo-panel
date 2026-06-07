@@ -1,0 +1,245 @@
+package com.example.ui
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.example.domain.model.Tournament
+import com.example.ui.theme.*
+import java.util.UUID
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CreateTournamentScreen(
+    onNavigateBack: () -> Unit,
+    onCreate: (Tournament) -> Unit
+) {
+    var title by remember { mutableStateOf("") }
+    var game by remember { mutableStateOf("Free Fire") }
+    var status by remember { mutableStateOf("upcoming") }
+    var prizePool by remember { mutableStateOf("1000") }
+    var maxPlayers by remember { mutableStateOf("100") }
+    var startsAt by remember { mutableStateOf("") }
+    var endsAt by remember { mutableStateOf("") }
+    var phase by remember { mutableStateOf("Registrations Open") }
+    var eligibilityCriteria by remember { mutableStateOf("") }
+    var gameVersion by remember { mutableStateOf("") }
+    var rules by remember { mutableStateOf("") }
+    var isSaving by remember { mutableStateOf(false) }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Create Tournament", color = VelorixTextPrimary, fontWeight = FontWeight.Bold, fontSize = 20.sp) },
+                navigationIcon = {
+                    Box(
+                        modifier = Modifier
+                            .padding(8.dp)
+                            .size(40.dp)
+                            .background(VelorixAccentLight, CircleShape)
+                            .border(2.dp, VelorixAccentBorder, CircleShape)
+                            .clickable { onNavigateBack() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = VelorixAccentDark
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = VelorixBg)
+            )
+        },
+        containerColor = VelorixBg
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth().background(Color(0x1AFFB74D), RoundedCornerShape(8.dp)).padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFFFB74D))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "New tournaments are instantly broadcasted via Realtime events across the Velorix platform.",
+                        color = Color(0xFFFFB74D),
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp
+                    )
+                }
+            }
+
+            item {
+                SettingsCard {
+                    Text("Basic Information", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = VelorixTextPrimary, modifier = Modifier.padding(bottom = 12.dp))
+                    OutlinedTextField(
+                        value = title,
+                        onValueChange = { title = it },
+                        label = { Text("Tournament Title") },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = game,
+                        onValueChange = { game = it },
+                        label = { Text("Game Title") },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
+                    )
+                }
+            }
+
+            item {
+                SettingsCard {
+                    Text("Prize & Logistics", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = VelorixTextPrimary, modifier = Modifier.padding(bottom = 12.dp))
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        OutlinedTextField(
+                            value = prizePool,
+                            onValueChange = { prizePool = it },
+                            label = { Text("Prize Pool ($)") },
+                            modifier = Modifier.weight(1f),
+                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
+                        )
+                        OutlinedTextField(
+                            value = maxPlayers,
+                            onValueChange = { maxPlayers = it },
+                            label = { Text("Max Slots") },
+                            modifier = Modifier.weight(1f),
+                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = status,
+                        onValueChange = { status = it },
+                        label = { Text("Status (upcoming/live/ended)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
+                    )
+                }
+            }
+
+            item {
+                SettingsCard {
+                    Text("Schedule & Phases", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = VelorixTextPrimary, modifier = Modifier.padding(bottom = 12.dp))
+                    OutlinedTextField(
+                        value = startsAt,
+                        onValueChange = { startsAt = it },
+                        label = { Text("Start Date/Time") },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("e.g. 2023-12-01T18:00:00Z") },
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = endsAt,
+                        onValueChange = { endsAt = it },
+                        label = { Text("End Date/Time") },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("e.g. 2023-12-05T18:00:00Z") },
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = phase,
+                        onValueChange = { phase = it },
+                        label = { Text("Tournament Phase") },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("e.g. Group Stage, Semifinals") },
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
+                    )
+                }
+            }
+
+            item {
+                SettingsCard {
+                    Text("Participant Rules", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = VelorixTextPrimary, modifier = Modifier.padding(bottom = 12.dp))
+                    OutlinedTextField(
+                        value = eligibilityCriteria,
+                        onValueChange = { eligibilityCriteria = it },
+                        label = { Text("Eligibility Criteria") },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("e.g. Pro tier only, Level 50+") },
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = gameVersion,
+                        onValueChange = { gameVersion = it },
+                        label = { Text("Game Version / Patch Info") },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("e.g. Patch 3.2v") },
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = rules,
+                        onValueChange = { rules = it },
+                        label = { Text("General Rules") },
+                        modifier = Modifier.fillMaxWidth().height(120.dp),
+                        maxLines = 5,
+                        placeholder = { Text("Custom rules and requirements...") },
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
+                    )
+                }
+            }
+
+            item {
+                Button(
+                    onClick = {
+                        isSaving = true
+                        val newTournament = Tournament(
+                            id = UUID.randomUUID().toString(),
+                            title = title.ifEmpty { "New Tournament" },
+                            game = game,
+                            entryFee = 0f,
+                            prizePool = prizePool.toFloatOrNull() ?: 0f,
+                            maxPlayers = maxPlayers.toIntOrNull() ?: 100,
+                            registeredPlayers = 0,
+                            status = status,
+                            startsAt = startsAt,
+                            endsAt = endsAt,
+                            phase = phase,
+                            eligibilityCriteria = eligibilityCriteria,
+                            gameVersion = gameVersion,
+                            rules = rules
+                        )
+                        onCreate(newTournament)
+                    },
+                    modifier = Modifier.fillMaxWidth().height(56.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent),
+                    enabled = !isSaving
+                ) {
+                    if (isSaving) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color.White)
+                    } else {
+                        Text("CREATE TOURNAMENT", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    }
+                }
+                Spacer(modifier = Modifier.height(32.dp))
+            }
+        }
+    }
+}

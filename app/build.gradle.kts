@@ -12,7 +12,7 @@ android {
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
   defaultConfig {
-    applicationId = "com.aistudio.velorixadmin.qxzbpa"
+    applicationId = "com.admin.velorix"
     minSdk = 24
     targetSdk = 36
     versionCode = 1
@@ -91,6 +91,7 @@ dependencies {
   implementation(libs.androidx.navigation.compose)
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)
+  implementation("androidx.compose.ui:ui-text-google-fonts:1.6.0")
   // implementation(libs.coil.compose)
   implementation(libs.converter.moshi)
   // implementation(libs.firebase.ai)
@@ -103,6 +104,7 @@ dependencies {
   // Custom
   implementation(platform(libs.supabase.bom))
   implementation(libs.supabase.auth)
+  implementation("io.github.jan-tennert.supabase:compose-auth-ui")
   implementation(libs.supabase.postgrest)
   implementation(libs.supabase.realtime)
   implementation(libs.ktor.client.okhttp)

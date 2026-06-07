@@ -35,6 +35,16 @@ data class Tournament(
     val status: String,
     @SerialName("starts_at")
     val startsAt: String? = null,
+    @SerialName("ends_at")
+    val endsAt: String? = null,
+    @SerialName("time_zone")
+    val timeZone: String? = null,
+    @SerialName("phase")
+    val phase: String? = null,
+    @SerialName("eligibility_criteria")
+    val eligibilityCriteria: String? = null,
+    @SerialName("game_version")
+    val gameVersion: String? = null,
     @SerialName("rules")
     val rules: String? = null
 )
@@ -76,4 +86,28 @@ data class LeaderboardEntry(
     // Joined field typically coming from postgrest joins
     @SerialName("profiles")
     val profile: UserProfile? = null
+)
+
+@Serializable
+data class Match(
+    @SerialName("id")
+    val id: String,
+    @SerialName("tournament_id")
+    val tournamentId: String,
+    @SerialName("round")
+    val round: Int,
+    @SerialName("match_number")
+    val matchNumber: Int,
+    @SerialName("player1_id")
+    val player1Id: String? = null,
+    @SerialName("player2_id")
+    val player2Id: String? = null,
+    @SerialName("winner_id")
+    val winnerId: String? = null,
+    @SerialName("status")
+    val status: String,
+    @SerialName("score1")
+    val score1: Int? = null,
+    @SerialName("score2")
+    val score2: Int? = null
 )

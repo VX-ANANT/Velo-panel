@@ -27,7 +27,7 @@ import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Shield
-import androidx.compose.material.icons.filled.TrendingUp
+import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material3.Button
@@ -53,14 +53,29 @@ import com.example.domain.model.Tournament
 import com.example.ui.viewmodel.DashboardState
 import androidx.compose.material3.CircularProgressIndicator
 
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material3.FloatingActionButton
+
 @Composable
 fun DashboardScreen(
     uiState: DashboardState,
     onSettingsClick: (String) -> Unit,
-    onVerifyClick: () -> Unit
+    onCreateTournamentClick: () -> Unit,
+    onVerifyClick: () -> Unit,
+    onBracketClick: (String) -> Unit,
+    onNavClick: (String) -> Unit
 ) {
     Scaffold(
-        bottomBar = { DashboardBottomNavBar() },
+        floatingActionButton = {
+            FloatingActionButton(
+                onClick = onCreateTournamentClick,
+                containerColor = VelorixAccent,
+                contentColor = Color.Black
+            ) {
+                Icon(Icons.Default.Add, contentDescription = "Create Tournament")
+            }
+        },
+        bottomBar = { DashboardBottomNavBar(onNavClick = onNavClick) },
         containerColor = VelorixBg
     ) { innerPadding ->
         Column(
@@ -69,7 +84,7 @@ fun DashboardScreen(
                 .padding(innerPadding)
                 .background(VelorixBg)
         ) {
-            DashboardHeader()
+            DashboardHeader(onProfileClick = { onNavClick("staff_management") })
             
             when (uiState) {
                 is DashboardState.Loading -> {
@@ -79,9 +94,12 @@ fun DashboardScreen(
                 }
                 is DashboardState.Success -> {
                     DashboardContent(
-                        tournaments = uiState.tournaments,
+                        uiState = uiState,
                         onSettingsClick = onSettingsClick,
-                        onVerifyClick = onVerifyClick
+                        onVerifyClick = onVerifyClick,
+                        onBracketClick = onBracketClick,
+                        onProfilesClick = { onNavClick("player_profiles") },
+                        onAnalyticsClick = { onNavClick("analytics") }
                     )
                 }
                 is DashboardState.Error -> {
@@ -95,7 +113,7 @@ fun DashboardScreen(
 }
 
 @Composable
-fun DashboardHeader() {
+fun DashboardHeader(onProfileClick: () -> Unit = {}) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -145,7 +163,8 @@ fun DashboardHeader() {
             modifier = Modifier
                 .size(40.dp)
                 .background(VelorixAccentLight, CircleShape)
-                .border(2.dp, VelorixAccentBorder, CircleShape),
+                .border(2.dp, VelorixAccentBorder, CircleShape)
+                .clickable { onProfileClick() },
             contentAlignment = Alignment.Center
         ) {
             Icon(
@@ -160,11 +179,14 @@ fun DashboardHeader() {
 
 @Composable
 fun DashboardContent(
-    tournaments: List<Tournament>,
+    uiState: DashboardState.Success,
     onSettingsClick: (String) -> Unit,
-    onVerifyClick: () -> Unit
+    onVerifyClick: () -> Unit,
+    onBracketClick: (String) -> Unit,
+    onProfilesClick: () -> Unit,
+    onAnalyticsClick: () -> Unit
 ) {
-    val liveTournament = tournaments.firstOrNull()
+    val liveTournament = uiState.tournaments.firstOrNull()
 
     Column(
         modifier = Modifier
@@ -181,7 +203,7 @@ fun DashboardContent(
                     .fillMaxWidth()
                     .background(CardLiveBg, RoundedCornerShape(24.dp))
                     .border(1.dp, VelorixAccentDark.copy(alpha = 0.05f), RoundedCornerShape(24.dp))
-                    .clickable { onSettingsClick(liveTournament.id) }
+                    .clickable { onBracketClick(liveTournament.id) }
                     .padding(20.dp)
             ) {
                 Column {
@@ -215,12 +237,13 @@ fun DashboardContent(
                         Box(
                             modifier = Modifier
                                 .size(40.dp)
-                                .background(Color.White.copy(alpha = 0.4f), CircleShape),
+                                .background(Color.White.copy(alpha = 0.4f), CircleShape)
+                                .clickable { onSettingsClick(liveTournament.id) },
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = Icons.Default.AccountTree,
-                                contentDescription = "Bracket structure",
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = "Tournament Settings",
                                 tint = VelorixAccentDark
                             )
                         }
@@ -299,7 +322,7 @@ fun DashboardContent(
                 
                 Spacer(modifier = Modifier.height(16.dp))
                 
-                Text(text = "14", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = VelorixTextPrimary)
+                Text(text = uiState.pendingRegistrationsCount.toString(), fontSize = 30.sp, fontWeight = FontWeight.Bold, color = VelorixTextPrimary)
                 Text(text = "Players pending manual review", fontSize = 10.sp, color = VelorixTextSecondary, lineHeight = 12.sp)
                 
                 Spacer(modifier = Modifier.height(12.dp))
@@ -318,6 +341,7 @@ fun DashboardContent(
             Column(
                 modifier = Modifier
                     .weight(1f)
+                    .clickable { onAnalyticsClick() }
                     .background(CardAnalyticsBg, RoundedCornerShape(24.dp))
                     .border(1.dp, CardAnalyticsBorder, RoundedCornerShape(24.dp))
                     .padding(16.dp)
@@ -328,7 +352,7 @@ fun DashboardContent(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
-                        imageVector = Icons.Default.TrendingUp,
+                        imageVector = Icons.AutoMirrored.Filled.TrendingUp,
                         contentDescription = "Trending Up",
                         tint = VelorixAccent,
                         modifier = Modifier.size(20.dp)
@@ -354,7 +378,7 @@ fun DashboardContent(
                 Text(
                     text = buildAnnotatedString {
                         withStyle(style = SpanStyle(fontSize = 18.sp, fontWeight = FontWeight.Bold, color = VelorixTextPrimary)) {
-                            append("4.2k ")
+                            append("${uiState.totalRegistrationsCount} ")
                         }
                         withStyle(style = SpanStyle(fontSize = 10.sp, fontWeight = FontWeight.Normal, color = VelorixTextPrimary)) {
                             append("Regs")
@@ -383,7 +407,7 @@ fun DashboardContent(
                     letterSpacing = 1.sp
                 )
                 Text(
-                    text = "$12,850.00",
+                    text = "$${uiState.payoutPool}",
                     color = Color.White,
                     fontSize = 24.sp,
                     fontWeight = FontWeight.Bold,
@@ -432,7 +456,7 @@ fun DashboardContent(
 }
 
 @Composable
-fun DashboardBottomNavBar() {
+fun DashboardBottomNavBar(onNavClick: (String) -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -446,29 +470,34 @@ fun DashboardBottomNavBar() {
         NavBarItem(
             icon = Icons.Default.GridView,
             label = "Overview",
-            isSelected = true
+            isSelected = true,
+            onClick = { onNavClick("dashboard") }
         )
         NavBarItem(
             icon = Icons.Default.EmojiEvents,
             label = "Tourneys",
-            isSelected = false
+            isSelected = false,
+            onClick = { onNavClick("tournaments_list") }
         )
         NavBarItem(
             icon = Icons.Default.Group,
             label = "Users",
-            isSelected = false
+            isSelected = false,
+            onClick = { onNavClick("player_profiles") }
         )
         NavBarItem(
             icon = Icons.Default.Settings,
             label = "Config",
-            isSelected = false
+            isSelected = false,
+            onClick = { onNavClick("global_settings") }
         )
     }
 }
 
 @Composable
-fun NavBarItem(icon: ImageVector, label: String, isSelected: Boolean) {
+fun NavBarItem(icon: ImageVector, label: String, isSelected: Boolean, onClick: () -> Unit) {
     Column(
+        modifier = Modifier.clickable { onClick() },
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
