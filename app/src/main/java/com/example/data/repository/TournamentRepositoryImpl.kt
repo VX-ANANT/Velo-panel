@@ -30,13 +30,9 @@ class TournamentRepositoryImpl(
     }
 
     suspend fun getAvailableTournaments(): List<Tournament> {
-        return try {
-            supabase.postgrest["tournaments"]
-                .select()
-                .decodeList<Tournament>()
-        } catch (e: Exception) {
-            emptyList()
-        }
+        return supabase.postgrest["tournaments"]
+            .select()
+            .decodeList<Tournament>()
     }
 
     suspend fun getPendingRegistrations(): List<PlayerRegistration> {

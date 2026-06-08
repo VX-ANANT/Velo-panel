@@ -36,17 +36,7 @@ data class Tournament(
     @SerialName("starts_at")
     val startsAt: String? = null,
     @SerialName("ends_at")
-    val endsAt: String? = null,
-    @SerialName("time_zone")
-    val timeZone: String? = null,
-    @SerialName("phase")
-    val phase: String? = null,
-    @SerialName("eligibility_criteria")
-    val eligibilityCriteria: String? = null,
-    @SerialName("game_version")
-    val gameVersion: String? = null,
-    @SerialName("rules")
-    val rules: String? = null
+    val endsAt: String? = null
 )
 
 @Serializable

@@ -161,14 +161,6 @@ fun RegistrationCard(
                         color = VelorixAccentDark
                     )
                 }
-                if (registration.tournament?.eligibilityCriteria?.isNotEmpty() == true) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "Req: ${registration.tournament.eligibilityCriteria}",
-                        fontSize = 10.sp,
-                        color = Color(0xFFFFB74D) // Warning-like color for attention
-                    )
-                }
             }
         }
 

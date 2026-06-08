@@ -68,9 +68,9 @@ fun TournamentsListScreen(uiState: DashboardState, onNavigateBack: () -> Unit) {
         var selectedTab by remember { mutableStateOf(0) }
         val tournamentsList = (uiState as? DashboardState.Success)?.tournaments ?: emptyList()
         val displayList = when (selectedTab) {
-            0 -> tournamentsList.filter { it.status == "upcoming" }
-            1 -> tournamentsList.filter { it.status == "live" }
-            else -> tournamentsList.filter { it.status == "ended" }
+            0 -> tournamentsList.filter { it.status.equals("upcoming", ignoreCase = true) }
+            1 -> tournamentsList.filter { it.status.equals("live", ignoreCase = true) }
+            else -> tournamentsList.filter { it.status.equals("ended", ignoreCase = true) }
         }
         
         Column(modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp)) {

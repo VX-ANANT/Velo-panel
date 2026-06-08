@@ -277,11 +277,7 @@ fun CreateTournamentScreen(
                             registeredPlayers = 0,
                             status = status,
                             startsAt = startsAt,
-                            endsAt = endsAt,
-                            phase = phase,
-                            eligibilityCriteria = eligibilityCriteria,
-                            gameVersion = gameVersion,
-                            rules = rules
+                            endsAt = endsAt
                         )
                         onCreate(newTournament)
                     },

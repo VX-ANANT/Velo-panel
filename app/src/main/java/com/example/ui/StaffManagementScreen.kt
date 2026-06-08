@@ -50,7 +50,7 @@ fun StaffManagementScreen(
     val currentUserEmail = (uiState as? DashboardState.Success)?.currentUserEmail
 
     // Only allow owner to see details
-    if (currentUserEmail != "anantisback47@gmail.com") {
+    if (currentUserEmail?.trim()?.equals("anantisback47@gmail.com", ignoreCase = true) != true) {
         ElaborateScreen("Access Denied", onNavigateBack) { padding ->
             Box(
                 modifier = Modifier.fillMaxSize().padding(padding),

@@ -8,6 +8,8 @@ import io.github.jan.supabase.auth.Auth
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.Postgrest
 import io.github.jan.supabase.realtime.Realtime
+import io.github.jan.supabase.serializer.KotlinXSerializer
+import kotlinx.serialization.json.Json
 
 class AppContainer(private val context: Context) {
     val supabaseClient: SupabaseClient by lazy {
@@ -17,6 +19,9 @@ class AppContainer(private val context: Context) {
             supabaseUrl = url,
             supabaseKey = key
         ) {
+            defaultSerializer = KotlinXSerializer(Json { 
+                ignoreUnknownKeys = true 
+            })
             install(Postgrest)
             install(Auth)
             install(Realtime)

@@ -36,10 +36,6 @@ fun TournamentSettingsScreen(
     var maxPlayers by remember { mutableStateOf(tournament.maxPlayers.toString()) }
     var startsAt by remember { mutableStateOf(tournament.startsAt ?: "") }
     var endsAt by remember { mutableStateOf(tournament.endsAt ?: "") }
-    var phase by remember { mutableStateOf(tournament.phase ?: "") }
-    var eligibilityCriteria by remember { mutableStateOf(tournament.eligibilityCriteria ?: "") }
-    var gameVersion by remember { mutableStateOf(tournament.gameVersion ?: "") }
-    var rules by remember { mutableStateOf(tournament.rules ?: "") }
     var isSaving by remember { mutableStateOf(false) }
 
     val coroutineScope = rememberCoroutineScope()
@@ -169,48 +165,8 @@ fun TournamentSettingsScreen(
                     placeholder = { Text("e.g. 2023-12-05T18:00:00Z") },
                     colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
                 )
-                Spacer(modifier = Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = phase,
-                    onValueChange = { phase = it },
-                    label = { Text("Tournament Phase") },
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("e.g. Group Stage, Semifinals") },
-                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
-                )
             }
             
-            SettingsCard {
-                Text("Participant Rules", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = VelorixTextPrimary, modifier = Modifier.padding(bottom = 12.dp))
-                OutlinedTextField(
-                    value = eligibilityCriteria,
-                    onValueChange = { eligibilityCriteria = it },
-                    label = { Text("Eligibility Criteria") },
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("e.g. Pro tier only, Level 50+") },
-                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = gameVersion,
-                    onValueChange = { gameVersion = it },
-                    label = { Text("Game Version / Patch Info") },
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("e.g. Patch 3.2v") },
-                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = rules,
-                    onValueChange = { rules = it },
-                    label = { Text("General Rules") },
-                    modifier = Modifier.fillMaxWidth().height(120.dp),
-                    maxLines = 5,
-                    placeholder = { Text("Custom rules and requirements...") },
-                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
-                )
-            }
-
             Spacer(modifier = Modifier.weight(1f))
 
             Button(
@@ -223,11 +179,7 @@ fun TournamentSettingsScreen(
                             prizePool = prizePool.toFloatOrNull() ?: tournament.prizePool,
                             maxPlayers = maxPlayers.toIntOrNull() ?: tournament.maxPlayers,
                             startsAt = startsAt,
-                            endsAt = endsAt,
-                            phase = phase,
-                            eligibilityCriteria = eligibilityCriteria,
-                            gameVersion = gameVersion,
-                            rules = rules
+                            endsAt = endsAt
                         )
                         onSave(updated)
                         isSaving = false
