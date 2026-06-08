@@ -68,16 +68,18 @@ fun TournamentsListScreen(uiState: DashboardState, onNavigateBack: () -> Unit) {
         var selectedTab by remember { mutableStateOf(0) }
         val tournamentsList = (uiState as? DashboardState.Success)?.tournaments ?: emptyList()
         val displayList = when (selectedTab) {
-            0 -> tournamentsList.filter { it.status.equals("upcoming", ignoreCase = true) }
-            1 -> tournamentsList.filter { it.status.equals("live", ignoreCase = true) }
+            0 -> tournamentsList
+            1 -> tournamentsList.filter { it.status.equals("upcoming", ignoreCase = true) }
+            2 -> tournamentsList.filter { it.status.equals("live", ignoreCase = true) }
             else -> tournamentsList.filter { it.status.equals("ended", ignoreCase = true) }
         }
         
         Column(modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp)) {
-            TabRow(
+            ScrollableTabRow(
                 selectedTabIndex = selectedTab,
                 containerColor = Color.Transparent,
                 contentColor = VelorixAccent,
+                edgePadding = 0.dp,
                 indicator = { tabPositions ->
                     if (selectedTab < tabPositions.size) {
                         TabRowDefaults.SecondaryIndicator(
@@ -87,7 +89,7 @@ fun TournamentsListScreen(uiState: DashboardState, onNavigateBack: () -> Unit) {
                     }
                 }
             ) {
-                listOf("Upcoming", "Ongoing", "Completed").forEachIndexed { index, title ->
+                listOf("All", "Upcoming", "Ongoing", "Completed").forEachIndexed { index, title ->
                     Tab(
                         selected = selectedTab == index,
                         onClick = { selectedTab = index },
@@ -104,10 +106,11 @@ fun TournamentsListScreen(uiState: DashboardState, onNavigateBack: () -> Unit) {
                 }
                 items(displayList.size) { i ->
                     val t = displayList[i]
-                    val statusColor = when (selectedTab) {
-                        0 -> Color(0xFF64B5F6)
-                        1 -> Color(0xFF81C784)
-                        else -> Color(0xFFE0E0E0)
+                    val statusColor = when (t.status.lowercase()) {
+                        "upcoming" -> Color(0xFF64B5F6)
+                        "live" -> Color(0xFF81C784)
+                        "ended" -> Color(0xFFE0E0E0)
+                        else -> Color(0xFFBCAAA4)
                     }
                     Column(
                         modifier = Modifier

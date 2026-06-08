@@ -41,10 +41,6 @@ fun CreateTournamentScreen(
     var maxPlayers by remember { mutableStateOf("100") }
     var startsAt by remember { mutableStateOf("") }
     var endsAt by remember { mutableStateOf("") }
-    var phase by remember { mutableStateOf("Registrations Open") }
-    var eligibilityCriteria by remember { mutableStateOf("") }
-    var gameVersion by remember { mutableStateOf("") }
-    var rules by remember { mutableStateOf("") }
     var isSaving by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -218,48 +214,6 @@ fun CreateTournamentScreen(
                             }, calendar.get(Calendar.YEAR), calendar.get(Calendar.MONTH), calendar.get(Calendar.DAY_OF_MONTH)).show()
                         })
                     }
-                    Spacer(modifier = Modifier.height(12.dp))
-                    OutlinedTextField(
-                        value = phase,
-                        onValueChange = { phase = it },
-                        label = { Text("Tournament Phase") },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("e.g. Group Stage, Semifinals") },
-                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
-                    )
-                }
-            }
-
-            item {
-                SettingsCard {
-                    Text("Participant Rules", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = VelorixTextPrimary, modifier = Modifier.padding(bottom = 12.dp))
-                    OutlinedTextField(
-                        value = eligibilityCriteria,
-                        onValueChange = { eligibilityCriteria = it },
-                        label = { Text("Eligibility Criteria") },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("e.g. Pro tier only, Level 50+") },
-                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    OutlinedTextField(
-                        value = gameVersion,
-                        onValueChange = { gameVersion = it },
-                        label = { Text("Game Version / Patch Info") },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("e.g. Patch 3.2v") },
-                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    OutlinedTextField(
-                        value = rules,
-                        onValueChange = { rules = it },
-                        label = { Text("General Rules") },
-                        modifier = Modifier.fillMaxWidth().height(120.dp),
-                        maxLines = 5,
-                        placeholder = { Text("Custom rules and requirements...") },
-                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
-                    )
                 }
             }
 
@@ -276,8 +230,8 @@ fun CreateTournamentScreen(
                             maxPlayers = maxPlayers.toIntOrNull() ?: 100,
                             registeredPlayers = 0,
                             status = status,
-                            startsAt = startsAt,
-                            endsAt = endsAt
+                            startsAt = startsAt.ifEmpty { null },
+                            endsAt = endsAt.ifEmpty { null }
                         )
                         onCreate(newTournament)
                     },
