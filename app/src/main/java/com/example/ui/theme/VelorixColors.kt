@@ -2,26 +2,37 @@ package com.example.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-val VelorixBg = Color(0xFFFDF8F6)
-val VelorixTextPrimary = Color(0xFF1D1B1E)
-val VelorixTextSecondary = Color(0xFF49454F)
+// Vercel / Lovable Modern Dark Palette
+val VelorixBg = Color(0xFF000000) // Deep pitch black background
+val VelorixCardBg = Color(0xFF0C0C0C) // Subtle dark zinc card surface
+val VelorixCardBgElevated = Color(0xFF141414)
+val VelorixTextPrimary = Color(0xFFEDEDED) // Crisp high-contrast white
+val VelorixTextSecondary = Color(0xFFA1A1AA) // Zinc-400 clean secondary
+val VelorixTextMuted = Color(0xFF71717A) // Zinc-500 muted text
 
-val VelorixAccent = Color(0xFF6750A4)
-val VelorixAccentLight = Color(0xFFEADDFF)
-val VelorixAccentBorder = Color(0xFFD0BCFF)
-val VelorixAccentDark = Color(0xFF21005D)
+val VelorixBorderSubtle = Color(0xFF27272A) // Zinc-800 crisp border
+val VelorixBorderLight = Color(0xFF3F3F46) // Zinc-700 active border
 
-val CardLiveBg = Color(0xFFD0BCFF)
-val CardVerifyBg = Color(0xFFFFFFFF)
-val CardVerifyBorder = Color(0xFFCAC4D0)
-val CardVerifyIconBg = Color(0xFFFBCCE1)
-val CardVerifyIcon = Color(0xFF31111D)
+// Accent: Clean Electric Violet / Monochrome Vercel White Accents
+val VelorixAccent = Color(0xFFFFFFFF)
+val VelorixAccentViolet = Color(0xFF8B5CF6)
+val VelorixAccentLight = Color(0xFFA78BFA)
+val VelorixAccentBorder = Color(0xFF27272A)
+val VelorixAccentDark = Color(0xFF18181B)
 
-val CardAnalyticsBg = Color(0xFFF3EDF7)
-val CardAnalyticsBorder = Color(0xFFE7E0EC)
+val CardLiveBg = Color(0xFF0C0C0C)
+val CardVerifyBg = Color(0xFF0C0C0C)
+val CardVerifyBorder = Color(0xFF27272A)
+val CardVerifyIconBg = Color(0xFF18181B)
+val CardVerifyIcon = Color(0xFFEDEDED)
 
-val CardPayoutBg = Color(0xFF1C1B1F)
+val CardAnalyticsBg = Color(0xFF0C0C0C)
+val CardAnalyticsBorder = Color(0xFF27272A)
 
-val NavBarBg = Color(0xFFF3EDF7)
-val NavBarBorder = Color(0xFFCAC4D0)
-val NavBarSelectedBg = Color(0xFFE8DEF8)
+val CardPayoutBg = Color(0xFF0C0C0C)
+
+val NavBarBg = Color(0xE60A0A0A)
+val NavBarBorder = Color(0xFF27272A)
+val NavBarSelectedBg = Color(0xFF18181B)
+
+

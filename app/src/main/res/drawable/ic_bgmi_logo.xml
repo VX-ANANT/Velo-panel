@@ -1,0 +1,22 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <!-- Outer Shield Background -->
+    <path
+        android:fillColor="#FF7A00"
+        android:pathData="M24,2 L42,10 L42,24 C42,34.5 34.3,44.1 24,46 C13.7,44.1 6,34.5 6,24 L6,10 L24,2 Z"/>
+    <!-- Inner Dark Core -->
+    <path
+        android:fillColor="#111625"
+        android:pathData="M24,5 L39,12 L39,24 C39,32.8 32.7,40.9 24,42.5 C15.3,40.9 9,32.8 9,24 L9,12 L24,5 Z"/>
+    <!-- Tactical Helmet / Visor in Gold -->
+    <path
+        android:fillColor="#FFB800"
+        android:pathData="M16,18 L32,18 C33.1,18 34,18.9 34,20 L34,25 C34,29.4 30.4,33 26,33 L22,33 C17.6,33 14,29.4 14,25 L14,20 C14,18.9 14.9,18 16,18 Z"/>
+    <!-- Visor Slit in Cyan Glow -->
+    <path
+        android:fillColor="#00E5FF"
+        android:pathData="M17,22 L31,22 L31,24 L17,24 Z"/>
+</vector>

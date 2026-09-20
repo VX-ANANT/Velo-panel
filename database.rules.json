@@ -1,0 +1,288 @@
+{
+  "rules": {
+    "users": {
+      ".read": "auth != null && (root.child('admins').child(auth.uid).child('active').val() === true || auth.token.admin === true || auth.token.email === 'anantisback47@gmail.com' || auth.token.email === 'velorixtest@gmail.com')",
+      "$uid": {
+        ".read": "auth != null",
+        ".write": "auth != null && (auth.uid === $uid || root.child('admins').child(auth.uid).child('role').val() === 'super_admin' || auth.token.email === 'anantisback47@gmail.com' || auth.token.email === 'velorixtest@gmail.com') && !root.child('banned_users').child(auth.uid).exists()",
+        ".validate": "newData.hasChildren(['id', 'email'])",
+        "id": { ".validate": "newData.val() === $uid" },
+        "email": { ".validate": "newData.isString() && newData.val().contains('@')" },
+        "name": { ".validate": "newData.isString() && newData.val().length <= 60" },
+        "ign": { ".validate": "newData.isString() && newData.val().length <= 30" },
+        "gameId": { ".validate": "newData.isString() && newData.val().length <= 30" },
+        "phone": { ".validate": "newData.isString() && newData.val().length <= 15" },
+        "avatarUrl": { ".validate": "newData.isString() && newData.val().length <= 500" },
+        "fcmToken": { ".validate": "newData.isString() && newData.val().length <= 350" },
+        "bio": { ".validate": "newData.isString() && newData.val().length <= 200" },
+        "createdAt": { ".validate": "newData.isNumber()" },
+        "lastLoginAt": { ".validate": "newData.isNumber()" },
+        "balance": {
+          ".validate": "newData.isNumber() && newData.val() >= 0 && (!data.exists() || data.val() === newData.val() || root.child('admins').child(auth.uid).child('role').val() === 'super_admin' || auth.token.email === 'anantisback47@gmail.com' || auth.token.email === 'velorixtest@gmail.com')"
+        },
+        "activityPoints": {
+          ".validate": "newData.isNumber() && newData.val() >= 0 && (!data.exists() || data.val() === newData.val() || root.child('admins').child(auth.uid).child('active').val() === true || auth.token.email === 'anantisback47@gmail.com')"
+        },
+        "wins": {
+          ".validate": "newData.isNumber() && newData.val() >= 0 && (!data.exists() || data.val() === newData.val() || root.child('admins').child(auth.uid).child('active').val() === true || auth.token.email === 'anantisback47@gmail.com')"
+        },
+        "kills": {
+          ".validate": "newData.isNumber() && newData.val() >= 0 && (!data.exists() || data.val() === newData.val() || root.child('admins').child(auth.uid).child('active').val() === true || auth.token.email === 'anantisback47@gmail.com')"
+        },
+        "role": {
+          ".validate": "newData.isString() && (!data.exists() || data.val() === newData.val() || root.child('admins').child(auth.uid).child('role').val() === 'super_admin' || auth.token.email === 'anantisback47@gmail.com' || auth.token.email === 'velorixtest@gmail.com')"
+        },
+        "isBanned": {
+          ".validate": "newData.isBoolean() && (!data.exists() || data.val() === newData.val() || root.child('admins').child(auth.uid).child('active').val() === true || auth.token.email === 'anantisback47@gmail.com')"
+        },
+        "walletFrozen": {
+          ".validate": "newData.isBoolean() && (!data.exists() || data.val() === newData.val() || root.child('admins').child(auth.uid).child('role').val() === 'super_admin' || auth.token.email === 'anantisback47@gmail.com')"
+        },
+        "vipTier": {
+          ".validate": "newData.isString() && (!data.exists() || data.val() === newData.val() || root.child('admins').child(auth.uid).child('active').val() === true || auth.token.email === 'anantisback47@gmail.com')"
+        }
+      }
+    },
+    "userProfiles": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "players": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "admins": {
+      ".read": "auth != null && (root.child('admins').child(auth.uid).child('active').val() === true || auth.token.admin === true || auth.token.email === 'anantisback47@gmail.com' || auth.token.email === 'velorixtest@gmail.com')",
+      ".write": "auth != null && (root.child('admins').child(auth.uid).child('role').val() === 'super_admin' || auth.token.super_admin === true || auth.token.email === 'anantisback47@gmail.com' || auth.token.email === 'velorixtest@gmail.com')",
+      "$adminUid": {
+        ".read": "auth != null",
+        ".write": "auth != null && (auth.uid === $adminUid || root.child('admins').child(auth.uid).child('role').val() === 'super_admin' || auth.token.email === 'anantisback47@gmail.com' || auth.token.email === 'velorixtest@gmail.com')",
+        ".validate": "newData.hasChildren(['role', 'active'])",
+        "role": {
+          ".validate": "newData.val() === 'super_admin' || newData.val() === 'tournament_admin' || newData.val() === 'support_admin' || newData.val() === 'moderator_admin'"
+        },
+        "active": { ".validate": "newData.isBoolean()" },
+        "grantedBy": { ".validate": "newData.isString()" },
+        "email": { ".validate": "newData.isString()" },
+        "grantedAt": { ".validate": "newData.isNumber()" }
+      }
+    },
+    "banned_users": {
+      ".read": "auth != null",
+      ".write": "auth != null && (root.child('admins').child(auth.uid).child('active').val() === true || auth.token.email === 'anantisback47@gmail.com' || auth.token.email === 'velorixtest@gmail.com')",
+      "$bannedUid": {
+        ".validate": "newData.hasChildren(['reason', 'bannedAt', 'bannedBy'])",
+        "reason": { ".validate": "newData.isString() && newData.val().length <= 250" },
+        "bannedAt": { ".validate": "newData.isNumber()" },
+        "bannedBy": { ".validate": "newData.isString()" },
+        "permanent": { ".validate": "newData.isBoolean()" },
+        "expiresAt": { ".validate": "newData.isNumber()" }
+      }
+    },
+    "support_tickets": {
+      ".read": "auth != null && (root.child('admins').child(auth.uid).child('active').val() === true || auth.token.admin === true || auth.token.email === 'anantisback47@gmail.com' || auth.token.email === 'velorixtest@gmail.com')",
+      "$ticketId": {
+        ".read": "auth != null && (data.child('userId').val() === auth.uid || root.child('admins').child(auth.uid).child('active').val() === true || auth.token.email === 'anantisback47@gmail.com')",
+        ".write": "auth != null && (((!data.exists() && newData.child('userId').val() === auth.uid)) || (data.child('userId').val() === auth.uid) || (root.child('admins').child(auth.uid).child('active').val() === true) || auth.token.email === 'anantisback47@gmail.com')",
+        ".validate": "newData.hasChildren(['userId', 'subject', 'category', 'status', 'createdAt'])",
+        "userId": { ".validate": "newData.val() === auth.uid || root.child('admins').child(auth.uid).child('active').val() === true || auth.token.email === 'anantisback47@gmail.com'" },
+        "userName": { ".validate": "newData.isString()" },
+        "freeFireId": { ".validate": "newData.isString()" },
+        "subject": { ".validate": "newData.isString() && newData.val().length <= 150" },
+        "category": { ".validate": "newData.val() === 'Withdrawal Issue' || newData.val() === 'Room ID Error' || newData.val() === 'Cheater Report' || newData.val() === 'App Error' || newData.val() === 'Other'" },
+        "description": { ".validate": "newData.isString() && newData.val().length <= 1000" },
+        "priority": { ".validate": "newData.val() === 'Low' || newData.val() === 'Medium' || newData.val() === 'High' || newData.val() === 'Urgent'" },
+        "status": { ".validate": "newData.val() === 'open' || newData.val() === 'in_progress' || newData.val() === 'resolved' || newData.val() === 'closed'" },
+        "createdAt": { ".validate": "newData.isNumber()" },
+        "updatedAt": { ".validate": "newData.isNumber()" },
+        "adminNote": { ".validate": "newData.isString() && newData.val().length <= 500" },
+        "assignedTo": { ".validate": "newData.isString()" }
+      }
+    },
+    "complaints": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "chatbot_complaints": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "payout_requests": {
+      ".read": "auth != null && (root.child('admins').child(auth.uid).child('active').val() === true || auth.token.email === 'anantisback47@gmail.com' || auth.token.email === 'velorixtest@gmail.com')",
+      "$requestId": {
+        ".read": "auth != null && (data.child('userId').val() === auth.uid || root.child('admins').child(auth.uid).child('active').val() === true || auth.token.email === 'anantisback47@gmail.com')",
+        ".write": "auth != null && (((!data.exists() && newData.child('userId').val() === auth.uid && !root.child('banned_users').child(auth.uid).exists())) || (root.child('admins').child(auth.uid).child('role').val() === 'super_admin') || auth.token.email === 'anantisback47@gmail.com' || auth.token.email === 'velorixtest@gmail.com')",
+        ".validate": "newData.hasChildren(['userId', 'amount', 'payoutMethod', 'accountDetails', 'status', 'createdAt'])",
+        "userId": { ".validate": "newData.val() === auth.uid || root.child('admins').child(auth.uid).child('role').val() === 'super_admin' || auth.token.email === 'anantisback47@gmail.com'" },
+        "userName": { ".validate": "newData.isString()" },
+        "amount": { ".validate": "newData.isNumber() && newData.val() >= 1" },
+        "payoutMethod": { ".validate": "newData.val() === 'UPI' || newData.val() === 'Paytm' || newData.val() === 'BankTransfer' || newData.val() === 'IMPS'" },
+        "accountDetails": { ".validate": "newData.isString() && newData.val().length <= 120" },
+        "status": { ".validate": "newData.val() === 'pending' || newData.val() === 'approved' || newData.val() === 'processing' || newData.val() === 'completed' || newData.val() === 'rejected'" },
+        "createdAt": { ".validate": "newData.isNumber()" },
+        "processedAt": { ".validate": "newData.isNumber()" },
+        "processedBy": { ".validate": "newData.isString()" },
+        "rejectionReason": { ".validate": "newData.isString() && newData.val().length <= 300" }
+      }
+    },
+    "withdrawals": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "wallet_transactions": {
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || root.child('admins').child(auth.uid).child('role').val() === 'super_admin' || auth.token.email === 'anantisback47@gmail.com' || auth.token.email === 'velorixtest@gmail.com')",
+        ".write": "auth != null && (root.child('admins').child(auth.uid).child('role').val() === 'super_admin' || auth.token.email === 'anantisback47@gmail.com' || auth.token.email === 'velorixtest@gmail.com')",
+        "$txId": {
+          ".validate": "newData.hasChildren(['amount', 'type', 'timestamp', 'status'])",
+          "amount": { ".validate": "newData.isNumber()" },
+          "type": { ".validate": "newData.val() === 'deposit' || newData.val() === 'withdrawal' || newData.val() === 'entry_fee' || newData.val() === 'prize_payout' || newData.val() === 'mission_reward' || newData.val() === 'referral_bonus' || newData.val() === 'refund' || newData.val() === 'BONUS' || newData.val() === 'DEPOSIT' || newData.val() === 'WINNINGS'" },
+          "timestamp": { ".validate": "newData.isNumber()" },
+          "status": { ".validate": "newData.val() === 'pending' || newData.val() === 'completed' || newData.val() === 'failed' || newData.val() === 'rejected' || newData.val() === 'COMPLETED'" },
+          "referenceId": { ".validate": "newData.isString()" },
+          "description": { ".validate": "newData.isString() && newData.val().length <= 200" }
+        }
+      }
+    },
+    "tournaments": {
+      ".read": "auth != null && !root.child('banned_users').child(auth.uid).exists()",
+      ".write": "auth != null && (root.child('admins').child(auth.uid).child('role').val() === 'super_admin' || root.child('admins').child(auth.uid).child('role').val() === 'tournament_admin' || auth.token.email === 'anantisback47@gmail.com' || auth.token.email === 'velorixtest@gmail.com')",
+      "$tournamentId": {
+        ".validate": "newData.hasChildren(['title', 'game', 'fee', 'prizePool', 'status'])",
+        "title": { ".validate": "newData.isString() && newData.val().length <= 120" },
+        "game": { ".validate": "newData.isString()" },
+        "format": { ".validate": "newData.val() === 'Solo' || newData.val() === 'Duo' || newData.val() === 'Squad' || newData.val() === 'CS 4v4'" },
+        "map": { ".validate": "newData.isString()" },
+        "fee": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+        "prizePool": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+        "maxPlayers": { ".validate": "newData.isNumber() && newData.val() > 0" },
+        "slotsFilled": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+        "status": { ".validate": "newData.val() === 'upcoming' || newData.val() === 'live' || newData.val() === 'completed' || newData.val() === 'cancelled'" },
+        "startTime": { ".validate": "newData.isNumber()" },
+        "rulesText": { ".validate": "newData.isString() && newData.val().length <= 2000" },
+        "roomDetails": {
+          ".read": "auth != null && (root.child('registrations').child($tournamentId).child(auth.uid).exists() || root.child('admins').child(auth.uid).child('active').val() === true || auth.token.email === 'anantisback47@gmail.com')",
+          ".write": "auth != null && (root.child('admins').child(auth.uid).child('role').val() === 'super_admin' || root.child('admins').child(auth.uid).child('role').val() === 'tournament_admin' || auth.token.email === 'anantisback47@gmail.com')",
+          ".validate": "newData.hasChildren(['roomId', 'roomPassword'])",
+          "roomId": { ".validate": "newData.isString()" },
+          "roomPassword": { ".validate": "newData.isString()" }
+        }
+      }
+    },
+    "matches": {
+      ".read": "auth != null",
+      ".write": "auth != null && (root.child('admins').child(auth.uid).child('active').val() === true || auth.token.email === 'anantisback47@gmail.com')"
+    },
+    "active_tournaments": {
+      ".read": "auth != null",
+      ".write": "auth != null && (root.child('admins').child(auth.uid).child('active').val() === true || auth.token.email === 'anantisback47@gmail.com')"
+    },
+    "custom_rooms": {
+      ".read": "auth != null",
+      ".write": "auth != null && (root.child('admins').child(auth.uid).child('active').val() === true || auth.token.email === 'anantisback47@gmail.com')"
+    },
+    "registrations": {
+      "$tournamentId": {
+        ".read": "auth != null",
+        "$uid": {
+          ".write": "auth != null && ((auth.uid === $uid && !root.child('banned_users').child(auth.uid).exists() && !data.exists()) || (root.child('admins').child(auth.uid).child('active').val() === true) || auth.token.email === 'anantisback47@gmail.com')",
+          ".validate": "newData.hasChildren(['userId', 'ign', 'gameId', 'registeredAt'])",
+          "userId": { ".validate": "newData.val() === $uid" },
+          "ign": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 30" },
+          "gameId": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 30" },
+          "teamName": { ".validate": "newData.isString() && newData.val().length <= 50" },
+          "registeredAt": { ".validate": "newData.isNumber()" },
+          "slotNumber": { ".validate": "newData.isNumber()" },
+          "paymentTxId": { ".validate": "newData.isString()" }
+        }
+      }
+    },
+    "missions": {
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || root.child('admins').child(auth.uid).child('active').val() === true || auth.token.email === 'anantisback47@gmail.com')",
+        "$missionId": {
+          ".write": "auth != null && auth.uid === $uid && !root.child('banned_users').child(auth.uid).exists()",
+          ".validate": "newData.hasChildren(['id', 'title', 'rewardVt', 'isCompleted', 'isClaimed'])",
+          "id": { ".validate": "newData.isString()" },
+          "title": { ".validate": "newData.isString()" },
+          "rewardVt": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+          "isCompleted": { ".validate": "newData.isBoolean()" },
+          "isClaimed": { ".validate": "newData.isBoolean()" },
+          "claimedAt": { ".validate": "newData.isNumber()" },
+          "progress": { ".validate": "newData.isNumber()" }
+        }
+      }
+    },
+    "leaderboards": {
+      ".read": "auth != null",
+      ".write": "auth != null && (root.child('admins').child(auth.uid).child('active').val() === true || auth.token.email === 'anantisback47@gmail.com')",
+      "$seasonId": {
+        "$uid": {
+          ".validate": "newData.hasChildren(['userName', 'score', 'rank'])",
+          "userName": { ".validate": "newData.isString()" },
+          "freeFireId": { ".validate": "newData.isString()" },
+          "kills": { ".validate": "newData.isNumber()" },
+          "wins": { ".validate": "newData.isNumber()" },
+          "score": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+          "rank": { ".validate": "newData.isNumber() && newData.val() >= 1" },
+          "updatedAt": { ".validate": "newData.isNumber()" }
+        }
+      }
+    },
+    "community_chat": {
+      ".read": "auth != null && !root.child('banned_users').child(auth.uid).exists()",
+      "$messageId": {
+        ".write": "auth != null && ((!data.exists() && newData.child('senderUid').val() === auth.uid && !root.child('banned_users').child(auth.uid).exists()) || root.child('admins').child(auth.uid).child('active').val() === true || auth.token.email === 'anantisback47@gmail.com')",
+        ".validate": "newData.hasChildren(['senderUid', 'senderName', 'message', 'timestamp'])",
+        "senderUid": { ".validate": "newData.val() === auth.uid || root.child('admins').child(auth.uid).child('active').val() === true || auth.token.email === 'anantisback47@gmail.com'" },
+        "senderName": { ".validate": "newData.isString() && newData.val().length <= 50" },
+        "senderAvatar": { ".validate": "newData.isString()" },
+        "message": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 500" },
+        "timestamp": { ".validate": "newData.isNumber()" },
+        "isAnnouncement": { ".validate": "newData.isBoolean()" }
+      }
+    },
+    "system_config": {
+      ".read": "auth != null",
+      ".write": "auth != null && (root.child('admins').child(auth.uid).child('role').val() === 'super_admin' || auth.token.email === 'anantisback47@gmail.com' || auth.token.email === 'velorixtest@gmail.com')",
+      "maintenanceMode": { ".validate": "newData.isBoolean()" },
+      "minWithdrawalAmount": { ".validate": "newData.isNumber() && newData.val() >= 1" },
+      "announcementBanner": { ".validate": "newData.isString() && newData.val().length <= 300" },
+      "appMinVersion": { ".validate": "newData.isString()" },
+      "supportEmail": { ".validate": "newData.isString()" },
+      "upiMerchantId": { ".validate": "newData.isString()" }
+    },
+    "campaigns": {
+      ".read": "auth != null",
+      ".write": "auth != null && (root.child('admins').child(auth.uid).child('active').val() === true || auth.token.email === 'anantisback47@gmail.com')"
+    },
+    "announcements": {
+      ".read": "auth != null",
+      ".write": "auth != null && (root.child('admins').child(auth.uid).child('active').val() === true || auth.token.email === 'anantisback47@gmail.com')"
+    },
+    "notifications": {
+      ".read": "auth != null",
+      ".write": "auth != null && (root.child('admins').child(auth.uid).child('active').val() === true || auth.token.email === 'anantisback47@gmail.com')"
+    },
+    "banners": {
+      ".read": "auth != null",
+      ".write": "auth != null && (root.child('admins').child(auth.uid).child('active').val() === true || auth.token.email === 'anantisback47@gmail.com')"
+    },
+    "tokens": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "audit_logs": {
+      ".read": "auth != null && (root.child('admins').child(auth.uid).child('role').val() === 'super_admin' || auth.token.email === 'anantisback47@gmail.com')",
+      ".write": "auth != null && (root.child('admins').child(auth.uid).child('active').val() === true || auth.token.email === 'anantisback47@gmail.com')",
+      "$logId": {
+        ".validate": "newData.hasChildren(['action', 'performedBy', 'timestamp'])",
+        "action": { ".validate": "newData.isString() && newData.val().length <= 200" },
+        "performedBy": { ".validate": "newData.isString()" },
+        "targetUid": { ".validate": "newData.isString()" },
+        "details": { ".validate": "newData.isString() && newData.val().length <= 500" },
+        "timestamp": { ".validate": "newData.isNumber()" }
+      }
+    }
+  }
+}

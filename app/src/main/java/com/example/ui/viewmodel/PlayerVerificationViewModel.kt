@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.data.repository.TournamentRepositoryImpl
 import com.example.domain.model.PlayerRegistration
+import com.example.ui.common.GlobalErrorManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -34,6 +35,9 @@ class PlayerVerificationViewModel(
                 val pending = repository.getPendingRegistrations()
                 _uiState.value = VerificationState.Success(pending)
             } catch (e: Exception) {
+                GlobalErrorManager.emitFirestoreError("Registrations", e, actionLabel = "Retry") {
+                    fetchPendingRegistrations()
+                }
                 _uiState.value = VerificationState.Error(e.message ?: "Failed to load registrations")
             }
         }
@@ -44,8 +48,10 @@ class PlayerVerificationViewModel(
             try {
                 val status = if (approve) "approved" else "rejected"
                 repository.updateRegistrationStatus(registrationId, status)
+                GlobalErrorManager.emitSuccess("Registration ${if (approve) "approved" else "rejected"} successfully")
                 fetchPendingRegistrations()
             } catch (e: Exception) {
+                GlobalErrorManager.emitFirestoreError("Registration Verification", e)
                 _uiState.value = VerificationState.Error(e.message ?: "Failed to verify registration")
             }
         }

@@ -16,6 +16,18 @@
 # debugging stack traces.
 #-keepattributes SourceFile,LineNumberTable
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# Keep Firebase and Google Play Services
+-keep class com.google.firebase.** { *; }
+-keep class com.google.android.gms.** { *; }
+-dontwarn com.google.firebase.**
+-dontwarn com.google.android.gms.**
+
+# Keep Credential Manager & Google ID
+-keep class androidx.credentials.** { *; }
+-keep class com.google.android.libraries.identity.googleid.** { *; }
+
+# Keep data models and serialization
+-keepclassmembers class * {
+    @com.google.firebase.database.PropertyName <fields>;
+    @com.google.firebase.firestore.PropertyName <fields>;
+}

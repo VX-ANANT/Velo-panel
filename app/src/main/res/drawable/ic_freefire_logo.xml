@@ -1,0 +1,18 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <!-- Fire Phoenix Wings / Emblem -->
+    <path
+        android:fillColor="#FF3300"
+        android:pathData="M24,4 L28,14 L38,12 L32,22 L44,24 L32,32 L38,44 L24,36 L10,44 L16,32 L4,24 L16,22 L10,12 L20,14 Z"/>
+    <!-- Inner Flame Crest in Amber/Yellow -->
+    <path
+        android:fillColor="#FFCC00"
+        android:pathData="M24,10 L27,18 L34,17 L30,24 L38,26 L30,32 L34,40 L24,34 L14,40 L18,32 L10,26 L18,24 L14,17 L21,18 Z"/>
+    <!-- Core FF Emblem Center in White -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M22,18 L27,18 L27,22 L24,22 L24,24 L26,24 L26,27 L24,27 L24,32 L22,32 Z"/>
+</vector>

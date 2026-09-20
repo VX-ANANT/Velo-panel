@@ -1,10 +1,11 @@
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.compose)
-  alias(libs.plugins.google.devtools.ksp)
+  // alias(libs.plugins.google.devtools.ksp)
   alias(libs.plugins.roborazzi)
   alias(libs.plugins.secrets)
   alias(libs.plugins.kotlin.serialization)
+  id("com.google.gms.google-services")
 }
 
 android {
@@ -70,7 +71,14 @@ secrets {
 // This makes it easy to add them back in the future if needed.
 dependencies {
   implementation(platform(libs.androidx.compose.bom))
-  implementation(platform(libs.firebase.bom))
+  implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
+  implementation("com.google.firebase:firebase-firestore-ktx")
+  implementation("com.google.firebase:firebase-auth-ktx")
+  implementation("com.google.firebase:firebase-storage-ktx")
+  implementation("com.google.firebase:firebase-database-ktx")
+  implementation("com.google.firebase:firebase-messaging-ktx")
+  implementation("com.google.firebase:firebase-config-ktx")
+  implementation("com.google.firebase:firebase-analytics-ktx")
   // implementation(libs.accompanist.permissions)
   implementation(libs.androidx.activity.compose)
   // implementation(libs.androidx.camera.camera2)
@@ -91,8 +99,8 @@ dependencies {
   implementation(libs.androidx.navigation.compose)
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)
-  implementation("androidx.compose.ui:ui-text-google-fonts:1.6.0")
-  // implementation(libs.coil.compose)
+  // implementation("androidx.compose.ui:ui-text-google-fonts:1.6.0")
+  implementation(libs.coil.compose)
   implementation(libs.converter.moshi)
   // implementation(libs.firebase.ai)
   implementation(libs.kotlinx.coroutines.android)
@@ -101,17 +109,26 @@ dependencies {
   implementation(libs.moshi.kotlin)
   implementation(libs.okhttp)
   
+  // Liquid Glass Backdrop SDK
+  implementation(libs.backdrop)
+  
+  // Google Sign-In & Credential Manager & Play Services
+  implementation("androidx.credentials:credentials:1.3.0")
+  implementation("androidx.credentials:credentials-play-services-auth:1.3.0")
+  implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
+  implementation("com.google.android.gms:play-services-base:18.5.0")
+  implementation("com.google.android.gms:play-services-auth:21.2.0")
+  implementation("com.google.android.gms:play-services-tasks:18.2.0")
+  
   // Custom
-  implementation(platform(libs.supabase.bom))
-  implementation(libs.supabase.auth)
-  implementation("io.github.jan-tennert.supabase:compose-auth-ui")
-  implementation(libs.supabase.postgrest)
-  implementation(libs.supabase.realtime)
-  implementation(libs.ktor.client.okhttp)
   implementation(libs.kotlinx.serialization.json)
   
-  // implementation(libs.play.services.location)
+  // Gemini AI / Google AI
+  // implementation("com.google.firebase:firebase-vertexai") // Optional Firebase AI
   implementation(libs.retrofit)
+  implementation("com.squareup.retrofit2:converter-kotlinx-serialization:2.11.0")
+  implementation(libs.kotlinx.serialization.json)
+  implementation(libs.okhttp)
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)
   testImplementation(libs.androidx.junit)
@@ -128,6 +145,6 @@ dependencies {
   androidTestImplementation(libs.androidx.runner)
   debugImplementation(libs.androidx.compose.ui.test.manifest)
   debugImplementation(libs.androidx.compose.ui.tooling)
-  "ksp"(libs.androidx.room.compiler)
-  "ksp"(libs.moshi.kotlin.codegen)
+  // "ksp"(libs.androidx.room.compiler)
+  // "ksp"(libs.moshi.kotlin.codegen)
 }

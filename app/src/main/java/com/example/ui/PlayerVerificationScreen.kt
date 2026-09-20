@@ -39,7 +39,7 @@ fun PlayerVerificationScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(VelorixBg)
+                    .background(Color.Transparent)
                     .padding(horizontal = 16.dp, vertical = 24.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -76,7 +76,7 @@ fun PlayerVerificationScreen(
                 }
             }
         },
-        containerColor = VelorixBg
+        containerColor = Color.Transparent
     ) { innerPadding ->
         when (uiState) {
             is VerificationState.Loading -> {
@@ -136,14 +136,20 @@ fun RegistrationCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column {
+                val displayName = registration.playerName.ifBlank {
+                    registration.gameUsername.ifBlank {
+                        registration.profile?.username ?: "Registered Player"
+                    }
+                }
                 Text(
-                    text = registration.profile?.username ?: "Unknown User",
+                    text = displayName,
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
                     color = VelorixTextPrimary
                 )
+                val idToShow = registration.userId.ifBlank { registration.playerId.ifBlank { registration.id } }
                 Text(
-                    text = "ID: ${registration.userId.take(8)}...",
+                    text = "ID: ${idToShow.take(12)}",
                     fontSize = 12.sp,
                     color = VelorixTextSecondary
                 )
@@ -180,7 +186,10 @@ fun RegistrationCard(
             }
             Column(horizontalAlignment = Alignment.End) {
                 Text("Game Account", fontSize = 10.sp, color = VelorixTextSecondary)
-                Text(registration.gameAccountId ?: "Not Linked", fontSize = 14.sp, color = VelorixTextPrimary)
+                val accountId = registration.gameAccountId?.takeIf { it.isNotBlank() }
+                    ?: registration.gameId.takeIf { it.isNotBlank() }
+                    ?: "Not Linked"
+                Text(accountId, fontSize = 14.sp, color = VelorixTextPrimary)
             }
         }
 

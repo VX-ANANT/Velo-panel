@@ -4,6 +4,32 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <queries>
+        <package android:name="com.google.android.gms" />
+        <package android:name="com.android.vending" />
+        <intent>
+            <action android:name="com.google.android.gms.auth.service.START" />
+        </intent>
+        <intent>
+            <action android:name="com.google.android.gms.auth.api.identity.service.START" />
+        </intent>
+        <intent>
+            <action android:name="com.google.android.gms.auth.api.credentials.service.START" />
+        </intent>
+        <intent>
+            <action android:name="com.google.android.gms.common.telemetry.service.START" />
+        </intent>
+        <intent>
+            <action android:name="com.google.android.gms.signin.service.START" />
+        </intent>
+        <intent>
+            <action android:name="androidx.credentials.CREDENTIAL_PROVIDER" />
+        </intent>
+    </queries>
 
     <application
         android:name=".VelorixApplication"
@@ -25,7 +51,46 @@
 
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!-- Firebase Email Link / Passwordless Authentication Intent Filters -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="velorix-tournaments.firebaseapp.com" />
+            </intent-filter>
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="velorix-tournaments.page.link" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="velorix"
+                    android:host="auth" />
+            </intent-filter>
         </activity>
+
+        <!-- Firebase Cloud Messaging (FCM) Service -->
+        <meta-data
+            android:name="firebase_messaging_auto_init_enabled"
+            android:value="false" />
+
+        <service
+            android:name=".notification.VelorixFirebaseMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>
