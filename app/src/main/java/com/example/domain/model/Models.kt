@@ -181,7 +181,31 @@ data class SupportTicket(
     var tournamentTitle: String = "",
     @get:PropertyName("isHighPriority") @set:PropertyName("isHighPriority")
     var isHighPriority: Boolean = false
-)
+) {
+    val userId: String get() = userEmail
+    val messageText: String get() = description
+}
+
+@IgnoreExtraProperties
+@Serializable
+data class TicketMessage(
+    @get:PropertyName("id") @set:PropertyName("id")
+    var id: String = "",
+    @get:PropertyName("ticketId") @set:PropertyName("ticketId")
+    var ticketId: String = "",
+    @get:PropertyName("senderId") @set:PropertyName("senderId")
+    var senderId: String = "",
+    @get:PropertyName("senderName") @set:PropertyName("senderName")
+    var senderName: String = "",
+    @get:PropertyName("senderRole") @set:PropertyName("senderRole")
+    var senderRole: String = "ADMIN", // "ADMIN" or "USER"
+    @get:PropertyName("message") @set:PropertyName("message")
+    var message: String = "",
+    @get:PropertyName("timestamp") @set:PropertyName("timestamp")
+    var timestamp: Long = System.currentTimeMillis()
+) {
+    val messageText: String get() = message
+}
 
 // Legacy alias to keep existing components functioning
 typealias ComplaintTicket = SupportTicket
@@ -248,7 +272,10 @@ data class RoomDetails(
     var roomPassword: String = "",
     @get:PropertyName("updatedAt") @set:PropertyName("updatedAt")
     var updatedAt: Long = System.currentTimeMillis()
-)
+) {
+    @get:com.google.firebase.firestore.Exclude
+    val password: String get() = roomPassword
+}
 
 @IgnoreExtraProperties
 @Serializable

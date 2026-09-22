@@ -12,29 +12,41 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import com.example.domain.model.UserProfile
+import androidx.compose.ui.window.DialogProperties
 import com.example.domain.model.ComplaintTicket
+import com.example.domain.model.TicketMessage
+import com.example.domain.model.UserProfile
 import com.example.ui.theme.*
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -44,6 +56,9 @@ fun ComplaintsSupportScreen(
     onAddFundsToUser: (UserProfile, Double) -> Unit,
     onSaveTicket: ((ComplaintTicket) -> Unit)? = null,
     onDeleteTicket: ((String) -> Unit)? = null,
+    onSendTicketMessage: ((ticketId: String, message: String, onComplete: (Boolean) -> Unit) -> Unit)? = null,
+    getTicketMessagesStream: (suspend (String) -> Flow<List<TicketMessage>>)? = null,
+    onIssueTicketCompensation: ((ticket: ComplaintTicket, amount: Double, reason: String, onComplete: (Boolean) -> Unit) -> Unit)? = null,
     onNavigateBack: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
@@ -54,9 +69,11 @@ fun ComplaintsSupportScreen(
 
     var filterStatus by remember { mutableStateOf("ALL") }
     var selectedTicketForDetails by remember { mutableStateOf<ComplaintTicket?>(null) }
+    var selectedTicketForChat by remember { mutableStateOf<ComplaintTicket?>(null) }
     var showRefundDialog by remember { mutableStateOf<ComplaintTicket?>(null) }
     var ticketToDissolve by remember { mutableStateOf<ComplaintTicket?>(null) }
     var refundAmountInput by remember { mutableStateOf("250") }
+    var refundReasonInput by remember { mutableStateOf("Support ticket compensation resolution") }
 
     val filteredTickets = remember(tickets, filterStatus) {
         when (filterStatus) {
@@ -120,6 +137,9 @@ fun ComplaintsSupportScreen(
                         if (selectedTicketForDetails?.id == ticketId) {
                             selectedTicketForDetails = null
                         }
+                        if (selectedTicketForChat?.id == ticketId) {
+                            selectedTicketForChat = null
+                        }
                         Toast.makeText(context, "Ticket #$ticketId permanently dissolved.", Toast.LENGTH_SHORT).show()
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
@@ -139,7 +159,7 @@ fun ComplaintsSupportScreen(
         )
     }
 
-    // Direct Refund Dialog
+    // Direct Refund / Compensation Dialog
     showRefundDialog?.let { ticket ->
         AlertDialog(
             onDismissRequest = { showRefundDialog = null },
@@ -147,7 +167,7 @@ fun ComplaintsSupportScreen(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.Payments, contentDescription = null, tint = VelorixAccent)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Issue Direct Refund / Credit", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Text("Issue Direct Compensation", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 }
             },
             text = {
@@ -166,6 +186,19 @@ fun ComplaintsSupportScreen(
                         ),
                         modifier = Modifier.fillMaxWidth()
                     )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = refundReasonInput,
+                        onValueChange = { refundReasonInput = it },
+                        label = { Text("Compensation Reason", color = Color.Gray) },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = VelorixAccent,
+                            unfocusedBorderColor = CardVerifyBorder
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
             },
             confirmButton = {
@@ -173,17 +206,23 @@ fun ComplaintsSupportScreen(
                     onClick = {
                         val amount = refundAmountInput.toDoubleOrNull() ?: 0.0
                         if (amount > 0) {
-                            val matchedUser = users.find { it.email.equals(ticket.userEmail, ignoreCase = true) }
-                            if (matchedUser != null) {
-                                onAddFundsToUser(matchedUser, amount)
+                            if (onIssueTicketCompensation != null) {
+                                onIssueTicketCompensation(ticket, amount, refundReasonInput) { ok ->
+                                    if (ok) {
+                                        val updated = ticket.copy(status = "RESOLVED", adminNote = "Compensated ₹$amount")
+                                        tickets = tickets.map { if (it.id == ticket.id) updated else it }
+                                    }
+                                }
+                            } else {
+                                val matchedUser = users.find { it.email.equals(ticket.userEmail, ignoreCase = true) }
+                                if (matchedUser != null) {
+                                    onAddFundsToUser(matchedUser, amount)
+                                }
+                                val updated = ticket.copy(status = "REFUNDED", adminNote = "Refunded ₹$amount: $refundReasonInput")
+                                tickets = tickets.map { if (it.id == ticket.id) updated else it }
+                                onSaveTicket?.invoke(updated)
                             }
-                            // Update ticket status to REFUNDED
-                            val updated = ticket.copy(status = "REFUNDED")
-                            tickets = tickets.map {
-                                if (it.id == ticket.id) updated else it
-                            }
-                            onSaveTicket?.invoke(updated)
-                            Toast.makeText(context, "₹$amount credited to ${ticket.username}!", Toast.LENGTH_LONG).show()
+                            Toast.makeText(context, "₹$amount compensation issued to ${ticket.username}!", Toast.LENGTH_LONG).show()
                         }
                         showRefundDialog = null
                     },
@@ -201,12 +240,44 @@ fun ComplaintsSupportScreen(
         )
     }
 
+    // Real-Time Live Chat Dialog
+    selectedTicketForChat?.let { ticket ->
+        TicketLiveChatDialog(
+            ticket = ticket,
+            user = users.find { it.email.equals(ticket.userEmail, ignoreCase = true) || it.id == ticket.userId },
+            getTicketMessagesStream = getTicketMessagesStream,
+            onSendMessage = { text ->
+                onSendTicketMessage?.invoke(ticket.id, text) { success ->
+                    if (success) {
+                        val updated = ticket.copy(status = if (ticket.status == "PENDING") "INVESTIGATING" else ticket.status)
+                        tickets = tickets.map { if (it.id == ticket.id) updated else it }
+                        onSaveTicket?.invoke(updated)
+                    }
+                }
+            },
+            onDismiss = { selectedTicketForChat = null },
+            onIssueRefund = {
+                showRefundDialog = ticket
+            },
+            onUpdateStatus = { nextStatus ->
+                val updated = ticket.copy(status = nextStatus)
+                tickets = tickets.map { if (it.id == ticket.id) updated else it }
+                onSaveTicket?.invoke(updated)
+                selectedTicketForChat = updated
+            }
+        )
+    }
+
     // Comprehensive Ticket Detail & Adjudication Dialog
     selectedTicketForDetails?.let { ticket ->
         ComplaintTicketDetailDialog(
             ticket = ticket,
             user = users.find { it.email.equals(ticket.userEmail, ignoreCase = true) },
             onDismiss = { selectedTicketForDetails = null },
+            onOpenLiveChat = {
+                selectedTicketForDetails = null
+                selectedTicketForChat = ticket
+            },
             onDirectEmail = {
                 val intent = Intent(Intent.ACTION_SENDTO).apply {
                     data = Uri.parse("mailto:${ticket.userEmail}")
@@ -244,7 +315,7 @@ fun ComplaintsSupportScreen(
             .fillMaxSize()
             .padding(horizontal = 16.dp)
     ) {
-        // Robust Header with perfect alignment & no awkward badge wrapping
+        // Robust Header with perfect alignment
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -272,7 +343,7 @@ fun ComplaintsSupportScreen(
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = "Direct contact & instant resolution control",
+                        text = "Real-time ticket resolution & live support chat",
                         color = Color.Gray,
                         fontSize = 11.5.sp,
                         maxLines = 1,
@@ -309,7 +380,7 @@ fun ComplaintsSupportScreen(
         ) {
             StatBadge(modifier = Modifier.weight(1f), label = "Total Tickets", value = "${tickets.size}", icon = Icons.Default.ConfirmationNumber, color = Color(0xFF64B5F6))
             StatBadge(modifier = Modifier.weight(1f), label = "Pending Action", value = "$pendingCount", icon = Icons.Default.Warning, color = Color(0xFFFFB74D))
-            StatBadge(modifier = Modifier.weight(1f), label = "Resolved Today", value = "${tickets.count { it.status == "RESOLVED" || it.status == "REFUNDED" }}", icon = Icons.Default.CheckCircle, color = Color(0xFF81C784))
+            StatBadge(modifier = Modifier.weight(1f), label = "Resolved", value = "${tickets.count { it.status == "RESOLVED" || it.status == "REFUNDED" }}", icon = Icons.Default.CheckCircle, color = Color(0xFF81C784))
         }
 
         // Filter tabs
@@ -346,6 +417,9 @@ fun ComplaintsSupportScreen(
                     onClick = {
                         selectedTicketForDetails = ticket
                     },
+                    onLiveChat = {
+                        selectedTicketForChat = ticket
+                    },
                     onDirectEmail = {
                         val intent = Intent(Intent.ACTION_SENDTO).apply {
                             data = Uri.parse("mailto:${ticket.userEmail}")
@@ -369,7 +443,7 @@ fun ComplaintsSupportScreen(
                             if (it.id == ticket.id) updated else it
                         }
                         onSaveTicket?.invoke(updated)
-                        Toast.makeText(context, if (nextStatus == "RESOLVED") "Ticket #${ticket.id} Resolved Successfully!" else "Ticket #${ticket.id} Reopened as Pending.", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, if (nextStatus == "RESOLVED") "Ticket #${ticket.id} Resolved!" else "Ticket #${ticket.id} Reopened as Pending.", Toast.LENGTH_SHORT).show()
                     },
                     onDissolve = {
                         ticketToDissolve = ticket
@@ -423,6 +497,7 @@ fun FilterChipTab(label: String, isSelected: Boolean, onClick: () -> Unit) {
 fun ComplaintCard(
     ticket: ComplaintTicket,
     onClick: () -> Unit,
+    onLiveChat: () -> Unit,
     onDirectEmail: () -> Unit,
     onIssueRefund: () -> Unit,
     onToggleResolve: () -> Unit,
@@ -518,52 +593,43 @@ fun ComplaintCard(
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(Icons.Default.TouchApp, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(12.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Tap card to inspect and adjudicate details", color = Color.Gray, fontSize = 10.sp)
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(10.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                // Email Direct Contact
-                OutlinedButton(
-                    onClick = onDirectEmail,
-                    modifier = Modifier.weight(1f).height(34.dp),
-                    border = BorderStroke(1.dp, Color(0xFF64B5F6)),
-                    contentPadding = PaddingValues(0.dp)
+                // Live Chat Primary Action
+                Button(
+                    onClick = onLiveChat,
+                    modifier = Modifier.weight(1.3f).height(36.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+                    contentPadding = PaddingValues(horizontal = 8.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Email, contentDescription = null, tint = Color(0xFF64B5F6), modifier = Modifier.size(13.dp))
-                        Spacer(modifier = Modifier.width(3.dp))
-                        Text("Email", fontSize = 10.sp, color = Color(0xFF64B5F6))
+                        Icon(Icons.Default.Chat, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Live Chat", fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.Bold)
                     }
                 }
 
-                // Issue Refund
+                // Issue Compensation / Refund
                 Button(
                     onClick = onIssueRefund,
-                    modifier = Modifier.weight(1f).height(34.dp),
+                    modifier = Modifier.weight(1f).height(36.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent),
                     contentPadding = PaddingValues(0.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Payments, contentDescription = null, tint = Color.Black, modifier = Modifier.size(13.dp))
                         Spacer(modifier = Modifier.width(3.dp))
-                        Text("Refund", fontSize = 10.sp, color = Color.Black, fontWeight = FontWeight.Bold)
+                        Text("₹ Credit", fontSize = 11.sp, color = Color.Black, fontWeight = FontWeight.Bold)
                     }
                 }
 
                 // Resolve / Reopen Toggle
                 Button(
                     onClick = onToggleResolve,
-                    modifier = Modifier.weight(1.1f).height(34.dp),
+                    modifier = Modifier.weight(1.1f).height(36.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (isResolved) Color(0xFF374151) else Color(0xFF16A34A)
                     ),
@@ -579,7 +645,7 @@ fun ComplaintCard(
                         Spacer(modifier = Modifier.width(3.dp))
                         Text(
                             text = if (isResolved) "Reopen" else "Resolve",
-                            fontSize = 10.sp,
+                            fontSize = 11.sp,
                             color = Color.White,
                             fontWeight = FontWeight.Bold
                         )
@@ -587,19 +653,364 @@ fun ComplaintCard(
                 }
 
                 // Dissolve / Delete Button
-                OutlinedButton(
+                IconButton(
                     onClick = onDissolve,
-                    modifier = Modifier.height(34.dp),
-                    border = BorderStroke(1.dp, Color(0xFFEF4444).copy(alpha = 0.7f)),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFEF4444)),
-                    contentPadding = PaddingValues(horizontal = 8.dp)
+                    modifier = Modifier.size(36.dp).background(Color(0xFF27272A), CircleShape)
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.DeleteOutline, contentDescription = "Dissolve Ticket", tint = Color(0xFFEF4444), modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(3.dp))
-                        Text("Dissolve", fontSize = 10.sp, color = Color(0xFFEF4444), fontWeight = FontWeight.Bold)
+                    Icon(Icons.Default.DeleteOutline, contentDescription = "Dissolve Ticket", tint = Color(0xFFEF4444), modifier = Modifier.size(16.dp))
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Real-Time Ticket Live Chat Dialog with bidirectional message streaming
+ */
+@Composable
+fun TicketLiveChatDialog(
+    ticket: ComplaintTicket,
+    user: UserProfile?,
+    getTicketMessagesStream: (suspend (String) -> Flow<List<TicketMessage>>)?,
+    onSendMessage: (String) -> Unit,
+    onDismiss: () -> Unit,
+    onIssueRefund: () -> Unit,
+    onUpdateStatus: (String) -> Unit
+) {
+    var inputText by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+    val listState = rememberLazyListState()
+
+    var messages by remember { mutableStateOf<List<TicketMessage>>(emptyList()) }
+
+    LaunchedEffect(ticket.id) {
+        if (getTicketMessagesStream != null) {
+            getTicketMessagesStream(ticket.id).collect { newMessages ->
+                messages = newMessages
+                if (newMessages.isNotEmpty()) {
+                    listState.animateScrollToItem(newMessages.size - 1)
+                }
+            }
+        }
+    }
+
+    val quickReplies = listOf(
+        "Checking match logs now...",
+        "Room ID & Pass sent to your game mailbox.",
+        "Screenshot verified. Thank you!",
+        "Compensation credited to your wallet.",
+        "Ticket resolved. Best of luck for next matches!"
+    )
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.96f)
+                .fillMaxHeight(0.92f),
+            shape = RoundedCornerShape(24.dp),
+            color = Color(0xFF0F0F12),
+            border = BorderStroke(1.dp, CardVerifyBorder)
+        ) {
+            Column(
+                modifier = Modifier.fillMaxSize()
+            ) {
+                // Top Chat Header
+                Surface(
+                    color = Color(0xFF18181F),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .background(Color(0xFF2563EB).copy(alpha = 0.2f), CircleShape)
+                                    .border(1.dp, Color(0xFF2563EB), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.SupportAgent, contentDescription = null, tint = Color(0xFF60A5FA), modifier = Modifier.size(22.dp))
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = ticket.username.ifEmpty { "Player" },
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 15.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = when (ticket.status) {
+                                            "RESOLVED" -> Color.Green.copy(alpha = 0.2f)
+                                            "INVESTIGATING" -> Color(0xFFFFB74D).copy(alpha = 0.2f)
+                                            else -> Color.Red.copy(alpha = 0.2f)
+                                        }
+                                    ) {
+                                        Text(
+                                            text = ticket.status,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                            color = when (ticket.status) {
+                                                "RESOLVED" -> Color.Green
+                                                "INVESTIGATING" -> Color(0xFFFFB74D)
+                                                else -> Color.Red
+                                            },
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = "Ticket #${ticket.id} • ${ticket.issueCategory}",
+                                    color = Color.Gray,
+                                    fontSize = 11.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(onClick = onIssueRefund, modifier = Modifier.size(32.dp)) {
+                                Icon(Icons.Default.Payments, contentDescription = "Refund", tint = VelorixAccent, modifier = Modifier.size(20.dp))
+                            }
+                            IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
+                                Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.LightGray, modifier = Modifier.size(20.dp))
+                            }
+                        }
                     }
                 }
+
+                // Initial Complaint Context Card
+                Surface(
+                    color = Color(0xFF14141A),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, Color(0xFF27272A))
+                ) {
+                    Column(modifier = Modifier.padding(10.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Initial Complaint Context", color = Color(0xFF60A5FA), fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+                            Text(ticket.userEmail, color = Color.Gray, fontSize = 10.5.sp)
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = ticket.description,
+                            color = Color.LightGray,
+                            fontSize = 12.sp,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
+                // Real-Time Chat Message Stream
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    if (messages.isEmpty()) {
+                        item {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 32.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(Icons.Default.ChatBubbleOutline, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(32.dp))
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text("No messages in this ticket yet.", color = Color.Gray, fontSize = 12.sp)
+                                    Text("Type a response below to connect live with ${ticket.username}.", color = Color.DarkGray, fontSize = 11.sp)
+                                }
+                            }
+                        }
+                    }
+
+                    items(messages) { msg ->
+                        ChatMessageBubble(message = msg)
+                    }
+                }
+
+                // Quick Response Chips
+                LazyRow(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    items(quickReplies) { reply ->
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = Color(0xFF1E1E26),
+                            border = BorderStroke(1.dp, Color(0xFF33333E)),
+                            modifier = Modifier.clickable {
+                                onSendMessage(reply)
+                            }
+                        ) {
+                            Text(
+                                text = reply,
+                                color = Color(0xFFE2E8F0),
+                                fontSize = 10.5.sp,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                            )
+                        }
+                    }
+                }
+
+                // Text Input & Send Row
+                Surface(
+                    color = Color(0xFF18181F),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = inputText,
+                            onValueChange = { inputText = it },
+                            placeholder = { Text("Type reply to player...", color = Color.Gray, fontSize = 13.sp) },
+                            modifier = Modifier.weight(1f),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = VelorixAccent,
+                                unfocusedBorderColor = Color(0xFF2E2E38),
+                                focusedContainerColor = Color(0xFF0F0F12),
+                                unfocusedContainerColor = Color(0xFF0F0F12)
+                            ),
+                            shape = RoundedCornerShape(20.dp),
+                            maxLines = 3
+                        )
+
+                        Spacer(modifier = Modifier.width(8.dp))
+
+                        IconButton(
+                            onClick = {
+                                val text = inputText.trim()
+                                if (text.isNotBlank()) {
+                                    onSendMessage(text)
+                                    inputText = ""
+                                }
+                            },
+                            modifier = Modifier
+                                .size(44.dp)
+                                .background(VelorixAccent, CircleShape)
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send", tint = Color.Black, modifier = Modifier.size(20.dp))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ChatMessageBubble(message: TicketMessage) {
+    val isAdminOrSystem = message.senderRole == "ADMIN" || message.senderRole == "SUPPORT" || message.senderRole == "SYSTEM"
+    val timeFormatted = remember(message.timestamp) {
+        try {
+            val sdf = SimpleDateFormat("hh:mm a", Locale.getDefault())
+            sdf.format(Date(message.timestamp))
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = if (isAdminOrSystem) Arrangement.End else Arrangement.Start
+    ) {
+        Column(
+            horizontalAlignment = if (isAdminOrSystem) Alignment.End else Alignment.Start,
+            modifier = Modifier.widthIn(max = 280.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = if (isAdminOrSystem) message.senderName.ifEmpty { "Velorix Support" } else message.senderName.ifEmpty { "Player" },
+                    color = if (isAdminOrSystem) VelorixAccent else Color(0xFF60A5FA),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                if (message.senderRole.isNotBlank()) {
+                    Surface(
+                        shape = RoundedCornerShape(3.dp),
+                        color = if (isAdminOrSystem) VelorixAccent.copy(alpha = 0.2f) else Color(0xFF2563EB).copy(alpha = 0.2f)
+                    ) {
+                        Text(
+                            text = message.senderRole,
+                            color = if (isAdminOrSystem) VelorixAccent else Color(0xFF60A5FA),
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                        )
+                    }
+                }
+                if (timeFormatted.isNotEmpty()) {
+                    Text(timeFormatted, color = Color.DarkGray, fontSize = 9.sp)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(2.dp))
+
+            Surface(
+                shape = RoundedCornerShape(
+                    topStart = 14.dp,
+                    topEnd = 14.dp,
+                    bottomStart = if (isAdminOrSystem) 14.dp else 2.dp,
+                    bottomEnd = if (isAdminOrSystem) 2.dp else 14.dp
+                ),
+                color = if (message.senderRole == "SYSTEM") {
+                    Color(0xFF2D1F00)
+                } else if (isAdminOrSystem) {
+                    Color(0xFF1E293B)
+                } else {
+                    Color(0xFF18181F)
+                },
+                border = BorderStroke(
+                    1.dp,
+                    if (message.senderRole == "SYSTEM") VelorixAccent.copy(alpha = 0.4f)
+                    else if (isAdminOrSystem) Color(0xFF3B82F6).copy(alpha = 0.3f)
+                    else Color(0xFF27272A)
+                )
+            ) {
+                Text(
+                    text = message.messageText,
+                    color = Color.White,
+                    fontSize = 12.5.sp,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                )
             }
         }
     }
@@ -613,6 +1024,7 @@ fun ComplaintTicketDetailDialog(
     ticket: ComplaintTicket,
     user: UserProfile?,
     onDismiss: () -> Unit,
+    onOpenLiveChat: () -> Unit,
     onDirectEmail: () -> Unit,
     onIssueRefund: () -> Unit,
     onDissolveTicket: () -> Unit,
@@ -802,15 +1214,28 @@ fun ComplaintTicketDetailDialog(
                 Text("Action & Adjudication Controls", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 Spacer(modifier = Modifier.height(8.dp))
 
+                // Live Chat Dedicated Button
+                Button(
+                    onClick = onOpenLiveChat,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB))
+                ) {
+                    Icon(Icons.Default.Chat, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Open Real-Time Live Support Chat", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
+                    OutlinedButton(
                         onClick = onDirectEmail,
                         modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB))
+                        border = BorderStroke(1.dp, Color(0xFF60A5FA))
                     ) {
-                        Icon(Icons.Default.Email, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Default.Email, contentDescription = null, tint = Color(0xFF60A5FA), modifier = Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Send Email", fontSize = 12.sp)
+                        Text("Send Email", color = Color(0xFF60A5FA), fontSize = 11.sp)
                     }
 
                     Button(
@@ -818,9 +1243,9 @@ fun ComplaintTicketDetailDialog(
                         modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent)
                     ) {
-                        Icon(Icons.Default.Payments, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Default.Payments, contentDescription = null, tint = Color.Black, modifier = Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("₹ Compensation", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text("₹ Compensation", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 11.sp)
                     }
                 }
 

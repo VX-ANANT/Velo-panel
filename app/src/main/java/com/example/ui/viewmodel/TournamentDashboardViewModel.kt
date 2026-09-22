@@ -7,6 +7,7 @@ import com.example.data.repository.TournamentRepositoryImpl
 import com.example.domain.model.Tournament
 import com.example.domain.model.UserProfile
 import com.example.domain.model.SupportTicket
+import com.example.domain.model.TicketMessage
 import com.example.domain.model.ComplaintTicket
 import com.example.domain.model.PayoutRequest
 import com.example.domain.model.AdminRecord
@@ -640,6 +641,97 @@ class TournamentDashboardViewModel(
                 GlobalErrorManager.emitSuccess("Ticket #${ticket.id} updated to ${ticket.status}")
             } catch (e: Exception) {
                 GlobalErrorManager.emitError("Failed to update ticket: ${e.message}")
+            }
+        }
+    }
+
+    suspend fun getTicketMessagesStream(ticketId: String): Flow<List<TicketMessage>> {
+        return repository.getLiveTicketMessagesStream(ticketId)
+    }
+
+    fun sendTicketMessage(
+        ticketId: String,
+        message: String,
+        senderName: String = "Velorix Support Admin",
+        senderRole: String = "ADMIN",
+        onComplete: (Boolean) -> Unit = {}
+    ) {
+        val cleanMsg = message.trim()
+        if (cleanMsg.isBlank() || ticketId.isBlank()) {
+            onComplete(false)
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val currentAdminUid = repository.auth.currentUser?.uid ?: "ADMIN_MASTER"
+                val success = repository.sendTicketMessage(
+                    ticketId = ticketId,
+                    senderId = currentAdminUid,
+                    senderName = senderName,
+                    senderRole = senderRole,
+                    messageText = cleanMsg
+                )
+                if (success) {
+                    GlobalErrorManager.emitSuccess("Support response sent")
+                }
+                onComplete(success)
+            } catch (e: Exception) {
+                e.printStackTrace()
+                GlobalErrorManager.emitError("Failed to send message: ${e.message}")
+                onComplete(false)
+            }
+        }
+    }
+
+    fun issueTicketCompensation(
+        ticket: SupportTicket,
+        amount: Double,
+        reason: String = "Support Ticket Resolution Compensation",
+        onComplete: (Boolean) -> Unit = {}
+    ) {
+        if (amount <= 0) {
+            GlobalErrorManager.emitError("Compensation amount must be greater than ₹0")
+            onComplete(false)
+            return
+        }
+        val curr = _uiState.value as? DashboardState.Success
+        val targetUser = curr?.users?.find { it.email.equals(ticket.userEmail, ignoreCase = true) || it.id == ticket.userId }
+        val adminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
+        viewModelScope.launch {
+            try {
+                if (targetUser != null) {
+                    val newBalance = targetUser.funds + amount
+                    repository.adjustUserBalance(targetUser.id, newBalance, reason, adminEmail)
+                    if (curr != null) {
+                        _uiState.value = curr.copy(
+                            users = curr.users.map { if (it.id == targetUser.id) it.copy(funds = newBalance) else it }
+                        )
+                    }
+                } else if (ticket.userEmail.isNotBlank()) {
+                    val fallbackId = "USR_${ticket.userEmail.hashCode()}"
+                    repository.adjustUserBalance(fallbackId, amount, reason, adminEmail)
+                }
+                // Send automated system confirmation message in ticket chat
+                repository.sendTicketMessage(
+                    ticketId = ticket.id,
+                    senderId = repository.auth.currentUser?.uid ?: "ADMIN_PAYOUTS",
+                    senderName = "Velorix Financial Support",
+                    senderRole = "SYSTEM",
+                    messageText = "₹${"%.2f".format(amount)} has been credited to your Velorix wallet for ticket #${ticket.id}. Reason: $reason"
+                )
+                // Update ticket status to RESOLVED
+                val updatedTicket = ticket.copy(
+                    status = "RESOLVED",
+                    adminNote = "Compensation ₹$amount credited. $reason"
+                )
+                repository.updateSupportTicket(updatedTicket)
+                saveComplaint(updatedTicket)
+                GlobalErrorManager.emitSuccess("₹$amount credited to user and ticket #${ticket.id} marked as RESOLVED!")
+                onComplete(true)
+            } catch (e: Exception) {
+                e.printStackTrace()
+                GlobalErrorManager.emitError("Failed to process compensation: ${e.message}")
+                onComplete(false)
             }
         }
     }

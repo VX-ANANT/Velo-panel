@@ -324,6 +324,15 @@ fun TournamentApp(
                     onDeleteComplaint = { ticketId ->
                         viewModel.deleteComplaint(ticketId)
                     },
+                    onSendTicketMessage = { ticketId, message, onComplete ->
+                        viewModel.sendTicketMessage(ticketId, message, onComplete = onComplete)
+                    },
+                    getTicketMessagesStream = { ticketId ->
+                        viewModel.getTicketMessagesStream(ticketId)
+                    },
+                    onIssueTicketCompensation = { ticket, amount, reason, onComplete ->
+                        viewModel.issueTicketCompensation(ticket, amount, reason, onComplete)
+                    },
                     onSaveToken = { token ->
                         viewModel.saveToken(token)
                     },
@@ -528,6 +537,27 @@ fun TournamentApp(
                         onNavigateBack = { navController.popBackStack() }
                     )
                 }
+            }
+            composable("daily_revenue") {
+                val success = uiState as? DashboardState.Success
+                DailyRevenueAnalyticsScreen(
+                    tournaments = success?.tournaments ?: emptyList(),
+                    users = success?.users ?: emptyList(),
+                    payouts = success?.payoutRequests ?: emptyList(),
+                    onBack = { navController.popBackStack() },
+                    onTournamentClick = { tId ->
+                        navController.navigate("tournament_details/$tId")
+                    },
+                    onBroadcastRoomCredentials = { tId, roomId, roomPass ->
+                        val tourney = success?.tournaments?.find { it.id == tId }
+                        if (tourney != null) {
+                            val updated = tourney.copy(
+                                roomDetails = com.example.domain.model.RoomDetails(roomId = roomId, roomPassword = roomPass)
+                            )
+                            viewModel.updateTournament(updated)
+                        }
+                    }
+                )
             }
             composable("analytics") {
                 AnalyticsScreen(

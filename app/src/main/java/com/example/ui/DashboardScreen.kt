@@ -139,6 +139,9 @@ fun DashboardScreen(
     onDeleteAdmin: ((adminUid: String) -> Unit)? = null,
     onSaveComplaint: ((com.example.domain.model.ComplaintTicket) -> Unit)? = null,
     onDeleteComplaint: ((String) -> Unit)? = null,
+    onSendTicketMessage: ((ticketId: String, message: String, onComplete: (Boolean) -> Unit) -> Unit)? = null,
+    getTicketMessagesStream: (suspend (String) -> kotlinx.coroutines.flow.Flow<List<com.example.domain.model.TicketMessage>>)? = null,
+    onIssueTicketCompensation: ((ticket: com.example.domain.model.ComplaintTicket, amount: Double, reason: String, onComplete: (Boolean) -> Unit) -> Unit)? = null,
     onSaveToken: ((com.example.domain.model.CheckInToken) -> Unit)? = null,
     onSaveBanner: ((com.example.domain.model.AppAnnouncementBanner) -> Unit)? = null,
     onPublishAnnouncement: ((com.example.domain.model.GlobalAnnouncement) -> Unit)? = null,
@@ -235,6 +238,7 @@ fun DashboardScreen(
                                     onCheckInTokensClick = { selectedTab = "lowcode" },
                                     onChatbotClick = { onNavClick("chatbot") },
                                     onLeaderboardClick = { selectedTab = "leaderboard" },
+                                    onFinancialAuditClick = { onNavClick("daily_revenue") },
                                     onCreateTournamentClick = onCreateTournamentClick,
                                     onPublishAnnouncement = { onPublishAnnouncement?.invoke(it) },
                                     onDeleteAnnouncement = { onDeleteAnnouncement?.invoke(it) }
@@ -261,6 +265,9 @@ fun DashboardScreen(
                                     onRefreshUserData = onRefreshUserData,
                                     onSaveComplaint = { onSaveComplaint?.invoke(it) },
                                     onDeleteComplaint = { onDeleteComplaint?.invoke(it) },
+                                    onSendTicketMessage = onSendTicketMessage,
+                                    getTicketMessagesStream = getTicketMessagesStream,
+                                    onIssueTicketCompensation = onIssueTicketCompensation,
                                     accentColor = currentHyperTheme.primaryColor
                                 )
                             }
@@ -332,7 +339,10 @@ fun DashboardScreen(
                                         },
                                         onDeleteTicket = { ticketId ->
                                             onDeleteComplaint?.invoke(ticketId)
-                                        }
+                                        },
+                                        onSendTicketMessage = onSendTicketMessage,
+                                        getTicketMessagesStream = getTicketMessagesStream,
+                                        onIssueTicketCompensation = onIssueTicketCompensation
                                     )
                                 }
                             }
@@ -722,6 +732,7 @@ fun DashboardContent(
     onCheckInTokensClick: () -> Unit = {},
     onChatbotClick: () -> Unit = {},
     onLeaderboardClick: () -> Unit = {},
+    onFinancialAuditClick: () -> Unit = {},
     onCreateTournamentClick: () -> Unit = {},
     onPublishAnnouncement: ((com.example.domain.model.GlobalAnnouncement) -> Unit)? = null,
     onDeleteAnnouncement: ((String) -> Unit)? = null
@@ -1153,15 +1164,15 @@ fun DashboardContent(
                     modifier = Modifier
                         .weight(1f)
                         .clip(RoundedCornerShape(12.dp))
-                        .border(1.dp, Color(0xFF27272A), RoundedCornerShape(12.dp))
-                        .bounceClick(scaleDown = 0.96f) { showFinancialAuditDialog = true }
+                        .border(1.dp, Color(0xFF10B981).copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                        .bounceClick(scaleDown = 0.96f) { onFinancialAuditClick() }
                         .padding(horizontal = 14.dp, vertical = 12.dp),
                     color = Color(0xFF0C0C0E)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.AutoMirrored.Filled.TrendingUp, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                        Icon(Icons.AutoMirrored.Filled.TrendingUp, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Financial Audit", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+                        Text("Earnings & Revenue", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
                     }
                 }
 
@@ -1389,6 +1400,9 @@ fun OperationsHubScreenContent(
     onRefreshUserData: (() -> Unit)? = null,
     onSaveComplaint: ((com.example.domain.model.ComplaintTicket) -> Unit)? = null,
     onDeleteComplaint: ((String) -> Unit)? = null,
+    onSendTicketMessage: ((ticketId: String, message: String, onComplete: (Boolean) -> Unit) -> Unit)? = null,
+    getTicketMessagesStream: (suspend (String) -> kotlinx.coroutines.flow.Flow<List<com.example.domain.model.TicketMessage>>)? = null,
+    onIssueTicketCompensation: ((ticket: com.example.domain.model.ComplaintTicket, amount: Double, reason: String, onComplete: (Boolean) -> Unit) -> Unit)? = null,
     accentColor: Color
 ) {
     var selectedSection by remember { mutableStateOf(0) } // 0: KYC Queue, 1: User Directory, 2: Support Tickets
@@ -1624,7 +1638,10 @@ fun OperationsHubScreenContent(
                     },
                     onDeleteTicket = { ticketId ->
                         onDeleteComplaint?.invoke(ticketId)
-                    }
+                    },
+                    onSendTicketMessage = onSendTicketMessage,
+                    getTicketMessagesStream = getTicketMessagesStream,
+                    onIssueTicketCompensation = onIssueTicketCompensation
                 )
             }
         }

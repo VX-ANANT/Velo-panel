@@ -509,7 +509,7 @@ fun FloatingGlassNavBar(
                 ) {
                     Row(
                         modifier = Modifier.fillMaxSize(),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         navItems.forEach { item ->
@@ -520,58 +520,77 @@ fun FloatingGlassNavBar(
                                 else -> selectedTab == item.id
                             }
 
-                            val animatedScale by animateFloatAsState(
-                                targetValue = if (isSelected) 1.05f else 0.95f,
-                                animationSpec = spring(dampingRatio = 0.80f, stiffness = 450f),
-                                label = "navScale"
+                            val animatedWeight by animateFloatAsState(
+                                targetValue = if (isSelected) 2.4f else 0.85f,
+                                animationSpec = spring(dampingRatio = 0.78f, stiffness = 380f),
+                                label = "navWeight"
                             )
 
                             Box(
                                 modifier = Modifier
-                                    .weight(1f)
+                                    .weight(animatedWeight)
                                     .fillMaxHeight()
-                                    .graphicsLayer {
-                                        scaleX = animatedScale
-                                        scaleY = animatedScale
-                                    }
-                                    .bounceClick(scaleDown = 0.92f) {
+                                    .padding(vertical = 5.dp, horizontal = 2.dp)
+                                    .bounceClick(scaleDown = 0.94f) {
                                         onNavClick(item.id)
                                     },
                                 contentAlignment = Alignment.Center
                             ) {
-                                // Selection: ONLY a soft luminous background glow — NO selection box, NO borders
+                                // Elongated horizontal illuminated glass pill capsule for active tab
                                 if (isSelected) {
                                     Box(
                                         modifier = Modifier
                                             .fillMaxSize()
-                                            .drawBehind {
-                                                drawSelectionBackgroundGlow(
-                                                    intensity = optics.vibrancy
+                                            .clip(RoundedCornerShape(26.dp))
+                                            .background(
+                                                Brush.horizontalGradient(
+                                                    colors = listOf(
+                                                        accentColor.copy(alpha = 0.32f),
+                                                        Color.White.copy(alpha = 0.20f),
+                                                        accentColor.copy(alpha = 0.26f)
+                                                    )
                                                 )
-                                            }
+                                            )
+                                            .border(
+                                                width = 1.2.dp,
+                                                brush = Brush.horizontalGradient(
+                                                    listOf(
+                                                        Color.White.copy(alpha = 0.55f),
+                                                        accentColor.copy(alpha = 0.75f),
+                                                        Color.White.copy(alpha = 0.40f)
+                                                    )
+                                                ),
+                                                shape = RoundedCornerShape(26.dp)
+                                            )
                                     )
                                 }
 
-                                Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.Center,
-                                    modifier = Modifier.padding(horizontal = 2.dp)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(horizontal = if (isSelected) 10.dp else 2.dp)
                                 ) {
                                     Icon(
                                         imageVector = item.icon,
                                         contentDescription = item.label,
-                                        tint = if (isSelected) Color.White else Color.White.copy(alpha = 0.65f),
-                                        modifier = Modifier.size(22.dp)
+                                        tint = if (isSelected) Color.White else Color.White.copy(alpha = 0.55f),
+                                        modifier = Modifier.size(20.dp)
                                     )
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(
-                                        text = item.label,
-                                        fontSize = 10.sp,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                        color = if (isSelected) Color.White else Color.White.copy(alpha = 0.70f),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
+
+                                    if (isSelected) {
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = item.label,
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White,
+                                            maxLines = 1,
+                                            softWrap = false,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
                                 }
                             }
                         }

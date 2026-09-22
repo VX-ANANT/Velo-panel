@@ -8,6 +8,7 @@ import com.example.domain.model.Match
 import com.example.domain.model.UserProfile
 import com.example.domain.model.ComplaintTicket
 import com.example.domain.model.SupportTicket
+import com.example.domain.model.TicketMessage
 import com.example.domain.model.PayoutRequest
 import com.example.domain.model.AdminRecord
 import com.example.domain.model.AdminVerificationResult
@@ -1593,14 +1594,20 @@ service cloud.firestore {
     suspend fun getLiveTournamentsStream(): Flow<List<Tournament>> = callbackFlow {
         val tournamentSources = mutableMapOf<String, Map<String, Tournament>>()
 
+        val isMockTournament: (Tournament) -> Boolean = { t ->
+            val id = t.id.trim().lowercase()
+            val title = t.title.trim().lowercase()
+            id.startsWith("mock_") || id.startsWith("demo_") || id.startsWith("test_") || id.startsWith("sample_") ||
+            title.contains("[mock]") || title.contains("[demo]") || title.contains("[test]") ||
+            title.startsWith("mock ") || title.startsWith("demo ") || title.startsWith("test ") ||
+            title.contains("mock tournament") || title.contains("demo tournament") || title.contains("test tournament")
+        }
+
         fun emitTournaments() {
             val combined = mutableMapOf<String, Tournament>()
             tournamentSources.values.forEach { sourceMap ->
                 sourceMap.forEach { (id, t) ->
-                    val isMock = id.startsWith("mock_") || id.startsWith("demo_") || id.startsWith("test_") ||
-                                 t.title.contains("[mock]", ignoreCase = true) || t.title.contains("[demo]", ignoreCase = true) ||
-                                 t.title.startsWith("Mock ", ignoreCase = true) || t.title.startsWith("Demo ", ignoreCase = true)
-                    if (!locallyDeletedTournamentIds.contains(id) && !isMock) {
+                    if (!locallyDeletedTournamentIds.contains(id) && !isMockTournament(t)) {
                         combined[id] = t
                     }
                 }
@@ -1614,13 +1621,13 @@ service cloud.firestore {
             val sourceMap = mutableMapOf<String, Tournament>()
             snapshot.children.forEach { child ->
                 val t = child.toTournament()
-                if (t != null && t.id.isNotBlank() && !locallyDeletedTournamentIds.contains(t.id)) {
+                if (t != null && t.id.isNotBlank() && !locallyDeletedTournamentIds.contains(t.id) && !isMockTournament(t)) {
                     sourceMap[t.id] = t
                 } else if (child.hasChildren()) {
                     // Check sub-children in case tournaments are grouped under category / game folders
                     child.children.forEach { subChild ->
                         val subT = subChild.toTournament()
-                        if (subT != null && subT.id.isNotBlank() && !locallyDeletedTournamentIds.contains(subT.id)) {
+                        if (subT != null && subT.id.isNotBlank() && !locallyDeletedTournamentIds.contains(subT.id) && !isMockTournament(subT)) {
                             sourceMap[subT.id] = subT
                         }
                     }
@@ -1718,7 +1725,7 @@ service cloud.firestore {
                     if (error == null && snapshot != null) {
                         val sourceMap = mutableMapOf<String, Tournament>()
                         snapshot.documents.mapNotNull { it.toTournament() }.forEach { t ->
-                            if (t.id.isNotBlank() && !locallyDeletedTournamentIds.contains(t.id)) {
+                            if (t.id.isNotBlank() && !locallyDeletedTournamentIds.contains(t.id) && !isMockTournament(t)) {
                                 sourceMap[t.id] = t
                             }
                         }
@@ -2767,6 +2774,135 @@ service cloud.firestore {
         }
     }
 
+    suspend fun getLiveTicketMessagesStream(ticketId: String): Flow<List<TicketMessage>> = callbackFlow {
+        val messagesMap = mutableMapOf<String, TicketMessage>()
+
+        fun emitMessages() {
+            val list = messagesMap.values.toList().sortedBy { it.timestamp }
+            trySend(list)
+        }
+
+        emitMessages()
+
+        // 1. Firestore real-time listener for support_tickets/{ticketId}/messages
+        var fsListener: com.google.firebase.firestore.ListenerRegistration? = null
+        try {
+            fsListener = firestore.collection("support_tickets")
+                .document(ticketId)
+                .collection("messages")
+                .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.ASCENDING)
+                .addSnapshotListener { snapshot, error ->
+                    if (error == null && snapshot != null) {
+                        snapshot.documents.forEach { doc ->
+                            val msg = doc.toObject(TicketMessage::class.java)?.copy(id = doc.id)
+                                ?: TicketMessage(
+                                    id = doc.id,
+                                    ticketId = doc.getString("ticketId") ?: ticketId,
+                                    senderId = doc.getString("senderId") ?: "",
+                                    senderName = doc.getString("senderName") ?: "Support",
+                                    senderRole = doc.getString("senderRole") ?: "ADMIN",
+                                    message = doc.getString("message") ?: "",
+                                    timestamp = doc.getLong("timestamp") ?: System.currentTimeMillis()
+                                )
+                            if (msg.id.isNotBlank() && msg.message.isNotBlank()) {
+                                messagesMap[msg.id] = msg
+                            }
+                        }
+                        emitMessages()
+                    }
+                }
+        } catch (_: Exception) {}
+
+        // 2. Realtime Database listener for real-time fallback/sync
+        val rtdbRef = database.child("support_tickets").child(ticketId).child("messages")
+        val rtdbListener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                snapshot.children.forEach { child ->
+                    val msg = child.getValue(TicketMessage::class.java)?.copy(id = child.key ?: "")
+                        ?: TicketMessage(
+                            id = child.key ?: "",
+                            ticketId = child.child("ticketId").value?.toString() ?: ticketId,
+                            senderId = child.child("senderId").value?.toString() ?: "",
+                            senderName = child.child("senderName").value?.toString() ?: "Support",
+                            senderRole = child.child("senderRole").value?.toString() ?: "ADMIN",
+                            message = child.child("message").value?.toString() ?: "",
+                            timestamp = child.child("timestamp").value?.toString()?.toLongOrNull() ?: System.currentTimeMillis()
+                        )
+                    if (msg.id.isNotBlank() && msg.message.isNotBlank()) {
+                        messagesMap[msg.id] = msg
+                    }
+                }
+                emitMessages()
+            }
+            override fun onCancelled(error: DatabaseError) {}
+        }
+        rtdbRef.addValueEventListener(rtdbListener)
+
+        awaitClose {
+            fsListener?.remove()
+            rtdbRef.removeEventListener(rtdbListener)
+        }
+    }
+
+    suspend fun sendTicketMessage(
+        ticketId: String,
+        senderId: String,
+        senderName: String,
+        senderRole: String,
+        messageText: String
+    ): Boolean {
+        val cleanMsg = com.example.data.validation.SecuritySanitizer.sanitizeInput(messageText, maxLength = 2000)
+        if (cleanMsg.isBlank() || ticketId.isBlank()) return false
+
+        val now = System.currentTimeMillis()
+        val msgId = "MSG_${now}_${java.util.UUID.randomUUID().toString().take(6)}"
+
+        val payload = mapOf(
+            "id" to msgId,
+            "ticketId" to ticketId,
+            "senderId" to senderId,
+            "senderName" to senderName,
+            "senderRole" to senderRole,
+            "message" to cleanMsg,
+            "timestamp" to now
+        )
+
+        var success = false
+
+        // 1. Write to Firestore collections
+        try {
+            firestore.collection("support_tickets").document(ticketId).collection("messages").document(msgId).set(payload).await()
+            success = true
+        } catch (_: Exception) {}
+
+        try {
+            firestore.collection("complaints").document(ticketId).collection("messages").document(msgId).set(payload).await()
+            success = true
+        } catch (_: Exception) {}
+
+        // 2. Write to RTDB nodes
+        try {
+            database.child("support_tickets").child(ticketId).child("messages").child(msgId).setValue(payload).await()
+            database.child("tickets_chat").child(ticketId).child("messages").child(msgId).setValue(payload).await()
+            success = true
+        } catch (_: Exception) {}
+
+        // 3. Update ticket metadata (updatedAt, adminNote, status = in_progress)
+        try {
+            val ticketUpdates = mapOf<String, Any>(
+                "updatedAt" to now,
+                "adminNote" to cleanMsg,
+                "status" to "in_progress"
+            )
+            database.child("support_tickets").child(ticketId).updateChildren(ticketUpdates).await()
+            database.child("complaints").child(ticketId).updateChildren(ticketUpdates).await()
+            try { firestore.collection("support_tickets").document(ticketId).update(ticketUpdates).await() } catch (_: Exception) {}
+            try { firestore.collection("complaints").document(ticketId).update(ticketUpdates).await() } catch (_: Exception) {}
+        } catch (_: Exception) {}
+
+        return success
+    }
+
     suspend fun getLivePayoutRequestsStream(): Flow<List<PayoutRequest>> = callbackFlow {
         val payoutsMap = mutableMapOf<String, PayoutRequest>()
 
@@ -3120,102 +3256,113 @@ service cloud.firestore {
 
         emitAdmins()
 
-        val adminNodes = listOf(
-            database.child("admins"),
-            database.child("Admins"),
-            database.child("staff"),
-            database.child("Staff"),
-            database.child("admin_users")
-        )
+        // Primary authoritative nodes
+        val primaryRtdbRef = database.child("admins")
+        val primaryFsCol = firestore.collection("admins")
 
-        adminNodes.forEach { nodeRef ->
-            nodeRef.get().addOnSuccessListener { snapshot ->
+        val rtdbListener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val currentIds = mutableSetOf<String>()
                 snapshot.children.mapNotNull { it.toAdminRecord() }.forEach { admin ->
-                    if (admin.uid.isNotBlank()) adminsMap[admin.uid] = admin
+                    if (admin.uid.isNotBlank()) {
+                        adminsMap[admin.uid] = admin
+                        currentIds.add(admin.uid)
+                    }
                 }
                 emitAdmins()
             }
+            override fun onCancelled(error: DatabaseError) {
+                emitAdmins()
+            }
         }
+        primaryRtdbRef.addValueEventListener(rtdbListener)
 
-        val listeners = adminNodes.map { nodeRef ->
-            val listener = object : ValueEventListener {
-                override fun onDataChange(snapshot: DataSnapshot) {
-                    snapshot.children.mapNotNull { it.toAdminRecord() }.forEach { admin ->
-                        if (admin.uid.isNotBlank()) {
-                            adminsMap[admin.uid] = admin
+        var fsListener: com.google.firebase.firestore.ListenerRegistration? = null
+        try {
+            fsListener = primaryFsCol.addSnapshotListener { snapshot, error ->
+                if (error == null && snapshot != null) {
+                    snapshot.documents.forEach { doc ->
+                        val uid = doc.id
+                        val email = doc.getString("email") ?: ""
+                        val name = doc.getString("name") ?: email.substringBefore("@")
+                        val role = doc.getString("role") ?: "tournament_admin"
+                        val active = doc.getBoolean("active") ?: true
+                        val assignedAt = doc.getLong("assignedAt") ?: doc.getLong("grantedAt") ?: System.currentTimeMillis()
+                        val grantedBy = doc.getString("grantedBy") ?: ""
+                        if (uid.isNotBlank()) {
+                            adminsMap[uid] = AdminRecord(
+                                uid = uid,
+                                email = email,
+                                name = name,
+                                role = role,
+                                active = active,
+                                assignedAt = assignedAt,
+                                grantedBy = grantedBy
+                            )
                         }
                     }
                     emitAdmins()
                 }
-                override fun onCancelled(error: DatabaseError) {
-                    emitAdmins()
-                }
             }
-            nodeRef.addValueEventListener(listener)
-            nodeRef to listener
-        }
-
-        val fsCollections = listOf("admins", "Admins", "staff")
-        val fsListeners = fsCollections.mapNotNull { col ->
-            try {
-                firestore.collection(col).addSnapshotListener { snapshot, error ->
-                    if (error == null && snapshot != null) {
-                        snapshot.documents.forEach { doc ->
-                            val uid = doc.id
-                            val email = doc.getString("email") ?: ""
-                            val name = doc.getString("name") ?: email.substringBefore("@")
-                            val role = doc.getString("role") ?: "tournament_admin"
-                            val active = doc.getBoolean("active") ?: true
-                            if (uid.isNotBlank()) {
-                                adminsMap[uid] = AdminRecord(uid = uid, email = email, name = name, role = role, active = active)
-                            }
-                        }
-                        emitAdmins()
-                    }
-                }
-            } catch (_: Exception) {
-                null
-            }
-        }
+        } catch (_: Exception) {}
 
         awaitClose {
-            listeners.forEach { (nodeRef, listener) ->
-                nodeRef.removeEventListener(listener)
-            }
-            fsListeners.forEach { it.remove() }
+            primaryRtdbRef.removeEventListener(rtdbListener)
+            fsListener?.remove()
         }
     }
 
     suspend fun grantAdminAccess(uid: String, email: String, name: String, role: String, grantedBy: String) {
-        val adminUid = if (uid.isNotBlank()) uid else "ADM-${System.currentTimeMillis().toString().takeLast(5)}"
+        val cleanEmail = email.trim().lowercase()
+        val adminUid = if (uid.isNotBlank()) uid else "ADM_${cleanEmail.replace(".", "_").replace("@", "_")}"
         val now = System.currentTimeMillis()
-        val validRole = when (role) {
-            "super_admin", "tournament_admin", "support_admin", "moderator_admin" -> role
+        val validRole = when (role.trim().lowercase()) {
+            "super_admin", "tournament_admin", "support_admin", "moderator_admin" -> role.trim().lowercase()
             else -> "tournament_admin"
         }
         val payload = mapOf(
             "uid" to adminUid,
             "role" to validRole,
             "active" to true,
+            "status" to "ACTIVE",
             "grantedBy" to grantedBy,
-            "email" to email,
-            "name" to name,
+            "email" to email.trim(),
+            "name" to name.trim(),
             "grantedAt" to now,
             "assignedAt" to now
         )
+        val userRoleUpdates = mapOf<String, Any>(
+            "role" to validRole,
+            "isAdmin" to true,
+            "active" to true
+        )
+
         var anySuccess = false
-        try {
-            database.child("admins").child(adminUid).setValue(payload).await()
-            anySuccess = true
-        } catch (e: Exception) {
-            e.printStackTrace()
+
+        val rtdbNodes = listOf("admins", "Admins", "staff", "Staff", "admin_users")
+        rtdbNodes.forEach { node ->
+            try {
+                database.child(node).child(adminUid).setValue(payload).await()
+                anySuccess = true
+            } catch (_: Exception) {}
         }
-        try {
-            firestore.collection("admins").document(adminUid).set(payload).await()
-            anySuccess = true
-        } catch (e: Exception) {
-            e.printStackTrace()
+
+        val fsCols = listOf("admins", "Admins", "staff")
+        fsCols.forEach { col ->
+            try {
+                firestore.collection(col).document(adminUid).set(payload).await()
+                anySuccess = true
+            } catch (_: Exception) {}
         }
+
+        // Sync to user profiles
+        try {
+            database.child("users").child(adminUid).updateChildren(userRoleUpdates).await()
+            database.child("userProfiles").child(adminUid).updateChildren(userRoleUpdates).await()
+            firestore.collection("users").document(adminUid).update(userRoleUpdates).await()
+            firestore.collection("userProfiles").document(adminUid).update(userRoleUpdates).await()
+        } catch (_: Exception) {}
+
         if (anySuccess) {
             GlobalErrorManager.emitSuccess("Admin access granted to $name ($validRole)!")
         } else {
@@ -3225,18 +3372,40 @@ service cloud.firestore {
 
     suspend fun revokeAdminAccess(adminUid: String) {
         var anySuccess = false
-        try {
-            database.child("admins").child(adminUid).child("active").setValue(false).await()
-            anySuccess = true
-        } catch (e: Exception) {
-            e.printStackTrace()
+        val updates = mapOf<String, Any>(
+            "active" to false,
+            "status" to "REVOKED",
+            "revokedAt" to System.currentTimeMillis()
+        )
+        val userRoleUpdates = mapOf<String, Any>(
+            "role" to "player",
+            "isAdmin" to false
+        )
+
+        val rtdbNodes = listOf("admins", "Admins", "staff", "Staff", "admin_users")
+        rtdbNodes.forEach { node ->
+            try {
+                database.child(node).child(adminUid).updateChildren(updates).await()
+                anySuccess = true
+            } catch (_: Exception) {}
         }
-        try {
-            firestore.collection("admins").document(adminUid).update("active", false).await()
-            anySuccess = true
-        } catch (e: Exception) {
-            e.printStackTrace()
+
+        val fsCols = listOf("admins", "Admins", "staff")
+        fsCols.forEach { col ->
+            try {
+                firestore.collection(col).document(adminUid).update(updates).await()
+                anySuccess = true
+            } catch (_: Exception) {}
         }
+
+        // Update user profile status
+        try {
+            database.child("users").child(adminUid).updateChildren(userRoleUpdates).await()
+            database.child("userProfiles").child(adminUid).updateChildren(userRoleUpdates).await()
+            firestore.collection("users").document(adminUid).update(userRoleUpdates).await()
+            firestore.collection("userProfiles").document(adminUid).update(userRoleUpdates).await()
+        } catch (_: Exception) {}
+
         if (anySuccess) {
             GlobalErrorManager.emitSuccess("Admin access revoked.")
         }
@@ -3244,18 +3413,38 @@ service cloud.firestore {
 
     suspend fun updateAdminRole(adminUid: String, newRole: String) {
         var anySuccess = false
-        try {
-            database.child("admins").child(adminUid).child("role").setValue(newRole).await()
-            anySuccess = true
-        } catch (e: Exception) {
-            e.printStackTrace()
+        val updates = mapOf<String, Any>(
+            "role" to newRole,
+            "updatedAt" to System.currentTimeMillis()
+        )
+        val userRoleUpdates = mapOf<String, Any>(
+            "role" to newRole,
+            "isAdmin" to true
+        )
+
+        val rtdbNodes = listOf("admins", "Admins", "staff", "Staff", "admin_users")
+        rtdbNodes.forEach { node ->
+            try {
+                database.child(node).child(adminUid).updateChildren(updates).await()
+                anySuccess = true
+            } catch (_: Exception) {}
         }
-        try {
-            firestore.collection("admins").document(adminUid).update("role", newRole).await()
-            anySuccess = true
-        } catch (e: Exception) {
-            e.printStackTrace()
+
+        val fsCols = listOf("admins", "Admins", "staff")
+        fsCols.forEach { col ->
+            try {
+                firestore.collection(col).document(adminUid).update(updates).await()
+                anySuccess = true
+            } catch (_: Exception) {}
         }
+
+        try {
+            database.child("users").child(adminUid).updateChildren(userRoleUpdates).await()
+            database.child("userProfiles").child(adminUid).updateChildren(userRoleUpdates).await()
+            firestore.collection("users").document(adminUid).update(userRoleUpdates).await()
+            firestore.collection("userProfiles").document(adminUid).update(userRoleUpdates).await()
+        } catch (_: Exception) {}
+
         if (anySuccess) {
             GlobalErrorManager.emitSuccess("Role changed to $newRole")
         }
@@ -3268,22 +3457,40 @@ service cloud.firestore {
             "email" to admin.email,
             "role" to admin.role,
             "active" to admin.active,
+            "status" to if (admin.active) "ACTIVE" else "REVOKED",
             "assignedAt" to admin.assignedAt,
-            "grantedBy" to admin.grantedBy
+            "grantedBy" to admin.grantedBy,
+            "updatedAt" to System.currentTimeMillis()
         )
+        val userRoleUpdates = mapOf<String, Any>(
+            "role" to admin.role,
+            "isAdmin" to admin.active
+        )
+
         var anySuccess = false
-        try {
-            database.child("admins").child(admin.uid).updateChildren(payload).await()
-            anySuccess = true
-        } catch (e: Exception) {
-            e.printStackTrace()
+
+        val rtdbNodes = listOf("admins", "Admins", "staff", "Staff", "admin_users")
+        rtdbNodes.forEach { node ->
+            try {
+                database.child(node).child(admin.uid).setValue(payload).await()
+                anySuccess = true
+            } catch (_: Exception) {}
         }
-        try {
-            firestore.collection("admins").document(admin.uid).set(payload).await()
-            anySuccess = true
-        } catch (e: Exception) {
-            e.printStackTrace()
+
+        val fsCols = listOf("admins", "Admins", "staff")
+        fsCols.forEach { col ->
+            try {
+                firestore.collection(col).document(admin.uid).set(payload).await()
+                anySuccess = true
+            } catch (_: Exception) {}
         }
+
+        try {
+            database.child("users").child(admin.uid).updateChildren(userRoleUpdates).await()
+            database.child("userProfiles").child(admin.uid).updateChildren(userRoleUpdates).await()
+            firestore.collection("users").document(admin.uid).update(userRoleUpdates).await()
+            firestore.collection("userProfiles").document(admin.uid).update(userRoleUpdates).await()
+        } catch (_: Exception) {}
 
         if (anySuccess) {
             GlobalErrorManager.emitSuccess("Admin record for ${admin.name} updated!")
@@ -3294,18 +3501,34 @@ service cloud.firestore {
 
     suspend fun deleteAdminRecord(adminUid: String) {
         var anySuccess = false
-        try {
-            database.child("admins").child(adminUid).removeValue().await()
-            anySuccess = true
-        } catch (e: Exception) {
-            e.printStackTrace()
+
+        val rtdbNodes = listOf("admins", "Admins", "staff", "Staff", "admin_users")
+        rtdbNodes.forEach { node ->
+            try {
+                database.child(node).child(adminUid).removeValue().await()
+                anySuccess = true
+            } catch (_: Exception) {}
         }
-        try {
-            firestore.collection("admins").document(adminUid).delete().await()
-            anySuccess = true
-        } catch (e: Exception) {
-            e.printStackTrace()
+
+        val fsCols = listOf("admins", "Admins", "staff")
+        fsCols.forEach { col ->
+            try {
+                firestore.collection(col).document(adminUid).delete().await()
+                anySuccess = true
+            } catch (_: Exception) {}
         }
+
+        val userRoleUpdates = mapOf<String, Any>(
+            "role" to "player",
+            "isAdmin" to false
+        )
+        try {
+            database.child("users").child(adminUid).updateChildren(userRoleUpdates).await()
+            database.child("userProfiles").child(adminUid).updateChildren(userRoleUpdates).await()
+            firestore.collection("users").document(adminUid).update(userRoleUpdates).await()
+            firestore.collection("userProfiles").document(adminUid).update(userRoleUpdates).await()
+        } catch (_: Exception) {}
+
         if (anySuccess) {
             GlobalErrorManager.emitSuccess("Admin access removed completely!")
         } else {
