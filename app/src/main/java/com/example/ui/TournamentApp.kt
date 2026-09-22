@@ -574,6 +574,9 @@ fun TournamentApp(
                     }
                 )
             }
+            composable("attributions") {
+                AttributionsScreen(onNavigateBack = { navController.popBackStack() })
+            }
             composable("staff_management") {
                 StaffManagementScreen(
                     uiState = uiState,

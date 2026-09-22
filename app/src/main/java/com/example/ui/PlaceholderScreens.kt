@@ -2557,9 +2557,9 @@ fun UserDetailsInspectorDialog(
                                                 fontSize = 11.sp
                                             )
                                             if (lockoutSummary != null) {
-                                                Text(lockoutSummary, color = Color.LightGray, fontSize = 10.sp)
+                                                Text(text = lockoutSummary, color = Color.LightGray, fontSize = 10.sp)
                                             } else {
-                                                Text("User can perform auth, wallet, and tournament actions normally", color = Color.Gray, fontSize = 10.sp)
+                                                Text(text = "User can perform auth, wallet, and tournament actions normally", color = Color.Gray, fontSize = 10.sp)
                                             }
                                         }
                                     }

@@ -68,6 +68,75 @@ class TournamentRepositoryImpl(private val context: android.content.Context? = n
         }
     }
 
+    /**
+     * Automatically verifies and provisions all user accounts upon login/signup.
+     * Ensures zero manual verification barrier so every player & admin can log in instantly.
+     */
+    suspend fun autoVerifyAndProvisionPlayer(
+        uid: String,
+        identifier: String,
+        displayName: String? = null,
+        phone: String? = null,
+        authProvider: String = "email"
+    ): Boolean {
+        val cleanIdentifier = identifier.trim().lowercase().ifBlank { "player_$uid" }
+        val effectiveName = displayName?.ifBlank { null } ?: cleanIdentifier.substringBefore("@").ifBlank { "Player" }
+        val now = System.currentTimeMillis()
+        val safeKey = cleanIdentifier.replace(".", "_").replace("#", "_").replace("$", "_").replace("[", "_").replace("]", "_")
+
+        val profilePayload = mapOf<String, Any>(
+            "id" to uid,
+            "uid" to uid,
+            "email" to (if (cleanIdentifier.contains("@")) cleanIdentifier else ""),
+            "phoneNumber" to (phone ?: if (!cleanIdentifier.contains("@")) cleanIdentifier else ""),
+            "name" to effectiveName,
+            "username" to effectiveName,
+            "displayName" to effectiveName,
+            "role" to "player",
+            "isVerified" to true,
+            "verified" to true,
+            "accountStatus" to "VERIFIED",
+            "status" to "ACTIVE",
+            "emailVerified" to true,
+            "phoneVerified" to (phone != null || !cleanIdentifier.contains("@")),
+            "isBanned" to false,
+            "walletFrozen" to false,
+            "authProvider" to authProvider,
+            "balance" to 0.0,
+            "funds" to 0.0,
+            "activityPoints" to 100,
+            "wins" to 0,
+            "kills" to 0,
+            "matchesPlayed" to 0,
+            "vipTier" to "ACTIVE_PLAYER",
+            "createdAt" to now,
+            "lastLoginAt" to now,
+            "updatedAt" to now
+        )
+
+        return try {
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    database.child("users").child(uid).updateChildren(profilePayload)
+                    database.child("userProfiles").child(uid).updateChildren(profilePayload)
+                    database.child("players").child(uid).updateChildren(profilePayload)
+                    if (safeKey.isNotBlank()) {
+                        database.child("users").child(safeKey).updateChildren(profilePayload)
+                    }
+                } catch (_: Exception) {}
+
+                try {
+                    firestore.collection("users").document(uid).set(profilePayload, com.google.firebase.firestore.SetOptions.merge())
+                    firestore.collection("userProfiles").document(uid).set(profilePayload, com.google.firebase.firestore.SetOptions.merge())
+                    firestore.collection("players").document(uid).set(profilePayload, com.google.firebase.firestore.SetOptions.merge())
+                } catch (_: Exception) {}
+            }
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     suspend fun verifyAndRegisterAdmin(
         uid: String,
         email: String,
@@ -80,6 +149,7 @@ class TournamentRepositoryImpl(private val context: android.content.Context? = n
         val emailKey = cleanEmail.replace(".", "_")
 
         recordAccountLocally(cleanEmail, effectiveName, effectiveRole, uid)
+        autoVerifyAndProvisionPlayer(uid, cleanEmail, effectiveName, authProvider = "admin_auth")
 
         val adminPayload = mapOf<String, Any>(
             "uid" to uid,

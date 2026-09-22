@@ -165,6 +165,7 @@ fun DashboardScreen(
     var showNotificationCenterDialog by remember { mutableStateOf(false) }
     var showBroadcastDialog by remember { mutableStateOf(false) }
     var showAdminProfileDialog by remember { mutableStateOf(false) }
+    var showRateLimiterDialog by remember { mutableStateOf(false) }
     var showLogoutConfirmationDialog by remember { mutableStateOf(false) }
 
     // Scroll Position Tracking & Blur Progress Calculation (iOS Progressive Blur Navbar)
@@ -509,11 +510,27 @@ fun DashboardScreen(
                 showAdminProfileDialog = false
                 selectedTab = tab
             },
+            onOpenAttributions = {
+                showAdminProfileDialog = false
+                onNavClick("attributions")
+            },
+            onOpenRateLimiter = {
+                showAdminProfileDialog = false
+                showRateLimiterDialog = true
+            },
             onLogoutClick = {
                 showAdminProfileDialog = false
                 showLogoutConfirmationDialog = true
             },
             accentColor = currentHyperTheme.primaryColor
+        )
+    }
+
+    if (showRateLimiterDialog) {
+        val currentEmail = (uiState as? DashboardState.Success)?.currentUserEmail ?: "system"
+        RateLimiterManagementDialog(
+            userIdentifier = currentEmail,
+            onDismissRequest = { showRateLimiterDialog = false }
         )
     }
 
@@ -748,17 +765,15 @@ fun DashboardContent(
         val isCompact = screenWidth < 360.dp
 
         val horizontalPadding = if (isCompact) 12.dp else 16.dp
-        val cardPadding = if (isCompact) 10.dp else 14.dp
-        val metricFontSize = if (isCompact) 20.sp else if (isTablet) 24.sp else 22.sp
 
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .verticalScroll(scrollState)
                 .padding(horizontal = horizontalPadding),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // Live Global Announcements
+            // 1. Live Global Announcements Banner
             GlobalAnnouncementsBanner(
                 announcements = uiState.globalAnnouncements,
                 isAdmin = true,
@@ -766,23 +781,23 @@ fun DashboardContent(
                 onDeleteClick = { id -> onDeleteAnnouncement?.invoke(id) }
             )
 
-            // Section 1: Minimalist Overview Metrics
+            // 2. Untitled UI Grid: Overview Metrics
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "OVERVIEW",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = VelorixTextSecondary,
-                    letterSpacing = 1.sp
-                )
-                Text(
-                    text = "Live Sync",
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Medium,
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "SYSTEM METRICS",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = VelorixTextSecondary,
+                        letterSpacing = 1.sp
+                    )
+                }
+                UntitledBadge(
+                    text = "REALTIME SYNC",
                     color = Color(0xFF10B981)
                 )
             }
@@ -790,58 +805,46 @@ fun DashboardContent(
             if (isTablet) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    DashboardMetricCard(
+                    UntitledMetricTile(
                         modifier = Modifier.weight(1f),
-                        icon = Icons.Default.Group,
-                        iconTint = Color.White,
                         title = "PLAYERS",
                         value = "${uiState.totalRegisteredUsersCount}",
-                        subtitle = "Registered",
-                        bg = Color(0xFF0C0C0E),
-                        border = Color(0xFF27272A),
-                        fontSize = metricFontSize,
-                        padding = cardPadding,
+                        subtitle = "Registered gamers",
+                        icon = UntitledIcons.Users,
+                        iconTint = Color(0xFF38BDF8),
+                        badgeText = "Total",
                         onClick = onProfilesClick
                     )
-                    DashboardMetricCard(
+                    UntitledMetricTile(
                         modifier = Modifier.weight(1f),
-                        icon = Icons.Default.Shield,
-                        iconTint = Color(0xFF8B5CF6),
-                        title = "ADMINS",
+                        title = "STAFF ADMINS",
                         value = "${uiState.totalActiveAdminsCount}",
-                        subtitle = "Active Staff",
-                        bg = Color(0xFF0C0C0E),
-                        border = Color(0xFF27272A),
-                        fontSize = metricFontSize,
-                        padding = cardPadding,
+                        subtitle = "RBAC Authorized",
+                        icon = UntitledIcons.ShieldCheck,
+                        iconTint = Color(0xFFA78BFA),
+                        badgeText = "Staff",
                         onClick = onAdminsClick
                     )
-                    DashboardMetricCard(
+                    UntitledMetricTile(
                         modifier = Modifier.weight(1f),
-                        icon = Icons.Default.Warning,
-                        iconTint = Color(0xFFEF4444),
-                        title = "TICKETS",
+                        title = "DISPUTES",
                         value = "${uiState.openSupportComplaintsCount}",
-                        subtitle = "Needs Action",
-                        bg = Color(0xFF0C0C0E),
-                        border = if (uiState.openSupportComplaintsCount > 0) Color(0xFFEF4444).copy(alpha = 0.5f) else Color(0xFF27272A),
-                        fontSize = metricFontSize,
-                        padding = cardPadding,
+                        subtitle = if (uiState.openSupportComplaintsCount > 0) "Needs attention" else "All resolved",
+                        icon = Icons.Default.Warning,
+                        iconTint = Color(0xFFF87171),
+                        badgeText = if (uiState.openSupportComplaintsCount > 0) "Action" else "Clean",
                         onClick = onComplaintsClick
                     )
-                    DashboardMetricCard(
+                    UntitledMetricTile(
                         modifier = Modifier.weight(1f),
-                        icon = Icons.Default.Payments,
-                        iconTint = Color(0xFF10B981),
                         title = "CASHOUTS",
                         value = "₹${uiState.pendingCashoutsSum.toInt()}",
-                        subtitle = "${uiState.pendingCashoutsCount} Pending",
-                        bg = Color(0xFF0C0C0E),
-                        border = Color(0xFF27272A),
-                        fontSize = metricFontSize,
-                        padding = cardPadding,
+                        subtitle = "${uiState.pendingCashoutsCount} Pending reviews",
+                        icon = UntitledIcons.Coins,
+                        iconTint = Color(0xFF34D399),
+                        badgeText = "Payouts",
                         onClick = onPayoutsClick
                     )
                 }
@@ -850,377 +853,478 @@ fun DashboardContent(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    DashboardMetricCard(
+                    UntitledMetricTile(
                         modifier = Modifier.weight(1f),
-                        icon = Icons.Default.Group,
-                        iconTint = Color.White,
                         title = "PLAYERS",
                         value = "${uiState.totalRegisteredUsersCount}",
-                        subtitle = "Registered",
-                        bg = Color(0xFF0C0C0E),
-                        border = Color(0xFF27272A),
-                        fontSize = metricFontSize,
-                        padding = cardPadding,
+                        subtitle = "Registered gamers",
+                        icon = UntitledIcons.Users,
+                        iconTint = Color(0xFF38BDF8),
+                        badgeText = "Active",
                         onClick = onProfilesClick
                     )
-                    DashboardMetricCard(
+                    UntitledMetricTile(
                         modifier = Modifier.weight(1f),
-                        icon = Icons.Default.Shield,
-                        iconTint = Color(0xFF8B5CF6),
-                        title = "ADMINS",
+                        title = "STAFF",
                         value = "${uiState.totalActiveAdminsCount}",
-                        subtitle = "Active Staff",
-                        bg = Color(0xFF0C0C0E),
-                        border = Color(0xFF27272A),
-                        fontSize = metricFontSize,
-                        padding = cardPadding,
+                        subtitle = "Authorized staff",
+                        icon = UntitledIcons.ShieldCheck,
+                        iconTint = Color(0xFFA78BFA),
+                        badgeText = "Staff",
                         onClick = onAdminsClick
                     )
                 }
-
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    DashboardMetricCard(
+                    UntitledMetricTile(
                         modifier = Modifier.weight(1f),
-                        icon = Icons.Default.Warning,
-                        iconTint = Color(0xFFEF4444),
-                        title = "TICKETS",
+                        title = "DISPUTES",
                         value = "${uiState.openSupportComplaintsCount}",
-                        subtitle = "Needs Action",
-                        bg = Color(0xFF0C0C0E),
-                        border = if (uiState.openSupportComplaintsCount > 0) Color(0xFFEF4444).copy(alpha = 0.5f) else Color(0xFF27272A),
-                        fontSize = metricFontSize,
-                        padding = cardPadding,
+                        subtitle = if (uiState.openSupportComplaintsCount > 0) "Pending review" else "Zero pending",
+                        icon = Icons.Default.Warning,
+                        iconTint = Color(0xFFF87171),
+                        badgeText = if (uiState.openSupportComplaintsCount > 0) "Urgent" else "Clean",
                         onClick = onComplaintsClick
                     )
-                    DashboardMetricCard(
+                    UntitledMetricTile(
                         modifier = Modifier.weight(1f),
-                        icon = Icons.Default.Payments,
-                        iconTint = Color(0xFF10B981),
                         title = "CASHOUTS",
                         value = "₹${uiState.pendingCashoutsSum.toInt()}",
                         subtitle = "${uiState.pendingCashoutsCount} Pending",
-                        bg = Color(0xFF0C0C0E),
-                        border = Color(0xFF27272A),
-                        fontSize = metricFontSize,
-                        padding = cardPadding,
+                        icon = UntitledIcons.Coins,
+                        iconTint = Color(0xFF34D399),
+                        badgeText = "Finance",
                         onClick = onPayoutsClick
                     )
                 }
             }
 
-            // Section 2: Clean Active Tournament Spotlight
-            if (liveTournament != null) {
-                GlassCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    brush = Brush.linearGradient(
-                        listOf(Color(0xFF111113), Color(0xFF0A0A0C))
-                    ),
-                    borderBrush = GlassTokens.GlassBorderSubtle,
-                    onClick = { onTournamentClick(liveTournament.id) }
-                ) {
-                    Column {
-                        if (liveTournament.bannerUrl.isNotBlank()) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(130.dp)
-                                    .clip(RoundedCornerShape(10.dp))
+            // 3. Consolidated Tournament Management Hub
+            UntitledCard(
+                modifier = Modifier.fillMaxWidth(),
+                backgroundColor = Color(0xFF0C0C0F),
+                borderColor = Color(0xFF27272E),
+                padding = 14.dp
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    // Header Bar of the Consolidated Hub
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Surface(
+                                modifier = Modifier.size(28.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                color = VelorixAccent.copy(alpha = 0.15f),
+                                border = BorderStroke(1.dp, VelorixAccent.copy(alpha = 0.35f))
                             ) {
-                                AsyncImage(
-                                    model = liveTournament.bannerUrl,
-                                    contentDescription = liveTournament.title,
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Crop
-                                )
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = UntitledIcons.Trophy,
+                                        contentDescription = null,
+                                        tint = VelorixAccent,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                }
                             }
-                            Spacer(modifier = Modifier.height(12.dp))
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(6.dp)
-                                        .background(Color(0xFF10B981), CircleShape)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = liveTournament.status.uppercase(),
-                                    color = Color(0xFF10B981),
-                                    fontSize = 10.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    letterSpacing = 0.5.sp
-                                )
-                            }
-
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                GameLogoBadge(gameName = liveTournament.game, size = 16.dp)
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "${liveTournament.game} • ${liveTournament.map}",
-                                    color = VelorixTextSecondary,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(6.dp))
-
-                        Text(
-                            text = liveTournament.title,
-                            color = Color.White,
-                            fontSize = if (isCompact) 17.sp else 19.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
                             Text(
-                                text = buildAnnotatedString {
-                                    withStyle(style = SpanStyle(fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)) {
-                                        append(liveTournament.registeredPlayers.toString())
+                                text = "TOURNAMENT COMMAND HUB",
+                                color = Color.White,
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.5.sp
+                            )
+                        }
+
+                        Surface(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .bounceClick(scaleDown = 0.94f) { onCreateTournamentClick() }
+                                .clickable { onCreateTournamentClick() },
+                            color = VelorixAccent,
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = "New Tournament",
+                                    tint = Color.Black,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Text(
+                                    text = "CREATE MATCH",
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = Color.Black
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Spotlight: Active / Featured Match (if available)
+                    if (liveTournament != null) {
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .border(1.dp, Color(0xFF2E2E38), RoundedCornerShape(12.dp))
+                                .clickable { onTournamentClick(liveTournament.id) },
+                            color = Color(0xFF14141A)
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        UntitledBadge(
+                                            text = liveTournament.status.uppercase(),
+                                            color = if (liveTournament.status.equals("active", ignoreCase = true) || liveTournament.status.equals("live", ignoreCase = true)) Color(0xFF10B981) else Color(0xFF60A5FA)
+                                        )
+                                        GameLogoBadge(gameName = liveTournament.game, size = 15.dp)
+                                        Text(
+                                            text = "${liveTournament.game} • ${liveTournament.map}",
+                                            color = VelorixTextSecondary,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
                                     }
-                                    withStyle(style = SpanStyle(fontSize = 12.sp, color = VelorixTextSecondary)) {
-                                        append(" / ${liveTournament.maxPlayers} Players")
+
+                                    Text(
+                                        text = "₹${liveTournament.prizePool.toInt()} Pool",
+                                        color = Color(0xFFFFD700),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.height(6.dp))
+
+                                Text(
+                                    text = liveTournament.title,
+                                    color = Color.White,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                // Slots fill progress bar
+                                val fillRatio = (liveTournament.registeredPlayers.toFloat() / liveTournament.maxPlayers.coerceAtLeast(1).toFloat()).coerceIn(0f, 1f)
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(
+                                            text = "${liveTournament.registeredPlayers}/${liveTournament.maxPlayers} Slots Filled",
+                                            fontSize = 10.5.sp,
+                                            color = VelorixTextSecondary,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Text(
+                                            text = "${(fillRatio * 100).toInt()}%",
+                                            fontSize = 10.5.sp,
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(4.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFF27272A))
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth(fillRatio)
+                                                .fillMaxHeight()
+                                                .clip(CircleShape)
+                                                .background(
+                                                    Brush.horizontalGradient(
+                                                        listOf(Color(0xFF38BDF8), VelorixAccent)
+                                                    )
+                                                )
+                                        )
                                     }
                                 }
-                            )
 
-                            Text(
-                                text = "₹${liveTournament.prizePool} Pool",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
+                                Spacer(modifier = Modifier.height(10.dp))
+
+                                // Direct Quick Action Row for this active tournament
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Surface(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .border(1.dp, Color(0xFF3B3B48), RoundedCornerShape(8.dp))
+                                            .clickable { onTournamentClick(liveTournament.id) }
+                                            .padding(vertical = 7.dp),
+                                        color = Color(0xFF1E1E26)
+                                    ) {
+                                        Row(
+                                            horizontalArrangement = Arrangement.Center,
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.padding(horizontal = 4.dp)
+                                        ) {
+                                            Icon(UntitledIcons.Sliders, contentDescription = null, tint = Color.White, modifier = Modifier.size(13.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("Rules & Room", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1)
+                                        }
+                                    }
+
+                                    Surface(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .border(1.dp, Color(0xFF3B3B48), RoundedCornerShape(8.dp))
+                                            .clickable { onBracketClick(liveTournament.id) }
+                                            .padding(vertical = 7.dp),
+                                        color = Color(0xFF1E1E26)
+                                    ) {
+                                        Row(
+                                            horizontalArrangement = Arrangement.Center,
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.padding(horizontal = 4.dp)
+                                        ) {
+                                            Icon(UntitledIcons.Bracket, contentDescription = null, tint = Color(0xFFA78BFA), modifier = Modifier.size(13.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("Bracket View", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1)
+                                        }
+                                    }
+                                }
+                            }
                         }
 
-                        Spacer(modifier = Modifier.height(14.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
 
+                    // Consolidated Tournament Management Grid (2x2 on phone, 4x1 on tablet)
+                    Text(
+                        text = "MANAGEMENT TOOLS",
+                        color = VelorixTextSecondary,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.5.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    if (isTablet) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Surface(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(Color.White)
-                                    .bounceClick(scaleDown = 0.96f) { onTournamentClick(liveTournament.id) }
-                                    .padding(vertical = 10.dp),
-                                color = Color.White
-                            ) {
-                                Text(
-                                    text = "MANAGE RULES & MATCH",
-                                    fontSize = 11.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.Black,
-                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                                )
-                            }
-
-                            Surface(
-                                modifier = Modifier
-                                    .weight(0.6f)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .border(1.dp, Color(0xFF27272A), RoundedCornerShape(10.dp))
-                                    .background(Color(0xFF141416))
-                                    .bounceClick(scaleDown = 0.96f) { onBracketClick(liveTournament.id) }
-                                    .padding(vertical = 10.dp),
-                                color = Color.Transparent
-                            ) {
-                                Text(
-                                    text = "BRACKET",
-                                    fontSize = 11.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White,
-                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                                )
-                            }
+                            UntitledActionTile(
+                                modifier = Modifier.weight(1f),
+                                title = "Verify Queue",
+                                subtitle = "${uiState.pendingRegistrationsCount} Pending",
+                                icon = UntitledIcons.ShieldCheck,
+                                iconTint = Color(0xFF60A5FA),
+                                counterBadge = if (uiState.pendingRegistrationsCount > 0) "${uiState.pendingRegistrationsCount}" else null,
+                                highlight = uiState.pendingRegistrationsCount > 0,
+                                onClick = onVerifyClick
+                            )
+                            UntitledActionTile(
+                                modifier = Modifier.weight(1f),
+                                title = "Check-In & PINs",
+                                subtitle = "${uiState.banners.size} Active Tokens",
+                                icon = UntitledIcons.Key,
+                                iconTint = Color(0xFFFBBF24),
+                                onClick = onCheckInTokensClick
+                            )
+                            UntitledActionTile(
+                                modifier = Modifier.weight(1f),
+                                title = "Match Brackets",
+                                subtitle = "Elimination Tree",
+                                icon = UntitledIcons.Bracket,
+                                iconTint = Color(0xFFA78BFA),
+                                onClick = { liveTournament?.id?.let { onBracketClick(it) } ?: onTournamentClick("") }
+                            )
+                            UntitledActionTile(
+                                modifier = Modifier.weight(1f),
+                                title = "Rules Matrix",
+                                subtitle = "Kill/Rank Points",
+                                icon = UntitledIcons.Sliders,
+                                iconTint = Color(0xFF34D399),
+                                onClick = { liveTournament?.id?.let { onSettingsClick(it) } ?: onTournamentClick("") }
+                            )
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            UntitledActionTile(
+                                modifier = Modifier.weight(1f),
+                                title = "Verify Queue",
+                                subtitle = "${uiState.pendingRegistrationsCount} Pending",
+                                icon = UntitledIcons.ShieldCheck,
+                                iconTint = Color(0xFF60A5FA),
+                                counterBadge = if (uiState.pendingRegistrationsCount > 0) "${uiState.pendingRegistrationsCount}" else null,
+                                highlight = uiState.pendingRegistrationsCount > 0,
+                                onClick = onVerifyClick
+                            )
+                            UntitledActionTile(
+                                modifier = Modifier.weight(1f),
+                                title = "Check-In & PINs",
+                                subtitle = "${uiState.banners.size} Active Tokens",
+                                icon = UntitledIcons.Key,
+                                iconTint = Color(0xFFFBBF24),
+                                onClick = onCheckInTokensClick
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            UntitledActionTile(
+                                modifier = Modifier.weight(1f),
+                                title = "Match Brackets",
+                                subtitle = "Elimination Tree",
+                                icon = UntitledIcons.Bracket,
+                                iconTint = Color(0xFFA78BFA),
+                                onClick = { liveTournament?.id?.let { onBracketClick(it) } ?: onTournamentClick("") }
+                            )
+                            UntitledActionTile(
+                                modifier = Modifier.weight(1f),
+                                title = "Rules Matrix",
+                                subtitle = "Kill/Rank Points",
+                                icon = UntitledIcons.Sliders,
+                                iconTint = Color(0xFF34D399),
+                                onClick = { liveTournament?.id?.let { onSettingsClick(it) } ?: onTournamentClick("") }
+                            )
                         }
                     }
                 }
             }
 
-            // Section 3: Clean Split Cards (Verify Queue + Check-in Engine)
+            // 4. Operations & System Growth Grid
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                // Verify Queue
-                GlassCard(
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(16.dp),
-                    brush = Brush.linearGradient(listOf(Color(0xFF0C0C0E), Color(0xFF0A0A0C))),
-                    borderBrush = GlassTokens.GlassBorderSubtle,
-                    onClick = { onVerifyClick() }
-                ) {
-                    Text(
-                        text = "VERIFY QUEUE",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = VelorixTextSecondary,
-                        letterSpacing = 0.5.sp
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = uiState.pendingRegistrationsCount.toString(),
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Black,
-                        color = Color.White
-                    )
-                    Text(
-                        text = "Pending reviews",
-                        fontSize = 11.sp,
-                        color = VelorixTextSecondary
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .border(1.dp, Color(0xFF27272A), RoundedCornerShape(8.dp))
-                            .padding(vertical = 6.dp),
-                        color = Color(0xFF141416)
-                    ) {
-                        Text(
-                            text = "REVIEW ALL",
-                            fontSize = 10.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                        )
-                    }
-                }
-
-                // Check-In Engine
-                GlassCard(
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(16.dp),
-                    brush = Brush.linearGradient(listOf(Color(0xFF0C0C0E), Color(0xFF0A0A0C))),
-                    borderBrush = GlassTokens.GlassBorderSubtle,
-                    onClick = { onCheckInTokensClick() }
-                ) {
-                    Text(
-                        text = "CHECK-IN TOKENS",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = VelorixTextSecondary,
-                        letterSpacing = 0.5.sp
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = "${uiState.banners.size} Active",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-                    Text(
-                        text = "PIN & Google Auth",
-                        fontSize = 11.sp,
-                        color = VelorixTextSecondary
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .border(1.dp, Color(0xFF27272A), RoundedCornerShape(8.dp))
-                            .padding(vertical = 6.dp),
-                        color = Color(0xFF141416)
-                    ) {
-                        Text(
-                            text = "GENERATE PIN",
-                            fontSize = 10.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                        )
-                    }
-                }
+                Text(
+                    text = "SYSTEM INTELLIGENCE & AUDIT",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = VelorixTextSecondary,
+                    letterSpacing = 1.sp
+                )
             }
 
-            // Quick Operational Tools
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Surface(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(12.dp))
-                        .border(1.dp, Color(0xFF10B981).copy(alpha = 0.3f), RoundedCornerShape(12.dp))
-                        .bounceClick(scaleDown = 0.96f) { onFinancialAuditClick() }
-                        .padding(horizontal = 14.dp, vertical = 12.dp),
-                    color = Color(0xFF0C0C0E)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.AutoMirrored.Filled.TrendingUp, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Earnings & Revenue", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
-                    }
-                }
-
-                Surface(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(12.dp))
-                        .border(1.dp, Color(0xFF27272A), RoundedCornerShape(12.dp))
-                        .bounceClick(scaleDown = 0.96f) { onLeaderboardClick() }
-                        .padding(horizontal = 14.dp, vertical = 12.dp),
-                    color = Color(0xFF0C0C0E)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.EmojiEvents, contentDescription = null, tint = Color(0xFFFFD700), modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Leaderboard", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
-                    }
-                }
-            }
-
-            // Firebase FCM & Remote Config Engine Launcher
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .border(1.dp, Color(0xFFFF9100).copy(alpha = 0.4f), RoundedCornerShape(12.dp))
-                    .bounceClick(scaleDown = 0.98f) { showFirebaseOptimizationDialog = true }
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                color = Color(0xFF141210)
-            ) {
+            if (isTablet) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = Color(0xFFFF9100), modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column {
-                            Text("Firebase Growth & Optimization", fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                            Text("FCM Push Tester • Remote Config • A/B Testing", fontSize = 10.5.sp, color = VelorixTextSecondary)
-                        }
-                    }
-                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = Color(0xFFFF9100), modifier = Modifier.size(18.dp))
+                    UntitledActionTile(
+                        modifier = Modifier.weight(1f),
+                        title = "Revenue Audit",
+                        subtitle = "Daily Profit & ROI",
+                        icon = UntitledIcons.ChartSquare,
+                        iconTint = Color(0xFF10B981),
+                        onClick = onFinancialAuditClick
+                    )
+                    UntitledActionTile(
+                        modifier = Modifier.weight(1f),
+                        title = "Leaderboard",
+                        subtitle = "Top 100 Players",
+                        icon = UntitledIcons.Trophy,
+                        iconTint = Color(0xFFFFD700),
+                        onClick = onLeaderboardClick
+                    )
+                    UntitledActionTile(
+                        modifier = Modifier.weight(1f),
+                        title = "Firebase Growth",
+                        subtitle = "Push & Config",
+                        icon = UntitledIcons.Sparkles,
+                        iconTint = Color(0xFFFF9100),
+                        onClick = { showFirebaseOptimizationDialog = true }
+                    )
+                    UntitledActionTile(
+                        modifier = Modifier.weight(1f),
+                        title = "AI Copilot",
+                        subtitle = "Gemini Admin Bot",
+                        icon = UntitledIcons.Zap,
+                        iconTint = Color(0xFF818CF8),
+                        onClick = onChatbotClick
+                    )
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    UntitledActionTile(
+                        modifier = Modifier.weight(1f),
+                        title = "Revenue Audit",
+                        subtitle = "Daily Profit & ROI",
+                        icon = UntitledIcons.ChartSquare,
+                        iconTint = Color(0xFF10B981),
+                        onClick = onFinancialAuditClick
+                    )
+                    UntitledActionTile(
+                        modifier = Modifier.weight(1f),
+                        title = "Leaderboard",
+                        subtitle = "Top 100 Players",
+                        icon = UntitledIcons.Trophy,
+                        iconTint = Color(0xFFFFD700),
+                        onClick = onLeaderboardClick
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    UntitledActionTile(
+                        modifier = Modifier.weight(1f),
+                        title = "Firebase Growth",
+                        subtitle = "Push & Config",
+                        icon = UntitledIcons.Sparkles,
+                        iconTint = Color(0xFFFF9100),
+                        onClick = { showFirebaseOptimizationDialog = true }
+                    )
+                    UntitledActionTile(
+                        modifier = Modifier.weight(1f),
+                        title = "AI Copilot",
+                        subtitle = "Gemini Admin Bot",
+                        icon = UntitledIcons.Zap,
+                        iconTint = Color(0xFF818CF8),
+                        onClick = onChatbotClick
+                    )
                 }
             }
 
-            Spacer(modifier = Modifier.height(115.dp))
+            Spacer(modifier = Modifier.height(90.dp))
         }
 
         // Modals
@@ -1892,6 +1996,8 @@ fun AdminProfileDialog(
     email: String,
     onDismiss: () -> Unit,
     onNavigateTab: (String) -> Unit,
+    onOpenAttributions: () -> Unit = {},
+    onOpenRateLimiter: () -> Unit = {},
     onLogoutClick: () -> Unit,
     accentColor: Color
 ) {
@@ -1977,7 +2083,51 @@ fun AdminProfileDialog(
                 }
 
                 // Quick Navigation items
-                Text("QUICK CONTROLS", color = Color(0xFF71717A), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
+                Text("QUICK CONTROLS & SECURITY", color = Color(0xFF71717A), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
+
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { onOpenRateLimiter() },
+                    color = Color(0xFF1A1A1E),
+                    border = BorderStroke(1.dp, Color(0xFF27272A))
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(UntitledIcons.Sliders, contentDescription = null, tint = Color(0xFFA78BFA), modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text("Rate Limiter & Quota Engine", color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+                        }
+                        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(15.dp))
+                    }
+                }
+
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { onOpenAttributions() },
+                    color = Color(0xFF1A1A1E),
+                    border = BorderStroke(1.dp, Color(0xFF27272A))
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Info, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text("Attributions & Tech Credits", color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+                        }
+                        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(15.dp))
+                    }
+                }
 
                 Surface(
                     modifier = Modifier
