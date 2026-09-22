@@ -149,7 +149,9 @@ data class AdminRecord(
     @get:PropertyName("assignedAt") @set:PropertyName("assignedAt")
     var assignedAt: Long = System.currentTimeMillis(),
     @get:PropertyName("grantedBy") @set:PropertyName("grantedBy")
-    var grantedBy: String = ""
+    var grantedBy: String = "",
+    @get:PropertyName("updatedAt") @set:PropertyName("updatedAt")
+    var updatedAt: Long = System.currentTimeMillis()
 )
 
 @IgnoreExtraProperties

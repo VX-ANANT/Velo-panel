@@ -417,7 +417,7 @@ fun TournamentDetailsScreen(
                             )
 
                             Spacer(modifier = Modifier.height(16.dp))
-                            Divider(color = CardVerifyBorder)
+                            HorizontalDivider(color = CardVerifyBorder)
                             Spacer(modifier = Modifier.height(14.dp))
 
                             // Stats 4-Column Row

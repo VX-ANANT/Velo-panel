@@ -43,8 +43,8 @@ import com.example.data.validation.ValidationResult
 class TournamentRepositoryImpl(private val context: android.content.Context? = null) {
     private val TAG = "TournamentRepository"
     private val DB_URL = "https://velorix-tournaments-default-rtdb.asia-southeast1.firebasedatabase.app"
-    private val firestore by lazy { FirebaseFirestore.getInstance() }
-    private val database by lazy {
+    val firestore: FirebaseFirestore by lazy { FirebaseFirestore.getInstance() }
+    val database: com.google.firebase.database.DatabaseReference by lazy {
         try {
             FirebaseDatabase.getInstance(DB_URL).reference
         } catch (_: Exception) {
@@ -3350,7 +3350,7 @@ service cloud.firestore {
         val fsCols = listOf("admins", "Admins", "staff")
         fsCols.forEach { col ->
             try {
-                firestore.collection(col).document(adminUid).set(payload).await()
+                firestore.collection(col).document(adminUid).set(payload, com.google.firebase.firestore.SetOptions.merge()).await()
                 anySuccess = true
             } catch (_: Exception) {}
         }
@@ -3359,8 +3359,8 @@ service cloud.firestore {
         try {
             database.child("users").child(adminUid).updateChildren(userRoleUpdates).await()
             database.child("userProfiles").child(adminUid).updateChildren(userRoleUpdates).await()
-            firestore.collection("users").document(adminUid).update(userRoleUpdates).await()
-            firestore.collection("userProfiles").document(adminUid).update(userRoleUpdates).await()
+            firestore.collection("users").document(adminUid).set(userRoleUpdates, com.google.firebase.firestore.SetOptions.merge()).await()
+            firestore.collection("userProfiles").document(adminUid).set(userRoleUpdates, com.google.firebase.firestore.SetOptions.merge()).await()
         } catch (_: Exception) {}
 
         if (anySuccess) {
@@ -3393,7 +3393,7 @@ service cloud.firestore {
         val fsCols = listOf("admins", "Admins", "staff")
         fsCols.forEach { col ->
             try {
-                firestore.collection(col).document(adminUid).update(updates).await()
+                firestore.collection(col).document(adminUid).set(updates, com.google.firebase.firestore.SetOptions.merge()).await()
                 anySuccess = true
             } catch (_: Exception) {}
         }
@@ -3402,8 +3402,8 @@ service cloud.firestore {
         try {
             database.child("users").child(adminUid).updateChildren(userRoleUpdates).await()
             database.child("userProfiles").child(adminUid).updateChildren(userRoleUpdates).await()
-            firestore.collection("users").document(adminUid).update(userRoleUpdates).await()
-            firestore.collection("userProfiles").document(adminUid).update(userRoleUpdates).await()
+            firestore.collection("users").document(adminUid).set(userRoleUpdates, com.google.firebase.firestore.SetOptions.merge()).await()
+            firestore.collection("userProfiles").document(adminUid).set(userRoleUpdates, com.google.firebase.firestore.SetOptions.merge()).await()
         } catch (_: Exception) {}
 
         if (anySuccess) {
@@ -3433,7 +3433,7 @@ service cloud.firestore {
         val fsCols = listOf("admins", "Admins", "staff")
         fsCols.forEach { col ->
             try {
-                firestore.collection(col).document(adminUid).update(updates).await()
+                firestore.collection(col).document(adminUid).set(updates, com.google.firebase.firestore.SetOptions.merge()).await()
                 anySuccess = true
             } catch (_: Exception) {}
         }
@@ -3441,8 +3441,8 @@ service cloud.firestore {
         try {
             database.child("users").child(adminUid).updateChildren(userRoleUpdates).await()
             database.child("userProfiles").child(adminUid).updateChildren(userRoleUpdates).await()
-            firestore.collection("users").document(adminUid).update(userRoleUpdates).await()
-            firestore.collection("userProfiles").document(adminUid).update(userRoleUpdates).await()
+            firestore.collection("users").document(adminUid).set(userRoleUpdates, com.google.firebase.firestore.SetOptions.merge()).await()
+            firestore.collection("userProfiles").document(adminUid).set(userRoleUpdates, com.google.firebase.firestore.SetOptions.merge()).await()
         } catch (_: Exception) {}
 
         if (anySuccess) {
@@ -3480,7 +3480,7 @@ service cloud.firestore {
         val fsCols = listOf("admins", "Admins", "staff")
         fsCols.forEach { col ->
             try {
-                firestore.collection(col).document(admin.uid).set(payload).await()
+                firestore.collection(col).document(admin.uid).set(payload, com.google.firebase.firestore.SetOptions.merge()).await()
                 anySuccess = true
             } catch (_: Exception) {}
         }
@@ -3488,8 +3488,8 @@ service cloud.firestore {
         try {
             database.child("users").child(admin.uid).updateChildren(userRoleUpdates).await()
             database.child("userProfiles").child(admin.uid).updateChildren(userRoleUpdates).await()
-            firestore.collection("users").document(admin.uid).update(userRoleUpdates).await()
-            firestore.collection("userProfiles").document(admin.uid).update(userRoleUpdates).await()
+            firestore.collection("users").document(admin.uid).set(userRoleUpdates, com.google.firebase.firestore.SetOptions.merge()).await()
+            firestore.collection("userProfiles").document(admin.uid).set(userRoleUpdates, com.google.firebase.firestore.SetOptions.merge()).await()
         } catch (_: Exception) {}
 
         if (anySuccess) {
@@ -3525,8 +3525,8 @@ service cloud.firestore {
         try {
             database.child("users").child(adminUid).updateChildren(userRoleUpdates).await()
             database.child("userProfiles").child(adminUid).updateChildren(userRoleUpdates).await()
-            firestore.collection("users").document(adminUid).update(userRoleUpdates).await()
-            firestore.collection("userProfiles").document(adminUid).update(userRoleUpdates).await()
+            firestore.collection("users").document(adminUid).set(userRoleUpdates, com.google.firebase.firestore.SetOptions.merge()).await()
+            firestore.collection("userProfiles").document(adminUid).set(userRoleUpdates, com.google.firebase.firestore.SetOptions.merge()).await()
         } catch (_: Exception) {}
 
         if (anySuccess) {

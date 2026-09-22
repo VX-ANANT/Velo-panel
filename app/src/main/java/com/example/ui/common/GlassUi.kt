@@ -444,7 +444,7 @@ fun FloatingGlassNavBar(
                     .height(64.dp)
                     .clip(RoundedCornerShape(32.dp))
             ) {
-                // Real-Time Optical Backdrop Sampling (Gaussian Blur, Lens Refraction & Chromatic Aberration)
+                // Real-Time Optical Backdrop Sampling (2% Gaussian Blur, Lens Refraction & Chromatic Aberration)
                 if (backdrop != null) {
                     val capsuleShape = remember { RoundedCornerShape(32.dp) }
                     Box(
@@ -454,7 +454,7 @@ fun FloatingGlassNavBar(
                                 backdrop = backdrop,
                                 shape = { capsuleShape },
                                 effects = {
-                                    blur(radius = (optics.blurRadius * 32.dp.value * blurProgress).coerceAtLeast(1f).dp.toPx())
+                                    blur(radius = (optics.blurRadius * 2.dp.value * blurProgress).coerceAtLeast(0.5f).dp.toPx())
                                     colorControls(
                                         brightness = 0.05f * optics.vibrancy,
                                         contrast = 1.05f,
@@ -478,11 +478,11 @@ fun FloatingGlassNavBar(
                     )
                 }
 
-                // Glass Substrate: 100% Clear Translucent Glass with 5.dp Gaussian Blur (NO BLACK OR DARK ACCENTS!)
+                // Glass Substrate: 100% Clear Translucent Glass with 2% (2.dp) Gaussian Blur
                 Box(
                     modifier = Modifier
                         .matchParentSize()
-                        .blur(radius = 5.dp)
+                        .blur(radius = 2.dp)
                         .background(
                             Brush.verticalGradient(
                                 colors = listOf(

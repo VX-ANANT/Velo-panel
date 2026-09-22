@@ -30,6 +30,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.repository.GeminiModelOption
@@ -42,6 +43,7 @@ import com.example.data.validation.UserRateLimiter
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.domain.model.*
 import com.example.ui.common.GeminiLogo
+import com.example.ui.common.IPhoneSlideableDynamicIslandPill
 import com.example.ui.theme.CardLiveBg
 import com.example.ui.theme.CardVerifyBorder
 import com.example.ui.theme.VelorixAccent
@@ -335,39 +337,21 @@ fun AdminChatbotScreen(
             TopAppBar(
                 title = {
                     Column {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
                             GeminiLogo(size = 20.dp)
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = "Gemini Helper Bot",
                                 color = VelorixTextPrimary,
-                                fontSize = 17.sp,
-                                fontWeight = FontWeight.Bold
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = Color(0xFF10B981).copy(alpha = 0.2f),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.5f))
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(5.dp)
-                                            .background(Color(0xFF10B981), CircleShape)
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        text = "LIVE DATA",
-                                        color = Color(0xFF34D399),
-                                        fontSize = 9.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
                         }
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -377,10 +361,13 @@ fun AdminChatbotScreen(
                                 .padding(vertical = 2.dp)
                         ) {
                             Text(
-                                text = "${selectedModel.displayName}${if (enableThinking) " • Thinking Mode" else ""}",
+                                text = "${selectedModel.displayName}${if (enableThinking) " • Thinking" else ""}",
                                 color = VelorixAccentLight,
                                 fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
                             )
                             Icon(
                                 imageVector = Icons.Default.KeyboardArrowDown,
@@ -438,38 +425,18 @@ fun AdminChatbotScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            // Live Snapshot Status Bar
-            Surface(
-                color = CardLiveBg,
+            // Slideable iPhone Dynamic Island Status Pill
+            IPhoneSlideableDynamicIslandPill(
+                title = "Super Admin AI Context",
+                statusText = "LIVE RTDB ⚡",
+                detailText = "${liveTournaments.size} Live Tournaments • ${liveAuditLogs.size} Audit Logs • ${liveSupportTickets.count { it.status.equals("open", ignoreCase = true) }} Open Tickets",
+                isActive = true,
+                accentColor = Color(0xFF10B981),
+                onInspectClick = { showLiveInspectorSheet = true },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                shape = RoundedCornerShape(12.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, CardVerifyBorder)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        StatBadge(label = "Tournaments", value = "${liveTournaments.size}", color = VelorixAccent)
-                        StatBadge(label = "Audit Logs", value = "${liveAuditLogs.size}", color = Color(0xFF818CF8))
-                        StatBadge(label = "Open Tickets", value = "${liveSupportTickets.count { it.status.equals("open", ignoreCase = true) }}", color = Color(0xFFF87171))
-                    }
-                    TextButton(
-                        onClick = { showLiveInspectorSheet = true },
-                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
-                    ) {
-                        Text("View Data", color = VelorixAccent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            )
 
             // Real-Time Query Hub Chips
             LazyRow(

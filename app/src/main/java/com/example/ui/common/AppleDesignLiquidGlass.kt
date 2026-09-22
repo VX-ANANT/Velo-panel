@@ -34,6 +34,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 import kotlin.math.abs
 
 /**
@@ -445,8 +446,9 @@ fun AppleLiquidGlassSegmentedControl(
 }
 
 /**
- * 4. Apple Dynamic Island Pill
- * Interactive status capsule that resizes with spring physics, displays live dot indicators and telemetry.
+ * 4. Apple Dynamic Island Pill & Slideable iOS Dynamic Island
+ * Interactive slideable capsule that resizes with spring physics, supports horizontal sliding/swiping,
+ * rubber-band drag, live dot indicators, and expandable telemetry.
  */
 @Composable
 fun AppleDynamicIslandCapsule(
@@ -456,14 +458,55 @@ fun AppleDynamicIslandCapsule(
     accentTint: Color = Color(0xFFD0BCFF),
     isActive: Boolean = true,
     leadingIcon: ImageVector = Icons.Default.Sensors,
+    onSlide: ((Float) -> Unit)? = null,
     trailingContent: @Composable () -> Unit = {}
 ) {
+    val haptic = LocalHapticFeedback.current
+    val coroutineScope = rememberCoroutineScope()
+    val dragOffset = remember { Animatable(0f) }
+    var isExpanded by remember { mutableStateOf(false) }
+
     Row(
         modifier = modifier
+            .offset { androidx.compose.ui.unit.IntOffset(dragOffset.value.toInt(), 0) }
+            .draggable(
+                orientation = Orientation.Horizontal,
+                state = rememberDraggableState { delta ->
+                    coroutineScope.launch {
+                        // Apply rubber-band damping for dragging past threshold
+                        val current = dragOffset.value
+                        val dampedDelta = delta * (1f - (abs(current) / 300f).coerceIn(0f, 0.75f))
+                        dragOffset.snapTo((current + dampedDelta).coerceIn(-180f, 180f))
+                        onSlide?.invoke(dragOffset.value)
+                    }
+                },
+                onDragStopped = { velocity ->
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    if (abs(dragOffset.value) > 60f || abs(velocity) > 400f) {
+                        isExpanded = !isExpanded
+                    }
+                    coroutineScope.launch {
+                        dragOffset.animateTo(
+                            targetValue = 0f,
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                stiffness = Spring.StiffnessLow
+                            )
+                        )
+                    }
+                }
+            )
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                isExpanded = !isExpanded
+            }
             .applePress(scaleDown = 0.97f)
             .appleLiquidGlass(
-                material = AppleGlassMaterial.THIN,
-                shape = CircleShape,
+                material = AppleGlassMaterial.THICK,
+                shape = RoundedCornerShape(24.dp),
                 accentTint = accentTint
             )
             .padding(horizontal = 14.dp, vertical = 8.dp),
@@ -493,16 +536,215 @@ fun AppleDynamicIslandCapsule(
                 color = Color.White,
                 fontWeight = FontWeight.Bold,
                 fontSize = 11.sp,
-                letterSpacing = (-0.1).sp
+                letterSpacing = (-0.1).sp,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
             )
             Text(
                 text = subtitle,
                 color = Color.White.copy(alpha = 0.65f),
-                fontSize = 10.sp
+                fontSize = 10.sp,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
             )
         }
 
         trailingContent()
+    }
+}
+
+/**
+ * Slideable iPhone Dynamic Island Capsule
+ * - Draggable/Slideable horizontally with fluid iOS spring physics and rubber-band elasticity
+ * - Tap or swipe to toggle between compact pill and expanded telemetry card
+ * - Fixed layout boundaries preventing vertical text wrapping or overflow clipping
+ */
+@Composable
+fun IPhoneSlideableDynamicIslandPill(
+    title: String,
+    statusText: String = "LIVE",
+    detailText: String? = null,
+    isActive: Boolean = true,
+    accentColor: Color = Color(0xFF10B981),
+    onInspectClick: (() -> Unit)? = null,
+    modifier: Modifier = Modifier
+) {
+    val haptic = LocalHapticFeedback.current
+    val coroutineScope = rememberCoroutineScope()
+    val dragOffset = remember { Animatable(0f) }
+    var isExpanded by remember { mutableStateOf(false) }
+
+    // Pulsing radar animation for live indicator
+    val infiniteTransition = rememberInfiniteTransition(label = "islandRadar")
+    val pulseScale by infiniteTransition.animateFloat(
+        initialValue = 0.9f,
+        targetValue = 1.35f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulseScale"
+    )
+
+    Surface(
+        modifier = modifier
+            .offset { androidx.compose.ui.unit.IntOffset(dragOffset.value.toInt(), 0) }
+            .draggable(
+                orientation = Orientation.Horizontal,
+                state = rememberDraggableState { delta ->
+                    coroutineScope.launch {
+                        val current = dragOffset.value
+                        val dampedDelta = delta * (1f - (abs(current) / 320f).coerceIn(0f, 0.75f))
+                        dragOffset.snapTo((current + dampedDelta).coerceIn(-160f, 160f))
+                    }
+                },
+                onDragStopped = { velocity ->
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    if (abs(dragOffset.value) > 45f || abs(velocity) > 350f) {
+                        isExpanded = !isExpanded
+                    }
+                    coroutineScope.launch {
+                        dragOffset.animateTo(
+                            targetValue = 0f,
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                stiffness = Spring.StiffnessLow
+                            )
+                        )
+                    }
+                }
+            )
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                isExpanded = !isExpanded
+            }
+            .shadow(
+                elevation = if (isExpanded) 16.dp else 6.dp,
+                shape = RoundedCornerShape(if (isExpanded) 20.dp else 24.dp),
+                spotColor = accentColor.copy(alpha = 0.35f)
+            )
+            .border(
+                width = 1.dp,
+                brush = Brush.horizontalGradient(
+                    listOf(
+                        Color.White.copy(alpha = 0.25f),
+                        accentColor.copy(alpha = 0.45f),
+                        Color.White.copy(alpha = 0.10f)
+                    )
+                ),
+                shape = RoundedCornerShape(if (isExpanded) 20.dp else 24.dp)
+            ),
+        shape = RoundedCornerShape(if (isExpanded) 20.dp else 24.dp),
+        color = Color(0xFF09090C)
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(horizontal = 12.dp, vertical = 6.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // Live Glowing Beacon Dot
+                Box(contentAlignment = Alignment.Center) {
+                    Box(
+                        modifier = Modifier
+                            .size(12.dp)
+                            .graphicsLayer {
+                                scaleX = pulseScale
+                                scaleY = pulseScale
+                            }
+                            .background(
+                                color = if (isActive) accentColor.copy(alpha = 0.28f) else Color.Gray.copy(alpha = 0.2f),
+                                shape = CircleShape
+                            )
+                    )
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .background(
+                                color = if (isActive) accentColor else Color.Gray,
+                                shape = CircleShape
+                            )
+                    )
+                }
+
+                Text(
+                    text = title,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = accentColor.copy(alpha = 0.16f),
+                    border = BorderStroke(0.8.dp, accentColor.copy(alpha = 0.4f))
+                ) {
+                    Text(
+                        text = statusText,
+                        color = accentColor,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
+
+                Spacer(modifier = Modifier.weight(1f, fill = false))
+
+                Icon(
+                    imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.UnfoldMore,
+                    contentDescription = "Slide or Tap to expand",
+                    tint = Color.White.copy(alpha = 0.5f),
+                    modifier = Modifier.size(14.dp)
+                )
+            }
+
+            if (isExpanded && detailText != null) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = detailText,
+                        color = Color.White.copy(alpha = 0.75f),
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    if (onInspectClick != null) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = accentColor.copy(alpha = 0.2f),
+                            border = BorderStroke(1.dp, accentColor.copy(alpha = 0.5f)),
+                            modifier = Modifier.clickable { onInspectClick() }
+                        ) {
+                            Text(
+                                text = "Inspect",
+                                color = Color.White,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

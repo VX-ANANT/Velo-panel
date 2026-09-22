@@ -81,6 +81,14 @@ class TournamentDashboardViewModel(
     private var overrideUserEmail: String? = null
     private val activeStreamJobs = mutableListOf<kotlinx.coroutines.Job>()
 
+    val userRoleManager: UserRoleManager = UserRoleManager(repository)
+
+    // In-memory locks to prevent real-time stream snapshots from causing 'revert-and-reactivate' UI glitches
+    private val lockedAdminStates = java.util.concurrent.ConcurrentHashMap<String, Pair<AdminRecord, Long>>()
+    private val lockedDeletedAdminUids = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val lockedUserStates = java.util.concurrent.ConcurrentHashMap<String, Pair<UserProfile, Long>>()
+    private val lockedDeletedUserIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
     fun setManualLoginEmail(email: String?) {
         overrideUserEmail = email
         if (email != null && email.isNotBlank()) {
@@ -135,7 +143,36 @@ class TournamentDashboardViewModel(
                 try {
                     repository.getLiveUsersStream().collect { liveUsers ->
                         val curr = _uiState.value as? DashboardState.Success ?: DashboardState.Success(currentUserEmail = initialEmail)
-                        _uiState.value = curr.copy(users = liveUsers)
+                        val now = System.currentTimeMillis()
+                        val filteredIncoming = liveUsers.filter { !lockedDeletedUserIds.contains(it.id) }
+                        val resolvedUsers = filteredIncoming.map { u ->
+                            val lockedEntry = lockedUserStates[u.id]
+                            if (lockedEntry != null) {
+                                val (lockedUser, lockTime) = lockedEntry
+                                if (now - lockTime < 20_000L) {
+                                    if (u.role == lockedUser.role && u.isBanned == lockedUser.isBanned && u.funds == lockedUser.funds) {
+                                        lockedUserStates.remove(u.id)
+                                        u
+                                    } else {
+                                        lockedUser
+                                    }
+                                } else {
+                                    lockedUserStates.remove(u.id)
+                                    u
+                                }
+                            } else {
+                                u
+                            }
+                        }.toMutableList()
+
+                        lockedUserStates.forEach { (uid, pair) ->
+                            val (lockedUser, lockTime) = pair
+                            if (now - lockTime < 20_000L && resolvedUsers.none { it.id == uid } && !lockedDeletedUserIds.contains(uid)) {
+                                resolvedUsers.add(0, lockedUser)
+                            }
+                        }
+
+                        _uiState.value = curr.copy(users = resolvedUsers)
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()
@@ -171,7 +208,36 @@ class TournamentDashboardViewModel(
                 try {
                     repository.getLiveAdminsStream().collect { adminList ->
                         val curr = _uiState.value as? DashboardState.Success ?: DashboardState.Success(currentUserEmail = initialEmail)
-                        _uiState.value = curr.copy(admins = adminList)
+                        val now = System.currentTimeMillis()
+                        val filteredIncoming = adminList.filter { !lockedDeletedAdminUids.contains(it.uid) }
+                        val resolvedAdmins = filteredIncoming.map { admin ->
+                            val lockedEntry = lockedAdminStates[admin.uid]
+                            if (lockedEntry != null) {
+                                val (lockedAdmin, lockTime) = lockedEntry
+                                if (now - lockTime < 20_000L) {
+                                    if (admin.role.equals(lockedAdmin.role, ignoreCase = true) && admin.active == lockedAdmin.active && admin.name == lockedAdmin.name) {
+                                        lockedAdminStates.remove(admin.uid)
+                                        admin
+                                    } else {
+                                        lockedAdmin
+                                    }
+                                } else {
+                                    lockedAdminStates.remove(admin.uid)
+                                    admin
+                                }
+                            } else {
+                                admin
+                            }
+                        }.toMutableList()
+
+                        lockedAdminStates.forEach { (uid, pair) ->
+                            val (lockedAdmin, lockTime) = pair
+                            if (now - lockTime < 20_000L && resolvedAdmins.none { it.uid == uid } && !lockedDeletedAdminUids.contains(uid)) {
+                                resolvedAdmins.add(0, lockedAdmin)
+                            }
+                        }
+
+                        _uiState.value = curr.copy(admins = resolvedAdmins)
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()
@@ -444,17 +510,29 @@ class TournamentDashboardViewModel(
     }
 
     fun grantAdminAccess(uid: String, email: String, name: String, role: String) {
-        val curr = _uiState.value as? DashboardState.Success
-        if (curr != null) {
-            val newRecord = AdminRecord(uid = uid, email = email, name = name, role = role, active = true)
-            _uiState.value = curr.copy(admins = listOf(newRecord) + curr.admins.filter { it.uid != uid && it.email != email })
-        }
+        val currAdminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
         viewModelScope.launch {
-            try {
-                val currAdminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
-                repository.grantAdminAccess(uid, email, name, role, currAdminEmail)
-                GlobalErrorManager.emitSuccess("Admin access granted to $name")
-            } catch (e: Exception) {
+            val result = userRoleManager.grantAdminRole(
+                uid = uid,
+                email = email,
+                name = name,
+                role = role,
+                grantedBy = currAdminEmail
+            )
+            result.onSuccess { confirmedRecord ->
+                lockedDeletedAdminUids.remove(confirmedRecord.uid)
+                lockedAdminStates[confirmedRecord.uid] = confirmedRecord to System.currentTimeMillis()
+                
+                // Server-side confirmation completed: safely update local UI state
+                val curr = _uiState.value as? DashboardState.Success
+                if (curr != null) {
+                    val updatedAdmins = listOf(confirmedRecord) + curr.admins.filter { 
+                        it.uid != confirmedRecord.uid && !it.email.equals(confirmedRecord.email, ignoreCase = true) 
+                    }
+                    _uiState.value = curr.copy(admins = updatedAdmins)
+                }
+                GlobalErrorManager.emitSuccess("Admin access granted to ${confirmedRecord.name}")
+            }.onFailure { e ->
                 e.printStackTrace()
                 GlobalErrorManager.emitError("Failed to grant admin: ${e.message}")
             }
@@ -462,15 +540,18 @@ class TournamentDashboardViewModel(
     }
 
     fun revokeAdminAccess(adminUid: String) {
-        val curr = _uiState.value as? DashboardState.Success
-        if (curr != null) {
-            _uiState.value = curr.copy(admins = curr.admins.map { if (it.uid == adminUid) it.copy(active = false) else it })
-        }
         viewModelScope.launch {
-            try {
-                repository.revokeAdminAccess(adminUid)
+            val result = userRoleManager.revokeAdminRole(adminUid)
+            result.onSuccess { revokedRecord ->
+                lockedAdminStates[adminUid] = revokedRecord to System.currentTimeMillis()
+                
+                // Server-side confirmation completed: safely update local UI state
+                val curr = _uiState.value as? DashboardState.Success
+                if (curr != null) {
+                    _uiState.value = curr.copy(admins = curr.admins.map { if (it.uid == adminUid) revokedRecord else it })
+                }
                 GlobalErrorManager.emitSuccess("Admin access revoked")
-            } catch (e: Exception) {
+            }.onFailure { e ->
                 e.printStackTrace()
                 GlobalErrorManager.emitError("Failed to revoke admin: ${e.message}")
             }
@@ -478,15 +559,19 @@ class TournamentDashboardViewModel(
     }
 
     fun updateAdminRecord(admin: AdminRecord) {
-        val curr = _uiState.value as? DashboardState.Success
-        if (curr != null) {
-            _uiState.value = curr.copy(admins = curr.admins.map { if (it.uid == admin.uid) admin else it })
-        }
         viewModelScope.launch {
-            try {
-                repository.updateAdminRecord(admin)
+            val result = userRoleManager.updateAdminRecord(admin)
+            result.onSuccess { updatedAdmin ->
+                lockedDeletedAdminUids.remove(updatedAdmin.uid)
+                lockedAdminStates[updatedAdmin.uid] = updatedAdmin to System.currentTimeMillis()
+                
+                // Server-side confirmation completed: safely update local UI state
+                val curr = _uiState.value as? DashboardState.Success
+                if (curr != null) {
+                    _uiState.value = curr.copy(admins = curr.admins.map { if (it.uid == updatedAdmin.uid) updatedAdmin else it })
+                }
                 GlobalErrorManager.emitSuccess("Admin record updated")
-            } catch (e: Exception) {
+            }.onFailure { e ->
                 e.printStackTrace()
                 GlobalErrorManager.emitError("Failed to update admin: ${e.message}")
             }
@@ -494,15 +579,19 @@ class TournamentDashboardViewModel(
     }
 
     fun deleteAdminRecord(adminUid: String) {
-        val curr = _uiState.value as? DashboardState.Success
-        if (curr != null) {
-            _uiState.value = curr.copy(admins = curr.admins.filter { it.uid != adminUid })
-        }
         viewModelScope.launch {
-            try {
-                repository.deleteAdminRecord(adminUid)
+            val result = userRoleManager.deleteAdminRecord(adminUid)
+            result.onSuccess {
+                lockedDeletedAdminUids.add(adminUid)
+                lockedAdminStates.remove(adminUid)
+                
+                // Server-side confirmation completed: safely update local UI state
+                val curr = _uiState.value as? DashboardState.Success
+                if (curr != null) {
+                    _uiState.value = curr.copy(admins = curr.admins.filter { it.uid != adminUid })
+                }
                 GlobalErrorManager.emitSuccess("Admin removed")
-            } catch (e: Exception) {
+            }.onFailure { e ->
                 e.printStackTrace()
                 GlobalErrorManager.emitError("Failed to delete admin: ${e.message}")
             }
@@ -511,33 +600,27 @@ class TournamentDashboardViewModel(
 
     fun toggleUserBan(user: UserProfile, explicitBanned: Boolean? = null) {
         val newBanned = explicitBanned ?: !user.isBanned
-        val curr = _uiState.value as? DashboardState.Success
-        if (curr != null) {
-            _uiState.value = curr.copy(
-                users = curr.users.map { if (it.id == user.id) it.copy(isBanned = newBanned) else it }
-            )
-        }
+        val reason = if (newBanned) user.banReason.ifBlank { "Banned by Admin Panel" } else ""
+        val currAdminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
+        
         viewModelScope.launch {
-            try {
-                val currAdminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
-                if (newBanned) {
-                    repository.banPlayer(
-                        uid = user.id,
-                        email = user.email,
-                        reason = "Banned by Admin Panel",
-                        bannedBy = currAdminEmail,
-                        gameId = user.gameId
+            val result = userRoleManager.toggleUserBan(user, newBanned, reason, currAdminEmail)
+            result.onSuccess { updatedUser ->
+                lockedUserStates[user.id] = updatedUser to System.currentTimeMillis()
+                
+                // Server-side confirmation completed: safely update local UI state
+                val curr = _uiState.value as? DashboardState.Success
+                if (curr != null) {
+                    _uiState.value = curr.copy(
+                        users = curr.users.map { if (it.id == user.id) updatedUser else it }
                     )
+                }
+                if (newBanned) {
                     GlobalErrorManager.emitSuccess("Player ${user.username} (${user.id}) banned successfully")
                 } else {
-                    repository.unbanPlayer(
-                        uid = user.id,
-                        email = user.email,
-                        gameId = user.gameId
-                    )
                     GlobalErrorManager.emitSuccess("Player ${user.username} (${user.id}) unbanned successfully")
                 }
-            } catch (e: Exception) {
+            }.onFailure { e ->
                 e.printStackTrace()
                 GlobalErrorManager.emitError("Failed to toggle ban: ${e.message}")
             }
@@ -545,26 +628,48 @@ class TournamentDashboardViewModel(
     }
 
     fun updateUserProfile(user: UserProfile) {
-        if (user.email.isNotBlank()) {
-            repository.recordAccountLocally(user.email, user.username, user.role, user.id)
-        }
-        val curr = _uiState.value as? DashboardState.Success
-        if (curr != null) {
-            val existingIndex = curr.users.indexOfFirst { it.id == user.id || (user.email.isNotBlank() && it.email.equals(user.email, ignoreCase = true)) }
-            val updatedList = if (existingIndex >= 0) {
-                curr.users.toMutableList().apply { set(existingIndex, user) }
-            } else {
-                curr.users + user
-            }
-            _uiState.value = curr.copy(users = updatedList)
-        }
         viewModelScope.launch {
-            try {
-                repository.updateUserProfile(user)
-                GlobalErrorManager.emitSuccess("User profile updated for ${user.username}")
-            } catch (e: Exception) {
+            val result = userRoleManager.updateUserProfile(user)
+            result.onSuccess { confirmedUser ->
+                lockedUserStates[confirmedUser.id] = confirmedUser to System.currentTimeMillis()
+                if (confirmedUser.email.isNotBlank()) {
+                    repository.recordAccountLocally(confirmedUser.email, confirmedUser.username, confirmedUser.role, confirmedUser.id)
+                }
+                
+                // Server-side confirmation completed: safely update local UI state
+                val curr = _uiState.value as? DashboardState.Success
+                if (curr != null) {
+                    val existingIndex = curr.users.indexOfFirst { 
+                        it.id == confirmedUser.id || (confirmedUser.email.isNotBlank() && it.email.equals(confirmedUser.email, ignoreCase = true)) 
+                    }
+                    val updatedList = if (existingIndex >= 0) {
+                        curr.users.toMutableList().apply { set(existingIndex, confirmedUser) }
+                    } else {
+                        curr.users + confirmedUser
+                    }
+                    _uiState.value = curr.copy(users = updatedList)
+                }
+                GlobalErrorManager.emitSuccess("User profile updated for ${confirmedUser.username}")
+            }.onFailure { e ->
                 e.printStackTrace()
                 GlobalErrorManager.emitError("Failed to update user profile: ${e.message}")
+            }
+        }
+    }
+
+    fun updateUserRole(userId: String, newRole: String, isAdmin: Boolean = false) {
+        viewModelScope.launch {
+            val result = userRoleManager.updateUserRole(userId, newRole, isAdmin)
+            result.onSuccess {
+                val curr = _uiState.value as? DashboardState.Success
+                if (curr != null) {
+                    val updatedUsers = curr.users.map { if (it.id == userId) it.copy(role = newRole) else it }
+                    _uiState.value = curr.copy(users = updatedUsers)
+                }
+                GlobalErrorManager.emitSuccess("Role updated to $newRole")
+            }.onFailure { e ->
+                e.printStackTrace()
+                GlobalErrorManager.emitError("Failed to update user role: ${e.message}")
             }
         }
     }
