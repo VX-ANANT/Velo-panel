@@ -4,8 +4,6 @@ import android.content.Context
 import android.os.Bundle
 import android.util.Log
 import com.google.firebase.analytics.FirebaseAnalytics
-import com.google.firebase.analytics.ktx.analytics
-import com.google.firebase.ktx.Firebase
 
 /**
  * VelorixAnalytics: Integrates Firebase Analytics for event tracking and A/B Testing conversion.
@@ -18,7 +16,7 @@ object VelorixAnalytics {
 
     fun initialize(context: Context) {
         try {
-            firebaseAnalytics = Firebase.analytics
+            firebaseAnalytics = FirebaseAnalytics.getInstance(context)
             Log.d(TAG, "Firebase Analytics initialized successfully.")
         } catch (e: Exception) {
             Log.w(TAG, "Firebase Analytics initialization skipped or failed: ${e.message}")

@@ -33,6 +33,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.repository.ApiKeyManager
+import com.example.ui.components.VelorixAudioLabDialog
+import com.example.ui.components.GeminiApiKeyDialog
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import com.example.data.repository.GeminiModelOption
 import com.example.data.repository.GeminiModelRegistry
 import com.example.data.repository.GeminiRepository
@@ -43,6 +48,7 @@ import com.example.data.validation.UserRateLimiter
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.domain.model.*
 import com.example.ui.common.GeminiLogo
+import com.example.ui.audio.rememberVelorixSoundManager
 import com.example.ui.common.IPhoneSlideableDynamicIslandPill
 import com.example.ui.theme.CardLiveBg
 import com.example.ui.theme.CardVerifyBorder
@@ -59,6 +65,12 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.example.data.agent.ActionExecutionStatus
+import com.example.data.agent.VelorixAgentAction
+import com.example.data.agent.VelorixAgentActionExecutor
+import com.example.data.agent.VelorixAgentActionParser
+import com.example.data.agent.VelorixAgentSystemPrompt
+import com.example.ui.components.CyberpunkActionCard
 
 data class ChatMessage(
     val id: String = System.currentTimeMillis().toString() + "_" + (0..999).random(),
@@ -68,7 +80,8 @@ data class ChatMessage(
     val isError: Boolean = false,
     val modelUsed: String? = null,
     val timestamp: Long = System.currentTimeMillis(),
-    val queryCategory: String? = null
+    val queryCategory: String? = null,
+    var agentAction: VelorixAgentAction? = null
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -80,7 +93,7 @@ fun AdminChatbotScreen(
 ) {
     val initialMessage = remember {
         ChatMessage(
-            text = "**Welcome to Velorix Gemini Admin Assistant**!\n\nI am connected directly to your real-time database. You can query live **Tournaments**, inspect **System Audit Logs**, evaluate **Dispute Tickets**, or review **Pending Payouts**.\n\n*Select any quick action below or type your custom admin query.*",
+            text = "**Velorix AI Command Agent Activated** ⚡\n\nI am authorized strictly for **Velorix Free Fire Tournaments**. You can instruct me in natural language to:\n• **Add a Tournament** (e.g. *\"Add a tournament for CS 4v4 Bermuda\"* or *\"Create a BR Solo match\"*)\n• **Update Room Details** (e.g. *\"Set room ID 98214 and password 1234 for CS match\"*)\n• **Anti-Cheat Enforcement** (e.g. *\"Ban user uid_xyz for speed hack\"*)\n• **Search Live Data** (e.g. *\"Search upcoming tournaments with available slots\"*)\n\n*Tap any command below or type your instruction.*",
             isUser = false
         )
     }
@@ -91,6 +104,8 @@ fun AdminChatbotScreen(
     var enableThinking by remember { mutableStateOf(false) }
     var showModelBottomSheet by remember { mutableStateOf(false) }
     var showLiveInspectorSheet by remember { mutableStateOf(false) }
+    var showAudioLabDialog by remember { mutableStateOf(false) }
+    var showApiKeyDialog by remember { mutableStateOf(false) }
     var activeInspectorTab by remember { mutableIntStateOf(0) }
 
     val chatCooldownSeconds by UserRateLimiter.observeCooldownSeconds(UserRateLimiter.ActionType.GEMINI_CHAT_MESSAGE).collectAsStateWithLifecycle()
@@ -108,6 +123,8 @@ fun AdminChatbotScreen(
     val listState = rememberLazyListState()
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
+    val soundManager = rememberVelorixSoundManager()
+    var isAudioMuted by remember { mutableStateOf(soundManager.isMuted) }
     
     // Multi-turn conversation history
     val conversationHistory = remember { mutableStateListOf<Content>() }
@@ -234,6 +251,7 @@ fun AdminChatbotScreen(
         
         val promptToSend = cleanText
         currentInput = ""
+        soundManager.playBeatTap()
         
         messages = messages + ChatMessage(
             text = promptToSend,
@@ -299,26 +317,31 @@ fun AdminChatbotScreen(
 
         coroutineScope.launch {
             listState.animateScrollToItem((messages.size - 1).coerceAtLeast(0))
-            val realtimeInstruction = buildRealtimeSystemContext()
+            val rawContext = buildRealtimeSystemContext()
+            val agentInstruction = VelorixAgentSystemPrompt.buildSystemPrompt(rawContext)
             
             val result = geminiRepository.sendChatMessage(
                 history = conversationHistory.toList(),
-                systemInstruction = realtimeInstruction,
+                systemInstruction = agentInstruction,
                 model = activeModel.id,
                 enableThinking = enableThinking
             )
 
             result.fold(
                 onSuccess = { reply ->
+                    soundManager.playSubtleChime()
+                    val parsed = VelorixAgentActionParser.parse(reply)
                     conversationHistory.add(Content(parts = listOf(Part(text = reply)), role = "model"))
                     messages = messages.filterNot { it.id == loadingMessageId } + ChatMessage(
-                        text = reply,
+                        text = parsed.displayText,
                         isUser = false,
                         modelUsed = activeModel.displayName,
-                        queryCategory = category
+                        queryCategory = category,
+                        agentAction = parsed.action
                     )
                 },
                 onFailure = { error ->
+                    soundManager.playOrchestraHit()
                     val errorMsg = error.message ?: "Failed to get response from Gemini."
                     messages = messages.filterNot { it.id == loadingMessageId } + ChatMessage(
                         text = errorMsg,
@@ -328,6 +351,31 @@ fun AdminChatbotScreen(
                     )
                 }
             )
+            listState.animateScrollToItem((messages.size - 1).coerceAtLeast(0))
+        }
+    }
+
+    fun executeAgentAction(action: VelorixAgentAction) {
+        action.status = ActionExecutionStatus.EXECUTING
+        messages = messages.map { it.copy() }
+        coroutineScope.launch {
+            val result = VelorixAgentActionExecutor.execute(action, tournamentRepository)
+            if (result.success) {
+                action.status = ActionExecutionStatus.COMPLETED
+                action.resultMessage = result.message
+                messages = messages.map { it.copy() } + ChatMessage(
+                    text = result.message,
+                    isUser = false,
+                    modelUsed = "Velorix OS Command",
+                    queryCategory = "Cloud Action"
+                )
+                android.widget.Toast.makeText(context, "Action committed to Firebase!", android.widget.Toast.LENGTH_SHORT).show()
+            } else {
+                action.status = ActionExecutionStatus.FAILED
+                action.resultMessage = result.message
+                messages = messages.map { it.copy() }
+                android.widget.Toast.makeText(context, "Failed: ${result.message}", android.widget.Toast.LENGTH_LONG).show()
+            }
             listState.animateScrollToItem((messages.size - 1).coerceAtLeast(0))
         }
     }
@@ -406,6 +454,49 @@ fun AdminChatbotScreen(
                             tint = if (enableThinking) VelorixAccent else Color.Gray
                         )
                     }
+                    // SFX Audio Lab Tester
+                    IconButton(
+                        onClick = {
+                            soundManager.playBeatTap()
+                            showAudioLabDialog = true
+                        }
+                    ) {
+                        Icon(
+                            Icons.Default.Headphones,
+                            contentDescription = "SFX Audio Lab",
+                            tint = Color(0xFFD49A3D)
+                        )
+                    }
+                    // Gemini API Key Config
+                    IconButton(
+                        onClick = {
+                            soundManager.playSnapPop()
+                            showApiKeyDialog = true
+                        }
+                    ) {
+                        Icon(
+                            Icons.Default.VpnKey,
+                            contentDescription = "Configure Gemini API Key",
+                            tint = if (ApiKeyManager.hasValidCustomKey()) Color(0xFF60A5FA) else Color.Gray
+                        )
+                    }
+                    // Toggle Audio SFX
+                    IconButton(
+                        onClick = {
+                            isAudioMuted = !isAudioMuted
+                            soundManager.isMuted = isAudioMuted
+                            if (!isAudioMuted) soundManager.playSnapPop()
+                            val stateMsg = if (isAudioMuted) "Sound FX Muted" else "Sound FX Enabled"
+                            android.widget.Toast.makeText(context, stateMsg, android.widget.Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.padding(end = 2.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isAudioMuted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
+                            contentDescription = "Toggle Audio SFX",
+                            tint = if (!isAudioMuted) Color(0xFFD49A3D) else Color.Gray
+                        )
+                    }
                     // Clear conversation
                     IconButton(onClick = {
                         conversationHistory.clear()
@@ -431,14 +522,14 @@ fun AdminChatbotScreen(
                 statusText = "LIVE RTDB ⚡",
                 detailText = "${liveTournaments.size} Live Tournaments • ${liveAuditLogs.size} Audit Logs • ${liveSupportTickets.count { it.status.equals("open", ignoreCase = true) }} Open Tickets",
                 isActive = true,
-                accentColor = Color(0xFF10B981),
+                accentColor = Color(0xFF3B8A6E),
                 onInspectClick = { showLiveInspectorSheet = true },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 6.dp)
             )
 
-            // Real-Time Query Hub Chips
+            // Real-Time Query & Agent Skills Hub Chips (Minimalist & Subtle)
             LazyRow(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -447,64 +538,64 @@ fun AdminChatbotScreen(
             ) {
                 item {
                     ActionQueryChip(
+                        icon = Icons.Default.SportsEsports,
+                        title = "Add CS 4v4 Match",
+                        accentColor = Color(0xFFD49A3D),
+                        onClick = {
+                            sendPrompt(
+                                userText = "Add a tournament for Clash Squad 4v4 category in Bermuda map with entry fee ₹50 and prize pool ₹350",
+                                category = "CS 4v4"
+                            )
+                        }
+                    )
+                }
+                item {
+                    ActionQueryChip(
                         icon = Icons.Default.EmojiEvents,
-                        title = "Live Tournaments",
-                        color = Color(0xFFFBBF24),
+                        title = "Add BR Solo Tournament",
+                        accentColor = Color(0xFF5B7A9C),
                         onClick = {
                             sendPrompt(
-                                userText = "Analyze and summarize all active, upcoming, and completed Free Fire tournaments from real-time database. Include slot fill percentages, formats, prize pool allocations, and room ID statuses.",
-                                category = "Tournaments"
+                                userText = "Add a tournament for Battle Royale Solo category in Bermuda map with 48 slots, entry fee ₹30 and prize pool ₹1000",
+                                category = "BR Solo"
                             )
                         }
                     )
                 }
                 item {
                     ActionQueryChip(
-                        icon = Icons.Default.Description,
-                        title = "System Logs",
-                        color = Color(0xFF818CF8),
+                        icon = Icons.Default.Pets,
+                        title = "Add Lone Wolf 1v1",
+                        accentColor = Color(0xFF7C72A0),
                         onClick = {
                             sendPrompt(
-                                userText = "Query and summarize the latest 10 system audit logs and administrator actions from database. Highlight any security events, role grants, bans, or config changes.",
-                                category = "Audit Logs"
+                                userText = "Add a tournament for Lone Wolf 1v1 category with entry fee ₹20 and prize pool ₹35",
+                                category = "Lone Wolf"
                             )
                         }
                     )
                 }
                 item {
                     ActionQueryChip(
-                        icon = Icons.Default.Warning,
-                        title = "Open Disputes",
-                        color = Color(0xFFF87171),
+                        icon = Icons.Default.VpnKey,
+                        title = "Set Room Credentials",
+                        accentColor = Color(0xFF438A8A),
                         onClick = {
                             sendPrompt(
-                                userText = "Give me a breakdown of all open support tickets and player complaints. Highlight high-priority issues, room ID errors, and recommended adjudications.",
-                                category = "Disputes"
+                                userText = "Set room details for the upcoming tournament with Room ID 8847291 and Password 7788",
+                                category = "Room Details"
                             )
                         }
                     )
                 }
                 item {
                     ActionQueryChip(
-                        icon = Icons.Default.Payments,
-                        title = "Cashout Audit",
-                        color = Color(0xFF34D399),
+                        icon = Icons.Default.Gavel,
+                        title = "Anti-Cheat Enforcement",
+                        accentColor = Color(0xFFB85D6B),
                         onClick = {
                             sendPrompt(
-                                userText = "Audit all pending payout and withdrawal requests. Summarize total pending VT amounts, payment channels (UPI/Paytm), and flag any suspicious cashout attempts.",
-                                category = "Payouts"
-                            )
-                        }
-                    )
-                }
-                item {
-                    ActionQueryChip(
-                        icon = Icons.Default.Shield,
-                        title = "Anti-Cheat Roster",
-                        color = Color(0xFFE879F9),
-                        onClick = {
-                            sendPrompt(
-                                userText = "Review the banned player directory and security blacklist. List banned UIDs, reasons, and recommend anti-cheat enforcement checks.",
+                                userText = "Ban player with target UID user_flagged_hacker for using unauthorized scripts in Clash Squad",
                                 category = "Anti-Cheat"
                             )
                         }
@@ -512,9 +603,48 @@ fun AdminChatbotScreen(
                 }
                 item {
                     ActionQueryChip(
+                        icon = Icons.Default.Search,
+                        title = "Search Live Slots",
+                        accentColor = Color(0xFF4D7298),
+                        onClick = {
+                            sendPrompt(
+                                userText = "Search all active and upcoming tournaments. Breakdown slot capacity, registration count, and category distribution.",
+                                category = "Search"
+                            )
+                        }
+                    )
+                }
+                item {
+                    ActionQueryChip(
+                        icon = Icons.Default.ConfirmationNumber,
+                        title = "Resolve Support Ticket",
+                        accentColor = Color(0xFF7C72A0),
+                        onClick = {
+                            sendPrompt(
+                                userText = "Check open dispute tickets and help me resolve the top priority ticket with an admin note.",
+                                category = "Tickets"
+                            )
+                        }
+                    )
+                }
+                item {
+                    ActionQueryChip(
+                        icon = Icons.Default.Campaign,
+                        title = "Broadcast Announcement",
+                        accentColor = Color(0xFFD49A3D),
+                        onClick = {
+                            sendPrompt(
+                                userText = "Broadcast an urgent tournament alert: 'Clash Squad Registration closing in 15 minutes! Room IDs will be published shortly.'",
+                                category = "Broadcast"
+                            )
+                        }
+                    )
+                }
+                item {
+                    ActionQueryChip(
                         icon = Icons.Default.Bolt,
-                        title = "Platform Health",
-                        color = Color(0xFF38BDF8),
+                        title = "Platform Health Check",
+                        accentColor = Color(0xFF4D7298),
                         onClick = {
                             sendPrompt(
                                 userText = "Perform a complete system health-check on platform metrics: active matches, player registration capacity, and database sync status.",
@@ -537,11 +667,15 @@ fun AdminChatbotScreen(
                     EnhancedChatBubble(
                         message = message,
                         onCopy = {
+                            soundManager.playSnapPop()
                             clipboardManager.setText(AnnotatedString(message.text))
                             android.widget.Toast.makeText(context, "Copied to clipboard", android.widget.Toast.LENGTH_SHORT).show()
                         },
                         onRetry = {
                             sendPrompt(message.text, category = message.queryCategory)
+                        },
+                        onExecuteAction = { action ->
+                            executeAgentAction(action)
                         }
                     )
                 }
@@ -951,32 +1085,48 @@ fun AdminChatbotScreen(
             }
         }
     }
+
+    if (showAudioLabDialog) {
+        VelorixAudioLabDialog(
+            soundManager = soundManager,
+            onDismissRequest = { showAudioLabDialog = false }
+        )
+    }
+
+    if (showApiKeyDialog) {
+        GeminiApiKeyDialog(
+            onDismissRequest = { showApiKeyDialog = false },
+            onKeySaved = { _ ->
+                showApiKeyDialog = false
+            }
+        )
+    }
 }
 
 @Composable
 fun ActionQueryChip(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     title: String,
-    color: Color,
+    accentColor: Color = Color(0xFF94A3B8),
     onClick: () -> Unit
 ) {
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(10.dp),
-        color = Color(0xFF181822),
-        border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.35f))
+        shape = RoundedCornerShape(8.dp),
+        color = Color(0xFF151822),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF252B3A))
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Icon(imageVector = icon, contentDescription = null, tint = color, modifier = Modifier.size(14.dp))
+            Icon(imageVector = icon, contentDescription = null, tint = accentColor, modifier = Modifier.size(13.dp))
             Text(
                 text = title,
-                color = color,
+                color = Color(0xFFE2E8F0),
                 fontSize = 11.sp,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Medium
             )
         }
     }
@@ -1020,18 +1170,19 @@ fun EmptyInspectorState(message: String) {
 fun EnhancedChatBubble(
     message: ChatMessage,
     onCopy: () -> Unit,
-    onRetry: () -> Unit
+    onRetry: () -> Unit,
+    onExecuteAction: ((VelorixAgentAction) -> Unit)? = null
 ) {
     val alignment = if (message.isUser) Alignment.CenterEnd else Alignment.CenterStart
     val bgColor = when {
-        message.isUser -> VelorixAccent
-        message.isError -> Color(0xFF3E1F1F)
-        else -> Color(0xFF1E1E26)
+        message.isUser -> Color(0xFF222838)
+        message.isError -> Color(0xFF26191E)
+        else -> Color(0xFF141722)
     }
     val textColor = when {
-        message.isUser -> Color.Black
-        message.isError -> Color(0xFFFF8A80)
-        else -> VelorixTextPrimary
+        message.isUser -> Color(0xFFF1F5F9)
+        message.isError -> Color(0xFFE28B96)
+        else -> Color(0xFFE2E8F0)
     }
 
     Box(
@@ -1040,23 +1191,25 @@ fun EnhancedChatBubble(
     ) {
         Column(
             horizontalAlignment = if (message.isUser) Alignment.End else Alignment.Start,
-            modifier = Modifier.widthIn(max = 330.dp)
+            modifier = Modifier.widthIn(max = 360.dp)
         ) {
             Box(
                 modifier = Modifier
                     .background(
                         bgColor,
                         RoundedCornerShape(
-                            topStart = 16.dp,
-                            topEnd = 16.dp,
-                            bottomStart = if (message.isUser) 16.dp else 4.dp,
-                            bottomEnd = if (message.isUser) 4.dp else 16.dp
+                            topStart = 14.dp,
+                            topEnd = 14.dp,
+                            bottomStart = if (message.isUser) 14.dp else 4.dp,
+                            bottomEnd = if (message.isUser) 4.dp else 14.dp
                         )
                     )
-                    .then(
-                        if (message.isError) {
-                            Modifier.border(1.dp, Color(0xFFE57373), RoundedCornerShape(16.dp))
-                        } else Modifier.border(1.dp, if (message.isUser) Color.Transparent else Color(0xFF2C2C38), RoundedCornerShape(16.dp))
+                    .border(
+                        1.dp,
+                        if (message.isError) Color(0xFF5E2B33)
+                        else if (message.isUser) Color(0xFF333C52)
+                        else Color(0xFF242A38),
+                        RoundedCornerShape(14.dp)
                     )
                     .padding(14.dp)
             ) {
@@ -1108,6 +1261,18 @@ fun EnhancedChatBubble(
                         )
                     }
                 }
+            }
+
+            // Render Cyberpunk Action Card if Agent proposed an actionable skill
+            message.agentAction?.let { act ->
+                Spacer(modifier = Modifier.height(8.dp))
+                CyberpunkActionCard(
+                    action = act,
+                    onExecute = { onExecuteAction?.invoke(act) },
+                    onDismiss = {
+                        act.status = ActionExecutionStatus.REJECTED
+                    }
+                )
             }
 
             if (!message.isLoading && !message.isUser) {

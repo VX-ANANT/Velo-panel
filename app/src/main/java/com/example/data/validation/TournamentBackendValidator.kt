@@ -125,6 +125,11 @@ object TournamentBackendValidator {
             return ValidationResult.Invalid("Invalid tournament status: ${tournament.status}. Must be one of $validStatuses.", "status")
         }
 
+        val validCategories = setOf("BR", "CS", "LONE_WOLF", "SCRIMS")
+        if (tournament.category.isNotBlank() && !validCategories.contains(tournament.category.uppercase())) {
+            return ValidationResult.Invalid("Invalid tournament category: ${tournament.category}. Must be one of $validCategories.", "category")
+        }
+
         return ValidationResult.Valid
     }
 
@@ -163,6 +168,18 @@ object TournamentBackendValidator {
 
         if (user.isBanned) {
             return ValidationResult.Invalid("Your account is currently restricted from participating in tournaments.", "isBanned")
+        }
+
+        // Under 18 Age & Esports Compliance Check:
+        // Players under 18 can join Free Training Matches / Scrims, but NOT cash/money tournaments.
+        if (user.isMinor || user.isUnder18 || (user.age in 1..17)) {
+            val isMoneyTournament = tournament.entryFee > 0f || (tournament.prizePool > 0f && !tournament.isTrainingMatch)
+            if (isMoneyTournament) {
+                return ValidationResult.Invalid(
+                    "Age Restriction (Esports Compliance): Players under 18 years of age are permitted to join Free Training Matches & Practice Scrims only. Real-money prize tournaments are strictly restricted to 18+ participants.",
+                    "ageRestriction"
+                )
+            }
         }
 
         // Duplicate registration check
@@ -230,5 +247,38 @@ object TournamentBackendValidator {
         }
 
         return ValidationResult.Valid
+    }
+
+    /**
+     * Calculates user age from Date of Birth string (supports YYYY-MM-DD, DD/MM/YYYY, etc.)
+     * Returns the calculated age in years, or -1 if invalid/unparseable.
+     */
+    fun calculateAgeFromDob(dob: String): Int {
+        val clean = dob.trim()
+        if (clean.isBlank()) return -1
+        return try {
+            val parts = clean.split("-", "/", ".")
+            if (parts.size != 3) return -1
+            val (year, month, day) = if (parts[0].length == 4) {
+                Triple(parts[0].toInt(), parts[1].toInt(), parts[2].toInt())
+            } else if (parts[2].length == 4) {
+                Triple(parts[2].toInt(), parts[1].toInt(), parts[0].toInt())
+            } else {
+                return -1
+            }
+
+            val calendar = java.util.Calendar.getInstance()
+            val currentYear = calendar.get(java.util.Calendar.YEAR)
+            val currentMonth = calendar.get(java.util.Calendar.MONTH) + 1
+            val currentDay = calendar.get(java.util.Calendar.DAY_OF_MONTH)
+
+            var age = currentYear - year
+            if (currentMonth < month || (currentMonth == month && currentDay < day)) {
+                age--
+            }
+            if (age in 0..120) age else -1
+        } catch (_: Exception) {
+            -1
+        }
     }
 }

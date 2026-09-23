@@ -17,6 +17,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
@@ -46,6 +48,7 @@ import com.example.data.validation.UserRateLimiter
 import com.example.ui.theme.*
 import com.example.ui.common.*
 import com.example.ui.viewmodel.DashboardState
+import com.example.ui.audio.rememberVelorixSoundManager
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -118,6 +121,7 @@ fun TournamentsListScreenContent(
     onSyncCloud: (() -> Unit)? = null
 ) {
     var selectedTab by remember { mutableStateOf(0) }
+    var selectedCategory by remember { mutableStateOf("ALL") }
     var searchQuery by remember { mutableStateOf("") }
     val tournamentsList = (uiState as? DashboardState.Success)?.tournaments ?: emptyList()
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -128,7 +132,7 @@ fun TournamentsListScreenContent(
     var extractedJsonText by remember { mutableStateOf("") }
     var syncStatusMessage by remember { mutableStateOf<String?>(null) }
     
-    val filteredList = remember(tournamentsList, selectedTab, searchQuery) {
+    val filteredList = remember(tournamentsList, selectedTab, selectedCategory, searchQuery) {
         tournamentsList.filter { t ->
             val matchesTab = when (selectedTab) {
                 1 -> t.status.equals("upcoming", ignoreCase = true)
@@ -137,11 +141,13 @@ fun TournamentsListScreenContent(
                 4 -> t.status.equals("cancelled", ignoreCase = true)
                 else -> true
             }
+            val matchesCategory = selectedCategory == "ALL" || t.canonicalCategory.equals(selectedCategory, ignoreCase = true)
             val matchesQuery = searchQuery.isBlank() ||
                     t.title.contains(searchQuery, ignoreCase = true) ||
                     t.game.contains(searchQuery, ignoreCase = true) ||
-                    t.map.contains(searchQuery, ignoreCase = true)
-            matchesTab && matchesQuery
+                    t.map.contains(searchQuery, ignoreCase = true) ||
+                    t.canonicalCategory.contains(searchQuery, ignoreCase = true)
+            matchesTab && matchesCategory && matchesQuery
         }
     }
     
@@ -268,7 +274,44 @@ fun TournamentsListScreenContent(
                 )
             }
         }
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(10.dp))
+        // Category Filter Chips
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            val categories = listOf(
+                "ALL" to "All Categories",
+                "BR" to "Battle Royale",
+                "CS" to "Clash Squad",
+                "LONE_WOLF" to "Lone Wolf",
+                "SCRIMS" to "Scrims"
+            )
+            categories.forEach { (catKey, catLabel) ->
+                val isSelected = selectedCategory == catKey
+                FilterChip(
+                    selected = isSelected,
+                    onClick = { selectedCategory = catKey },
+                    label = {
+                        Text(
+                            catLabel,
+                            fontSize = 12.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                        )
+                    },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = VelorixAccent.copy(alpha = 0.25f),
+                        selectedLabelColor = VelorixAccentLight,
+                        containerColor = Color(0xFF161224),
+                        labelColor = VelorixTextSecondary
+                    ),
+                    border = BorderStroke(1.dp, if (isSelected) VelorixAccent else CardVerifyBorder)
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(10.dp))
         LazyColumn(verticalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.padding(bottom = 90.dp)) {
             if (filteredList.isEmpty()) {
                 item {
@@ -345,25 +388,67 @@ fun TournamentsListScreenContent(
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = "${t.game} • ${t.format} • Map: ${t.map}",
+                                text = "${t.game} • ${t.canonicalCategory} • ${t.format} • Map: ${t.map}",
                                 color = VelorixTextSecondary,
                                 fontSize = 11.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = statusColor.copy(alpha = 0.15f),
-                            border = BorderStroke(1.dp, statusColor.copy(alpha = 0.4f))
-                        ) {
-                            Text(
-                                text = t.status.uppercase(),
-                                color = statusColor,
-                                fontSize = 9.5.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
-                            )
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = VelorixAccent.copy(alpha = 0.2f),
+                                border = BorderStroke(1.dp, VelorixAccent.copy(alpha = 0.5f))
+                            ) {
+                                Text(
+                                    text = t.canonicalCategory,
+                                    color = VelorixAccentLight,
+                                    fontSize = 8.5.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                                )
+                            }
+
+                            val isMoneyTournament = (t.entryFee > 0f) || (t.prizePool > 0.0)
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = if (isMoneyTournament) Color(0xFFF59E0B).copy(alpha = 0.15f) else Color(0xFF10B981).copy(alpha = 0.15f),
+                                border = BorderStroke(1.dp, if (isMoneyTournament) Color(0xFFF59E0B).copy(alpha = 0.4f) else Color(0xFF10B981).copy(alpha = 0.4f))
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = if (isMoneyTournament) Icons.Default.Lock else Icons.Default.CheckCircle,
+                                        contentDescription = null,
+                                        tint = if (isMoneyTournament) Color(0xFFFBBF24) else Color(0xFF34D399),
+                                        modifier = Modifier.size(10.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(3.dp))
+                                    Text(
+                                        text = if (isMoneyTournament) "18+ CASH" else "TRAINING",
+                                        color = if (isMoneyTournament) Color(0xFFFBBF24) else Color(0xFF34D399),
+                                        fontSize = 8.5.sp,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                }
+                            }
+
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = statusColor.copy(alpha = 0.15f),
+                                border = BorderStroke(1.dp, statusColor.copy(alpha = 0.4f))
+                            ) {
+                                Text(
+                                    text = t.status.uppercase(),
+                                    color = statusColor,
+                                    fontSize = 9.5.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                                )
+                            }
                         }
                     }
 
@@ -609,13 +694,18 @@ fun GlobalSettingsScreenContent(
     onThemeSelect: (com.example.ui.common.HyperOSTheme) -> Unit = {},
     onPurgeDemoData: (() -> Unit)? = null,
     currentUserEmail: String? = null,
-    onLogout: (() -> Unit)? = null
+    onLogout: (() -> Unit)? = null,
+    onNavigateTab: ((String) -> Unit)? = null,
+    onOpenAudioLab: (() -> Unit)? = null,
+    onOpenApiKeyDialog: (() -> Unit)? = null,
+    onOpenRateLimiter: (() -> Unit)? = null
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val manager = remember { opticsManager ?: LiquidGlassOpticsManager(context) }
     val repository = remember { com.example.data.repository.TournamentRepositoryImpl(context) }
     val coroutineScope = rememberCoroutineScope()
     val clipboardManager = LocalClipboardManager.current
+    val soundManager = rememberVelorixSoundManager()
 
     var showPurgeConfirmationDialog by remember { mutableStateOf(false) }
     var showLogoutConfirmationDialog by remember { mutableStateOf(false) }
@@ -839,44 +929,254 @@ fun GlobalSettingsScreenContent(
             .padding(horizontal = 16.dp)
             .padding(bottom = 100.dp)
     ) {
+        // Header
         item {
-            Text(
-                "Platform & Graphics Settings",
-                color = Color.White,
-                fontWeight = FontWeight.Bold,
-                fontSize = 20.sp,
-                modifier = Modifier.padding(vertical = 12.dp)
-            )
+            Column(modifier = Modifier.padding(top = 12.dp, bottom = 2.dp)) {
+                Text(
+                    text = "Settings",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 24.sp
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "System preferences, security policies & admin controls",
+                    color = Color(0xFF94A3B8),
+                    fontSize = 12.5.sp
+                )
+            }
         }
 
+        // 1. Super Administrator Account Profile
+        item {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                color = Color(0xFF141416),
+                border = BorderStroke(1.dp, Color(0xFF27272A))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(46.dp)
+                            .background(Color(0xFF27272A), CircleShape)
+                            .border(1.dp, Color(0xFF3F3F46), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = (currentUserEmail?.firstOrNull() ?: 'A').uppercase(),
+                            color = Color.White,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(14.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Super Administrator", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = Color(0xFF166534).copy(alpha = 0.35f),
+                                border = BorderStroke(0.5.dp, Color(0xFF22C55E).copy(alpha = 0.5f))
+                            ) {
+                                Text(
+                                    "ACTIVE",
+                                    color = Color(0xFF86EFAC),
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Text(currentUserEmail ?: "anantisback47@gmail.com", color = Color(0xFF94A3B8), fontSize = 12.sp)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(modifier = Modifier.size(6.dp).background(Color(0xFF22C55E), CircleShape))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Firebase RTDB & Firestore Connected", color = Color(0xFF86EFAC), fontSize = 10.5.sp)
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Audio & Sound Effects (SFX)
         item {
             Text(
-                "UI ACCENT & COLOR PALETTE",
-                color = VelorixAccentLight,
+                "AUDIO & SOUND EFFECTS (SFX)",
+                color = Color(0xFF94A3B8),
                 fontWeight = FontWeight.Bold,
-                fontSize = 12.sp,
+                fontSize = 11.sp,
                 letterSpacing = 1.sp
             )
         }
-
         item {
-            GlassCard(
+            var sfxMuted by remember { mutableStateOf(soundManager.isMuted) }
+            var sfxVol by remember { mutableFloatStateOf(soundManager.masterVolume) }
+
+            Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(18.dp),
-                borderBrush = GlassTokens.GlassBorderSubtle
+                shape = RoundedCornerShape(16.dp),
+                color = Color(0xFF141416),
+                border = BorderStroke(1.dp, Color(0xFF27272A))
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        "Theme Accent",
-                        color = Color.White,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        "Choose the color atmosphere for cards, navigation and controls",
-                        color = VelorixTextSecondary,
-                        fontSize = 11.sp
-                    )
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .background(Color(0xFF27272A), RoundedCornerShape(10.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.VolumeUp, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text("App Sound Effects", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+                                Text("Acoustic beats & funk snaps on actions", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
+                            }
+                        }
+                        Switch(
+                            checked = !sfxMuted,
+                            onCheckedChange = { active ->
+                                sfxMuted = !active
+                                soundManager.isMuted = !active
+                                if (active) soundManager.playSnapPop()
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = Color(0xFF2563EB),
+                                uncheckedTrackColor = Color(0xFF27272A)
+                            )
+                        )
+                    }
+
+                    if (!sfxMuted) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)
+                        ) {
+                            Text("Volume", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Slider(
+                                value = sfxVol,
+                                onValueChange = { newVol ->
+                                    sfxVol = newVol
+                                    soundManager.masterVolume = newVol
+                                },
+                                onValueChangeFinished = { soundManager.playBeatTap() },
+                                modifier = Modifier.weight(1f),
+                                colors = SliderDefaults.colors(
+                                    thumbColor = Color.White,
+                                    activeTrackColor = Color(0xFF2563EB),
+                                    inactiveTrackColor = Color(0xFF27272A)
+                                )
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text("${(sfxVol * 100).toInt()}%", color = Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    OutlinedButton(
+                        onClick = { onOpenAudioLab?.invoke() },
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, Color(0xFF3F3F46)),
+                        colors = ButtonDefaults.outlinedButtonColors(containerColor = Color(0xFF18181B)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Headphones, contentDescription = null, tint = Color(0xFFD49A3D), modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Open SFX Audio Lab (Test Beats)", color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+                    }
+                }
+            }
+        }
+
+        // 3. AI Assistant & Credentials
+        item {
+            Text(
+                "INTELLIGENCE & AI ENGINE",
+                color = Color(0xFF94A3B8),
+                fontWeight = FontWeight.Bold,
+                fontSize = 11.sp,
+                letterSpacing = 1.sp
+            )
+        }
+        item {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                color = Color(0xFF141416),
+                border = BorderStroke(1.dp, Color(0xFF27272A))
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .background(Color(0xFF2E1065).copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+                                .border(1.dp, Color(0xFF7C3AED).copy(alpha = 0.5f), RoundedCornerShape(10.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = Color(0xFFA78BFA), modifier = Modifier.size(18.dp))
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text("Gemini AI Mediator", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Automated dispute handling & rules", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
+                        }
+                    }
+                    Button(
+                        onClick = { onOpenApiKeyDialog?.invoke() },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF27272A)),
+                        border = BorderStroke(1.dp, Color(0xFF3F3F46)),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Icon(Icons.Default.Key, contentDescription = null, tint = Color(0xFFA78BFA), modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("API Key", color = Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
+        // 4. UI Theme Accent (Subtle & Minimal)
+        item {
+            Text(
+                "APPEARANCE & THEME",
+                color = Color(0xFF94A3B8),
+                fontWeight = FontWeight.Bold,
+                fontSize = 11.sp,
+                letterSpacing = 1.sp
+            )
+        }
+        item {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                color = Color(0xFF141416),
+                border = BorderStroke(1.dp, Color(0xFF27272A))
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Theme Palette", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Subtle ambient accents for dashboard surfaces", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -886,34 +1186,34 @@ fun GlobalSettingsScreenContent(
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(44.dp)
-                                    .clip(RoundedCornerShape(12.dp))
+                                    .height(42.dp)
+                                    .clip(RoundedCornerShape(10.dp))
                                     .background(
                                         if (isSelected) theme.primaryColor.copy(alpha = 0.25f)
-                                        else Color(0x22181525)
+                                        else Color(0xFF1E1E22)
                                     )
                                     .border(
-                                        width = if (isSelected) 1.5.dp else 0.8.dp,
-                                        color = if (isSelected) theme.primaryColor else Color.White.copy(alpha = 0.12f),
-                                        shape = RoundedCornerShape(12.dp)
+                                        width = if (isSelected) 1.5.dp else 1.dp,
+                                        color = if (isSelected) theme.primaryColor else Color(0xFF2E2E34),
+                                        shape = RoundedCornerShape(10.dp)
                                     )
                                     .clickable { onThemeSelect(theme) },
                                 contentAlignment = Alignment.Center
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
                                 ) {
                                     Box(
                                         modifier = Modifier
-                                            .size(10.dp)
+                                            .size(8.dp)
                                             .clip(CircleShape)
                                             .background(theme.primaryColor)
                                     )
                                     Text(
                                         text = theme.themeName.replace("Hyper ", ""),
-                                        color = if (isSelected) Color.White else Color.LightGray,
-                                        fontSize = 10.sp,
+                                        color = if (isSelected) Color.White else Color(0xFFD4D4D8),
+                                        fontSize = 10.5.sp,
                                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                                     )
                                 }
@@ -924,215 +1224,94 @@ fun GlobalSettingsScreenContent(
             }
         }
 
+        // 5. Platform & Tournament Policies
         item {
             Text(
-                "LIQUID GLASS OPTICS & SHADERS",
-                color = VelorixAccentLight,
+                "TOURNAMENT & PLATFORM CONTROLS",
+                color = Color(0xFF94A3B8),
                 fontWeight = FontWeight.Bold,
-                fontSize = 12.sp,
+                fontSize = 11.sp,
                 letterSpacing = 1.sp
             )
         }
+        item { SettingsToggle("Allow Direct Player Registration", true, "Players can self-register without admin pre-approval") }
+        item { SettingsToggle("Require ID Verification", false, "Mandatory Aadhaar/ID photo before cash prize withdrawal") }
+        item { SettingsToggle("Auto-Approve Prize Payouts", false, "Automatically process UPI payouts under Rs 1,000") }
+        item { SettingsToggle("Tournament Start Alerts", true, "Send automated FCM push notification 15m before start") }
+        item { SettingsToggle("Admin Dispute Notifications", true, "Notify on incoming support dispute tickets") }
 
-        // Live Optical Capsule Preview Card
-        item {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(60.dp)
-                    .clip(CircleShape)
-                    .border(
-                        width = 1.2.dp,
-                        brush = Brush.linearGradient(
-                            listOf(
-                                Color.White.copy(alpha = 0.70f),
-                                accentColor.copy(alpha = 0.45f),
-                                Color.White.copy(alpha = 0.20f),
-                                Color.White.copy(alpha = 0.55f)
-                            )
-                        ),
-                        shape = CircleShape
-                    )
-                    .drawBehind {
-                        drawLiquidGlassRefraction(manager.state, accentColor, isPill = true)
-                    }
-                    .padding(horizontal = 20.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.GraphicEq, contentDescription = null, tint = accentColor, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Live Optics Preview", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                        }
-                        Text(
-                            text = if (manager.state.chromaticAberration) "Prism Refraction ON" else "Refraction Standard",
-                            color = accentColor,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
-            }
-
-        // 1. Vibrancy
-        item {
-            LiquidGlassSliderItem(
-                title = "Vibrancy",
-                description = "Boost the saturation of the glass backdrop",
-                value = manager.state.vibrancy,
-                onValueChange = { manager.updateVibrancy(it) },
-                accentColor = accentColor
-            )
-        }
-
-        // 2. Blur Radius
-        item {
-            LiquidGlassSliderItem(
-                title = "Blur Radius",
-                description = "Amount of blur on the glass surface",
-                value = manager.state.blurRadius,
-                onValueChange = { manager.updateBlurRadius(it) },
-                accentColor = accentColor
-            )
-        }
-
-        // 3. Lens Refraction Height
-        item {
-            LiquidGlassSliderItem(
-                title = "Lens Refraction Height",
-                description = "Manage Lens Refraction Height settings",
-                value = manager.state.lensRefractionHeight,
-                onValueChange = { manager.updateLensRefractionHeight(it) },
-                accentColor = accentColor
-            )
-        }
-
-        // 4. Lens Refraction Amount
-        item {
-            LiquidGlassSliderItem(
-                title = "Lens Refraction Amount",
-                description = "Manage Lens Refraction Amount settings",
-                value = manager.state.lensRefractionAmount,
-                onValueChange = { manager.updateLensRefractionAmount(it) },
-                accentColor = accentColor
-            )
-        }
-
-        // 5. Chromatic Aberration Toggle
-        item {
-            LiquidGlassSwitchItem(
-                title = "Chromatic Aberration",
-                description = "Manage Chromatic Aberration settings",
-                checked = manager.state.chromaticAberration,
-                onCheckedChange = { manager.setChromaticAberration(it) },
-                accentColor = accentColor
-            )
-        }
-
-        // 6. Depth Effect Toggle
-        item {
-            LiquidGlassSwitchItem(
-                title = "Depth Effect",
-                description = "Manage Depth Effect settings",
-                checked = manager.state.depthEffect,
-                onCheckedChange = { manager.setDepthEffect(it) },
-                accentColor = accentColor
-            )
-        }
-
-        item { Spacer(modifier = Modifier.height(8.dp)) }
-
+        // 6. System & Administrative Tools
         item {
             Text(
-                "GENERAL PLATFORM CONTROLS",
-                color = VelorixAccentLight,
+                "ADMINISTRATIVE MODULES",
+                color = Color(0xFF94A3B8),
                 fontWeight = FontWeight.Bold,
-                fontSize = 12.sp,
-                letterSpacing = 1.sp
-            )
-        }
-        item { SettingsToggle("Allow Direct Player Registration", true) }
-        item { SettingsToggle("Require ID Verification", false) }
-        item { SettingsToggle("Auto-Approve Prize Payouts", false) }
-        
-        item { Spacer(modifier = Modifier.height(8.dp)) }
-        item {
-            Text(
-                "NOTIFICATIONS",
-                color = VelorixAccentLight,
-                fontWeight = FontWeight.Bold,
-                fontSize = 12.sp,
-                letterSpacing = 1.sp
-            )
-        }
-        item { SettingsToggle("Tournament Start Alerts", true) }
-        item { SettingsToggle("Admin Dispute Notifications", true) }
-
-        item { Spacer(modifier = Modifier.height(16.dp)) }
-        item {
-            Text(
-                "DATA & DATABASE MANAGEMENT",
-                color = Color(0xFFEF4444),
-                fontWeight = FontWeight.Bold,
-                fontSize = 12.sp,
+                fontSize = 11.sp,
                 letterSpacing = 1.sp
             )
         }
         item {
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-                color = Color(0xFF1C0A0A),
-                border = BorderStroke(1.dp, Color(0xFFEF4444).copy(alpha = 0.4f))
+                shape = RoundedCornerShape(16.dp),
+                color = Color(0xFF141416),
+                border = BorderStroke(1.dp, Color(0xFF27272A))
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.DeleteForever, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(20.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Purge Mock & Demo Data", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                    }
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        "Wipe dummy tournaments, match proofs, support tickets, and test records from Firebase Realtime Database & Firestore. Restores a clean database state.",
-                        color = Color(0xFF94A3B8),
-                        fontSize = 12.sp,
-                        lineHeight = 16.sp
+                Column(modifier = Modifier.padding(6.dp)) {
+                    SettingsModuleRow(
+                        title = "Staff & RBAC Permissions",
+                        subtitle = "Manage admin access and invitations",
+                        icon = Icons.Default.Shield,
+                        onClick = { onNavigateTab?.invoke("admins") }
                     )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Button(
-                        onClick = { showPurgeConfirmationDialog = true },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Default.DeleteSweep, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Wipe / Clean Demo Data", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                    }
+                    HorizontalDivider(color = Color(0xFF27272A), thickness = 0.5.dp)
+                    SettingsModuleRow(
+                        title = "Rules & Match Specs",
+                        subtitle = "Gun bans, custom character & device limits",
+                        icon = Icons.Default.MilitaryTech,
+                        onClick = { onNavigateTab?.invoke("tournament_rules") }
+                    )
+                    HorizontalDivider(color = Color(0xFF27272A), thickness = 0.5.dp)
+                    SettingsModuleRow(
+                        title = "Check-In PINs & Banners",
+                        subtitle = "Generate match PINs & announcement slides",
+                        icon = Icons.Default.DashboardCustomize,
+                        onClick = { onNavigateTab?.invoke("lowcode") }
+                    )
+                    HorizontalDivider(color = Color(0xFF27272A), thickness = 0.5.dp)
+                    SettingsModuleRow(
+                        title = "Player Leaderboards",
+                        subtitle = "Rankings, points tally & Hall of Fame",
+                        icon = Icons.Default.EmojiEvents,
+                        onClick = { onNavigateTab?.invoke("leaderboard") }
+                    )
+                    HorizontalDivider(color = Color(0xFF27272A), thickness = 0.5.dp)
+                    SettingsModuleRow(
+                        title = "Rate Limiter & Quotas",
+                        subtitle = "Inspect flood prevention & token buckets",
+                        icon = Icons.Default.Speed,
+                        onClick = { onOpenRateLimiter?.invoke() }
+                    )
                 }
             }
         }
-        item { Spacer(modifier = Modifier.height(16.dp)) }
+
+        // 7. Security & Database RLS
         item {
             Text(
                 "FIREBASE RLS & SECURITY RULES",
-                color = Color(0xFF38BDF8),
+                color = Color(0xFF94A3B8),
                 fontWeight = FontWeight.Bold,
-                fontSize = 12.sp,
+                fontSize = 11.sp,
                 letterSpacing = 1.sp
             )
         }
         item {
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
-                color = Color(0xFF0C1322),
-                border = BorderStroke(1.dp, Color(0xFF1E3A8A).copy(alpha = 0.6f))
+                shape = RoundedCornerShape(16.dp),
+                color = Color(0xFF141416),
+                border = BorderStroke(1.dp, Color(0xFF27272A))
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Row(
@@ -1144,22 +1323,22 @@ fun GlobalSettingsScreenContent(
                             Box(
                                 modifier = Modifier
                                     .size(36.dp)
-                                    .background(Color(0xFF38BDF8).copy(alpha = 0.2f), CircleShape)
-                                    .border(1.dp, Color(0xFF38BDF8), CircleShape),
+                                    .background(Color(0xFF0284C7).copy(alpha = 0.2f), CircleShape)
+                                    .border(1.dp, Color(0xFF0284C7), CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(Icons.Default.VpnKey, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(18.dp))
                             }
                             Spacer(modifier = Modifier.width(10.dp))
                             Column {
-                                Text("Database RLS Policies", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                                Text("Row-Level Security & Super Admin Auth", color = Color(0xFF94A3B8), fontSize = 11.sp)
+                                Text("Database RLS Policies", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+                                Text("Row-Level Security & Super Admin Auth", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
                             }
                         }
                         Surface(
                             shape = RoundedCornerShape(6.dp),
                             color = Color(0xFF0E2E3B),
-                            border = BorderStroke(1.dp, Color(0xFF0284C7))
+                            border = BorderStroke(0.5.dp, Color(0xFF0284C7))
                         ) {
                             Text(
                                 "ACTIVE RLS",
@@ -1175,7 +1354,7 @@ fun GlobalSettingsScreenContent(
                     Text(
                         "Ensures strict Row-Level Security: Only authorized administrators have access to dashboard endpoints and wallet controls, while players only access their personal records.",
                         color = Color(0xFF94A3B8),
-                        fontSize = 12.sp,
+                        fontSize = 11.5.sp,
                         lineHeight = 16.sp
                     )
 
@@ -1249,70 +1428,66 @@ fun GlobalSettingsScreenContent(
             }
         }
 
-        item { Spacer(modifier = Modifier.height(16.dp)) }
+        // 8. Maintenance & Danger Zone
         item {
             Text(
-                "ADMINISTRATOR SESSION",
-                color = Color.White,
+                "DATA & SESSION MAINTENANCE",
+                color = Color(0xFFEF4444),
                 fontWeight = FontWeight.Bold,
-                fontSize = 12.sp,
+                fontSize = 11.sp,
                 letterSpacing = 1.sp
             )
         }
         item {
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(16.dp),
                 color = Color(0xFF141416),
                 border = BorderStroke(1.dp, Color(0xFF27272A))
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .background(VelorixAccent.copy(alpha = 0.2f), CircleShape)
-                                    .border(1.dp, VelorixAccent, CircleShape),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(Icons.Default.Shield, contentDescription = null, tint = VelorixAccent, modifier = Modifier.size(18.dp))
-                            }
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column {
-                                Text("Super Administrator", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                                Text(currentUserEmail ?: "anantisback47@gmail.com", color = VelorixTextSecondary, fontSize = 11.sp)
-                            }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Reset / Clean Demo Data", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Wipe mock records from Realtime DB & Firestore", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
                         }
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = Color(0xFF102A1E),
-                            border = BorderStroke(1.dp, Color(0xFF166534))
+                        OutlinedButton(
+                            onClick = { showPurgeConfirmationDialog = true },
+                            border = BorderStroke(1.dp, Color(0xFFEF4444).copy(alpha = 0.6f)),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFEF4444)),
+                            shape = RoundedCornerShape(8.dp)
                         ) {
-                            Text(
-                                "ACTIVE SESSION",
-                                color = Color(0xFF86EFAC),
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
+                            Icon(Icons.Default.DeleteSweep, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Wipe Demo Data", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(14.dp))
-                    Button(
-                        onClick = { showLogoutConfirmationDialog = true },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF27272A), contentColor = Color(0xFFEF4444)),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth().height(42.dp)
+                    HorizontalDivider(color = Color(0xFF27272A), thickness = 0.5.dp)
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.ExitToApp, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Log Out Administrator Account", color = Color(0xFFEF4444), fontWeight = FontWeight.Bold, fontSize = 12.5.sp)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Sign Out Session", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+                            Text("End admin session and return to login", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
+                        }
+                        Button(
+                            onClick = { showLogoutConfirmationDialog = true },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF27272A)),
+                            border = BorderStroke(1.dp, Color(0xFF3F3F46)),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Icon(Icons.Default.ExitToApp, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Sign Out", color = Color(0xFFEF4444), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
@@ -1323,24 +1498,65 @@ fun GlobalSettingsScreenContent(
 }
 
 @Composable
-fun SettingsToggle(label: String, initial: Boolean) {
+fun SettingsModuleRow(
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(34.dp)
+                .background(Color(0xFF202024), RoundedCornerShape(8.dp))
+                .border(0.5.dp, Color(0xFF2E2E34), RoundedCornerShape(8.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(17.dp))
+        }
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(subtitle, color = Color(0xFF94A3B8), fontSize = 11.sp)
+        }
+        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = Color(0xFF71717A), modifier = Modifier.size(16.dp))
+    }
+}
+
+@Composable
+fun SettingsToggle(label: String, initial: Boolean, subtitle: String? = null) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val sharedPrefs = remember { context.getSharedPreferences("VelorixAdminSettings", android.content.Context.MODE_PRIVATE) }
     
     var checked by remember { 
         mutableStateOf(sharedPrefs.getBoolean(label, initial)) 
     }
-    GlassCard(
+    Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        borderBrush = GlassTokens.GlassBorderSubtle
+        shape = RoundedCornerShape(14.dp),
+        color = Color(0xFF141416),
+        border = BorderStroke(1.dp, Color(0xFF27272A))
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(label, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                Text(label, color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+                if (subtitle != null) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(subtitle, color = Color(0xFF94A3B8), fontSize = 11.5.sp)
+                }
+            }
             Switch(
                 checked = checked, 
                 onCheckedChange = { 
@@ -1349,8 +1565,8 @@ fun SettingsToggle(label: String, initial: Boolean) {
                 }, 
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = Color.White,
-                    checkedTrackColor = VelorixAccent,
-                    uncheckedTrackColor = Color(0x33100B1E)
+                    checkedTrackColor = Color(0xFF2563EB),
+                    uncheckedTrackColor = Color(0xFF27272A)
                 )
             )
         }

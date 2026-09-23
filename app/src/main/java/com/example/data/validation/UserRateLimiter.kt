@@ -67,6 +67,16 @@ object UserRateLimiter {
             actionDisplayName = "Account Login",
             category = RateCategory.AUTH
         ),
+        AUTH_REGISTER_ATTEMPT(
+            requestsPerMinute = 4.0,       // 4 registrations / min
+            burstCapacity = 2,
+            minIntervalMs = 2_000L,
+            maxAttemptsInWindow = 4,
+            windowDurationMs = 5 * 60_000L,
+            defaultLockoutMs = 60_000L,
+            actionDisplayName = "Account Registration",
+            category = RateCategory.AUTH
+        ),
         PHONE_OTP_REQUEST(
             requestsPerMinute = 1.0,       // 1 per minute max
             burstCapacity = 1,

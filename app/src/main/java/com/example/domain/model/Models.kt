@@ -80,8 +80,20 @@ data class UserProfile(
     var deviceModel: String = "",
     @get:PropertyName("ipAddress") @set:PropertyName("ipAddress")
     var ipAddress: String = "",
+    @get:PropertyName("dateOfBirth") @set:PropertyName("dateOfBirth")
+    var dateOfBirth: String = "",
+    @get:PropertyName("age") @set:PropertyName("age")
+    var age: Int = 0,
+    @get:PropertyName("isUnder18") @set:PropertyName("isUnder18")
+    var isUnder18: Boolean = false,
+    @get:PropertyName("eligibleForCashTournaments") @set:PropertyName("eligibleForCashTournaments")
+    var eligibleForCashTournaments: Boolean = true,
+    @get:PropertyName("ageConfirmed") @set:PropertyName("ageConfirmed")
+    var ageConfirmed: Boolean = false,
     var rawAttributes: Map<String, String> = emptyMap()
 ) {
+    val isMinor: Boolean get() = isUnder18 || (age in 1..17)
+    val canJoinCashTournaments: Boolean get() = !isMinor && eligibleForCashTournaments
     val totalWalletBalance: Double get() = when {
         balance > 0.0 -> balance
         (depositFunds + winningFunds + bonusFunds) > 0.0 -> depositFunds + winningFunds + bonusFunds
@@ -290,6 +302,8 @@ data class Tournament(
     var bannerUrl: String = "",
     @get:PropertyName("game") @set:PropertyName("game")
     var game: String = "Free Fire",
+    @get:PropertyName("category") @set:PropertyName("category")
+    var category: String = "BR", // BR (Battle Royale / Full Map), CS (Clash Squad), LONE_WOLF (Lone Wolf), SCRIMS (Training / Practice)
     @get:PropertyName("map") @set:PropertyName("map")
     var map: String = "Bermuda", // Bermuda, Purgatory, Kalahari, Alpine, NexTerra
     @get:PropertyName("entryFee") @set:PropertyName("entryFee")
@@ -382,7 +396,101 @@ data class Tournament(
 
     @get:PropertyName("registrations") @set:PropertyName("registrations")
     var registrations: List<PlayerRegistration> = emptyList()
-)
+) {
+    val isCashTournament: Boolean get() = entryFee > 0f || prizePool > 0f
+    val isTrainingMatch: Boolean get() = entryFee == 0f || title.contains("Training", ignoreCase = true) || title.contains("Scrim", ignoreCase = true) || title.contains("Practice", ignoreCase = true) || description.contains("training", ignoreCase = true)
+
+    val canonicalCategory: String get() {
+        val cat = category.trim().uppercase()
+        return when {
+            cat == "CS" || cat.contains("CLASH") || format.contains("CS", true) || title.contains("CS", true) || title.contains("Clash Squad", true) -> "CS"
+            cat == "LONE_WOLF" || cat == "LONEWOLF" || format.contains("Lone", true) || title.contains("Lone Wolf", true) || title.contains("1v1", true) && !format.contains("CS", true) || map.contains("Iron Cage", true) -> "LONE_WOLF"
+            cat == "SCRIMS" || cat == "TRAINING" || isTrainingMatch -> "SCRIMS"
+            else -> "BR"
+        }
+    }
+
+    val categoryDisplayName: String get() = when (canonicalCategory) {
+        "BR" -> "Battle Royale (Full Map)"
+        "CS" -> "Clash Squad (CS)"
+        "LONE_WOLF" -> "Lone Wolf (1v1 / 2v2)"
+        "SCRIMS" -> "Custom Scrims & Training"
+        else -> "Battle Royale"
+    }
+
+    val categoryShortBadge: String get() = when (canonicalCategory) {
+        "BR" -> "BR FULL MAP"
+        "CS" -> "CLASH SQUAD"
+        "LONE_WOLF" -> "LONE WOLF"
+        "SCRIMS" -> "SCRIMS / FREE"
+        else -> "BATTLE ROYALE"
+    }
+
+    val isBattleRoyale: Boolean get() = canonicalCategory == "BR"
+    val isClashSquad: Boolean get() = canonicalCategory == "CS"
+    val isLoneWolf: Boolean get() = canonicalCategory == "LONE_WOLF"
+    val isScrim: Boolean get() = canonicalCategory == "SCRIMS"
+}
+
+object FreeFireCategories {
+    const val BR = "BR"
+    const val CS = "CS"
+    const val LONE_WOLF = "LONE_WOLF"
+    const val SCRIMS = "SCRIMS"
+
+    data class CategoryMeta(
+        val key: String,
+        val label: String,
+        val shortName: String,
+        val description: String,
+        val defaultFormats: List<String>,
+        val defaultMaps: List<String>,
+        val defaultMaxPlayers: Int
+    )
+
+    val ALL_CATEGORIES = listOf(
+        CategoryMeta(
+            key = BR,
+            label = "Battle Royale (Full Map)",
+            shortName = "BR",
+            description = "Standard 48-player competitive survival matches across Bermuda, Purgatory, Kalahari & Alpine.",
+            defaultFormats = listOf("SOLO", "DUO", "SQUAD"),
+            defaultMaps = listOf("Bermuda", "Purgatory", "Kalahari", "Alpine", "NexTerra"),
+            defaultMaxPlayers = 48
+        ),
+        CategoryMeta(
+            key = CS,
+            label = "Clash Squad (CS)",
+            shortName = "CS",
+            description = "High-octane round-based tactical combat. 4v4, 2v2, or 1v1 best of 7/13 rounds.",
+            defaultFormats = listOf("4v4 CS", "2v2 CS", "1v1 CS"),
+            defaultMaps = listOf("Bermuda CS", "Kalahari CS", "Purgatory CS", "Alpine CS"),
+            defaultMaxPlayers = 8
+        ),
+        CategoryMeta(
+            key = LONE_WOLF,
+            label = "Lone Wolf (Duel)",
+            shortName = "Lone Wolf",
+            description = "Intense 1v1 and 2v2 weapon-pick showdown arena matches in Iron Cage.",
+            defaultFormats = listOf("1v1 LONE WOLF", "2v2 LONE WOLF"),
+            defaultMaps = listOf("Iron Cage", "Sci-Turf", "Bermuda Cage"),
+            defaultMaxPlayers = 2
+        ),
+        CategoryMeta(
+            key = SCRIMS,
+            label = "Custom Scrims & Training",
+            shortName = "Scrims",
+            description = "Guild practice, mock tournament scrims, and free entry training rooms for minor and pro players.",
+            defaultFormats = listOf("SQUAD SCRIMS", "SOLO PRACTICE", "DUO SCRIMS"),
+            defaultMaps = listOf("Bermuda", "Purgatory", "Kalahari"),
+            defaultMaxPlayers = 48
+        )
+    )
+
+    fun getCategoryMeta(key: String): CategoryMeta {
+        return ALL_CATEGORIES.firstOrNull { it.key.equals(key, ignoreCase = true) } ?: ALL_CATEGORIES[0]
+    }
+}
 
 object TournamentBannerPresets {
     data class BannerPreset(val id: String, val title: String, val map: String, val url: String)

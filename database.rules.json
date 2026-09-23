@@ -171,7 +171,27 @@
     },
     "matches": {
       ".read": "auth != null",
-      ".write": "auth != null && (root.child('admins').child(auth.uid).child('active').val() === true || auth.token.email === 'anantisback47@gmail.com')"
+      ".write": "auth != null && (root.child('admins').child(auth.uid).child('active').val() === true || auth.token.email === 'anantisback47@gmail.com' || auth.token.email === 'velorixtest@gmail.com')"
+    },
+    "categories": {
+      ".read": "auth != null",
+      ".write": "auth != null && (root.child('admins').child(auth.uid).child('active').val() === true || auth.token.email === 'anantisback47@gmail.com' || auth.token.email === 'velorixtest@gmail.com')"
+    },
+    "tournaments_by_category": {
+      ".read": "auth != null",
+      ".write": "auth != null && (root.child('admins').child(auth.uid).child('active').val() === true || auth.token.email === 'anantisback47@gmail.com' || auth.token.email === 'velorixtest@gmail.com')"
+    },
+    "matches_by_category": {
+      ".read": "auth != null",
+      ".write": "auth != null && (root.child('admins').child(auth.uid).child('active').val() === true || auth.token.email === 'anantisback47@gmail.com' || auth.token.email === 'velorixtest@gmail.com')"
+    },
+    "FreeFire": {
+      ".read": "auth != null",
+      ".write": "auth != null && (root.child('admins').child(auth.uid).child('active').val() === true || auth.token.email === 'anantisback47@gmail.com' || auth.token.email === 'velorixtest@gmail.com')"
+    },
+    "games": {
+      ".read": "auth != null",
+      ".write": "auth != null && (root.child('admins').child(auth.uid).child('active').val() === true || auth.token.email === 'anantisback47@gmail.com' || auth.token.email === 'velorixtest@gmail.com')"
     },
     "active_tournaments": {
       ".read": "auth != null",

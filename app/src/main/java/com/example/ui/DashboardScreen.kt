@@ -46,6 +46,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.DashboardCustomize
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.ExitToApp
@@ -68,6 +69,9 @@ import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.ui.platform.LocalContext
 import com.example.ui.common.LiquidGlassOpticsManager
 import com.example.ui.common.LiquidGlassOpticsStudio
+import com.example.ui.components.VelorixAudioLabDialog
+import com.example.ui.components.GeminiApiKeyDialog
+import com.example.ui.audio.rememberVelorixSoundManager
 import com.kashif_e.backdrop.*
 import com.kashif_e.backdrop.backdrops.*
 import androidx.compose.material3.AlertDialog
@@ -167,6 +171,8 @@ fun DashboardScreen(
     var showAdminProfileDialog by remember { mutableStateOf(false) }
     var showRateLimiterDialog by remember { mutableStateOf(false) }
     var showLogoutConfirmationDialog by remember { mutableStateOf(false) }
+    var showAudioLabDialog by remember { mutableStateOf(false) }
+    var showApiKeyDialog by remember { mutableStateOf(false) }
 
     // Scroll Position Tracking & Blur Progress Calculation (iOS Progressive Blur Navbar)
     val dashboardScrollState = rememberScrollState()
@@ -273,14 +279,22 @@ fun DashboardScreen(
                                 )
                             }
                             "system" -> {
-                                SystemHubScreenContent(
-                                    uiState = uiState,
-                                    onNavigate = { target ->
+                                GlobalSettingsScreenContent(
+                                    opticsManager = opticsManager,
+                                    accentColor = currentHyperTheme.primaryColor,
+                                    currentTheme = currentHyperTheme,
+                                    onThemeSelect = { currentHyperTheme = it },
+                                    onPurgeDemoData = onPurgeDemoData,
+                                    currentUserEmail = (uiState as? DashboardState.Success)?.currentUserEmail,
+                                    onLogout = { showLogoutConfirmationDialog = true },
+                                    onNavigateTab = { target ->
                                         if (target == "chatbot") onNavClick("chatbot")
+                                        else if (target == "sfx_lab") showAudioLabDialog = true
                                         else selectedTab = target
                                     },
-                                    onPublishAnnouncement = { onPublishAnnouncement?.invoke(it) },
-                                    accentColor = currentHyperTheme.primaryColor
+                                    onOpenAudioLab = { showAudioLabDialog = true },
+                                    onOpenApiKeyDialog = { showApiKeyDialog = true },
+                                    onOpenRateLimiter = { showRateLimiterDialog = true }
                                 )
                             }
                             "leaderboard" -> {
@@ -301,6 +315,7 @@ fun DashboardScreen(
                                     uiState = uiState,
                                     onNavigate = { target ->
                                         if (target == "chatbot") onNavClick("chatbot")
+                                        else if (target == "sfx_lab") showAudioLabDialog = true
                                         else selectedTab = target
                                     },
                                     onPublishAnnouncement = { onPublishAnnouncement?.invoke(it) },
@@ -427,7 +442,7 @@ fun DashboardScreen(
                             "settings" -> {
                                 Column(modifier = Modifier.fillMaxSize()) {
                                     SubAppNavigationHeader(
-                                        title = "System Settings",
+                                        title = "Settings",
                                         onBack = { selectedTab = "system" },
                                         accentColor = currentHyperTheme.primaryColor
                                     )
@@ -438,7 +453,15 @@ fun DashboardScreen(
                                         onThemeSelect = { currentHyperTheme = it },
                                         onPurgeDemoData = onPurgeDemoData,
                                         currentUserEmail = (uiState as? DashboardState.Success)?.currentUserEmail,
-                                        onLogout = { showLogoutConfirmationDialog = true }
+                                        onLogout = { showLogoutConfirmationDialog = true },
+                                        onNavigateTab = { target ->
+                                            if (target == "chatbot") onNavClick("chatbot")
+                                            else if (target == "sfx_lab") showAudioLabDialog = true
+                                            else selectedTab = target
+                                        },
+                                        onOpenAudioLab = { showAudioLabDialog = true },
+                                        onOpenApiKeyDialog = { showApiKeyDialog = true },
+                                        onOpenRateLimiter = { showRateLimiterDialog = true }
                                     )
                                 }
                             }
@@ -518,6 +541,10 @@ fun DashboardScreen(
                 showAdminProfileDialog = false
                 showRateLimiterDialog = true
             },
+            onOpenAudioLab = {
+                showAdminProfileDialog = false
+                showAudioLabDialog = true
+            },
             onLogoutClick = {
                 showAdminProfileDialog = false
                 showLogoutConfirmationDialog = true
@@ -569,6 +596,21 @@ fun DashboardScreen(
                     Text("Cancel", color = Color.White)
                 }
             }
+        )
+    }
+
+    if (showAudioLabDialog) {
+        val soundManager = rememberVelorixSoundManager()
+        VelorixAudioLabDialog(
+            soundManager = soundManager,
+            onDismissRequest = { showAudioLabDialog = false }
+        )
+    }
+
+    if (showApiKeyDialog) {
+        GeminiApiKeyDialog(
+            onDismissRequest = { showApiKeyDialog = false },
+            onKeySaved = { showApiKeyDialog = false }
         )
     }
 }
@@ -1804,6 +1846,14 @@ fun SystemHubScreenContent(
             iconGradient = listOf(Color(0xFFA855F7), Color(0xFF6366F1))
         ),
         AppHubItem(
+            id = "sfx_lab",
+            title = "SFX Audio Lab (Beat Tester)",
+            description = "Test subtle Michael Jackson acoustic beat textures, funk snaps, stabs & master volume",
+            badge = "SFX Tester",
+            icon = Icons.Default.Headphones,
+            iconGradient = listOf(Color(0xFFD49A3D), Color(0xFFB45309))
+        ),
+        AppHubItem(
             id = "settings",
             title = "Theme & Preferences",
             description = "System toggles, auto-registration policies & dark/light palettes",
@@ -1998,6 +2048,7 @@ fun AdminProfileDialog(
     onNavigateTab: (String) -> Unit,
     onOpenAttributions: () -> Unit = {},
     onOpenRateLimiter: () -> Unit = {},
+    onOpenAudioLab: () -> Unit = {},
     onLogoutClick: () -> Unit,
     accentColor: Color
 ) {
@@ -2102,6 +2153,28 @@ fun AdminProfileDialog(
                             Icon(UntitledIcons.Sliders, contentDescription = null, tint = Color(0xFFA78BFA), modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(10.dp))
                             Text("Rate Limiter & Quota Engine", color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+                        }
+                        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(15.dp))
+                    }
+                }
+
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { onOpenAudioLab() },
+                    color = Color(0xFF1A1A1E),
+                    border = BorderStroke(1.dp, Color(0xFF27272A))
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Headphones, contentDescription = null, tint = Color(0xFFD49A3D), modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text("SFX Audio Lab (Beat Tester)", color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
                         }
                         Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(15.dp))
                     }

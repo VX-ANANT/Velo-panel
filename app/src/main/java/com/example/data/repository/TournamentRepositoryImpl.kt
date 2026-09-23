@@ -77,14 +77,21 @@ class TournamentRepositoryImpl(private val context: android.content.Context? = n
         identifier: String,
         displayName: String? = null,
         phone: String? = null,
-        authProvider: String = "email"
+        authProvider: String = "email",
+        dateOfBirth: String? = null,
+        age: Int? = null,
+        isUnder18: Boolean? = null
     ): Boolean {
         val cleanIdentifier = identifier.trim().lowercase().ifBlank { "player_$uid" }
         val effectiveName = displayName?.ifBlank { null } ?: cleanIdentifier.substringBefore("@").ifBlank { "Player" }
         val now = System.currentTimeMillis()
         val safeKey = cleanIdentifier.replace(".", "_").replace("#", "_").replace("$", "_").replace("[", "_").replace("]", "_")
 
-        val profilePayload = mapOf<String, Any>(
+        val computedAge = if (age != null && age > 0) age else if (!dateOfBirth.isNullOrBlank()) com.example.data.validation.TournamentBackendValidator.calculateAgeFromDob(dateOfBirth) else 0
+        val computedUnder18 = isUnder18 ?: if (computedAge > 0) (computedAge < 18) else false
+        val cashEligible = !computedUnder18 && (computedAge >= 18 || computedAge <= 0)
+
+        val profilePayload = mutableMapOf<String, Any>(
             "id" to uid,
             "uid" to uid,
             "email" to (if (cleanIdentifier.contains("@")) cleanIdentifier else ""),
@@ -109,6 +116,11 @@ class TournamentRepositoryImpl(private val context: android.content.Context? = n
             "kills" to 0,
             "matchesPlayed" to 0,
             "vipTier" to "ACTIVE_PLAYER",
+            "dateOfBirth" to (dateOfBirth ?: ""),
+            "age" to computedAge,
+            "isUnder18" to computedUnder18,
+            "eligibleForCashTournaments" to cashEligible,
+            "ageConfirmed" to (computedAge > 0 || !dateOfBirth.isNullOrBlank()),
             "createdAt" to now,
             "lastLoginAt" to now,
             "updatedAt" to now
@@ -140,7 +152,10 @@ class TournamentRepositoryImpl(private val context: android.content.Context? = n
     suspend fun verifyAndRegisterAdmin(
         uid: String,
         email: String,
-        displayName: String? = null
+        displayName: String? = null,
+        dateOfBirth: String? = null,
+        age: Int? = null,
+        isUnder18: Boolean? = null
     ): AdminVerificationResult {
         val cleanEmail = email.trim().lowercase().ifBlank { "admin@velorix.gg" }
         val effectiveName = displayName?.ifBlank { null } ?: cleanEmail.substringBefore("@").ifBlank { "Admin" }
@@ -148,8 +163,20 @@ class TournamentRepositoryImpl(private val context: android.content.Context? = n
         val effectiveRole = "super_admin"
         val emailKey = cleanEmail.replace(".", "_")
 
+        val computedAge = if (age != null && age > 0) age else if (!dateOfBirth.isNullOrBlank()) com.example.data.validation.TournamentBackendValidator.calculateAgeFromDob(dateOfBirth) else 0
+        val computedUnder18 = isUnder18 ?: if (computedAge > 0) (computedAge < 18) else false
+        val cashEligible = !computedUnder18 && (computedAge >= 18 || computedAge <= 0)
+
         recordAccountLocally(cleanEmail, effectiveName, effectiveRole, uid)
-        autoVerifyAndProvisionPlayer(uid, cleanEmail, effectiveName, authProvider = "admin_auth")
+        autoVerifyAndProvisionPlayer(
+            uid = uid,
+            identifier = cleanEmail,
+            displayName = effectiveName,
+            authProvider = "admin_auth",
+            dateOfBirth = dateOfBirth,
+            age = computedAge,
+            isUnder18 = computedUnder18
+        )
 
         val adminPayload = mapOf<String, Any>(
             "uid" to uid,
@@ -198,7 +225,12 @@ class TournamentRepositoryImpl(private val context: android.content.Context? = n
             "kills" to 0,
             "isBanned" to false,
             "walletFrozen" to false,
-            "vipTier" to "NONE"
+            "vipTier" to "NONE",
+            "dateOfBirth" to (dateOfBirth ?: ""),
+            "age" to computedAge,
+            "isUnder18" to computedUnder18,
+            "eligibleForCashTournaments" to cashEligible,
+            "ageConfirmed" to (computedAge > 0 || !dateOfBirth.isNullOrBlank())
         )
 
         // Asynchronously sync admin permissions without blocking or hanging login
@@ -238,6 +270,31 @@ class TournamentRepositoryImpl(private val context: android.content.Context? = n
             val name = user?.displayName ?: email.substringBefore("@")
             val res = verifyAndRegisterAdmin(uid, email, name)
             res.isAuthorized
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    suspend fun updateUserDateOfBirth(uid: String, dateOfBirth: String): Boolean {
+        val calculatedAge = com.example.data.validation.TournamentBackendValidator.calculateAgeFromDob(dateOfBirth)
+        val isUnder18 = calculatedAge < 18
+        val eligibleForCash = calculatedAge >= 18
+        val now = System.currentTimeMillis()
+        val updates = mapOf<String, Any>(
+            "dateOfBirth" to dateOfBirth,
+            "age" to calculatedAge,
+            "isUnder18" to isUnder18,
+            "eligibleForCashTournaments" to eligibleForCash,
+            "ageConfirmed" to true,
+            "updatedAt" to now
+        )
+        return try {
+            database.child("users").child(uid).updateChildren(updates).await()
+            database.child("userProfiles").child(uid).updateChildren(updates).await()
+            database.child("players").child(uid).updateChildren(updates).await()
+            firestore.collection("users").document(uid).set(updates, com.google.firebase.firestore.SetOptions.merge()).await()
+            firestore.collection("userProfiles").document(uid).set(updates, com.google.firebase.firestore.SetOptions.merge()).await()
+            true
         } catch (_: Exception) {
             false
         }
@@ -526,7 +583,20 @@ service cloud.firestore {
         val directBalanceLong = (child("balance").value as? Long) ?: (child("balance").value as? Number)?.toLong()
         val directBalance = directBalanceLong?.toDouble() ?: findDouble("balance", "funds", "wallet", "walletBalance", "wallet_balance", "coins", "vtCoins", "amount", "money", "credits")
 
-        android.util.Log.d("AdminPanel", "User: $uId | Email: $email | IGN: $directIgn | Balance: ${directBalanceLong ?: directBalance.toLong()}")
+        val dateOfBirth = findString("dateOfBirth", "dob", "birthDate", "birth_date", "date_of_birth") ?: ""
+        var age = safeInt(child("age").value ?: child("userAge").value ?: child("user_age").value)
+        if (age <= 0 && dateOfBirth.isNotBlank()) {
+            age = com.example.data.validation.TournamentBackendValidator.calculateAgeFromDob(dateOfBirth)
+        }
+        val isUnder18 = (child("isUnder18").value as? Boolean)
+            ?: (child("under18").value as? Boolean)
+            ?: (age in 1..17)
+        val eligibleForCashTournaments = (child("eligibleForCashTournaments").value as? Boolean)
+            ?: (!isUnder18 && (age >= 18 || age <= 0))
+        val ageConfirmed = (child("ageConfirmed").value as? Boolean)
+            ?: (dateOfBirth.isNotBlank())
+
+        android.util.Log.d("AdminPanel", "User: $uId | Email: $email | IGN: $directIgn | Balance: ${directBalanceLong ?: directBalance.toLong()} | DOB: $dateOfBirth | Age: $age | isUnder18: $isUnder18")
 
         val rawMap = mutableMapOf<String, String>()
         fun extractChildren(prefix: String, snap: DataSnapshot) {
@@ -572,6 +642,11 @@ service cloud.firestore {
             isMaintenanceBypass = isMaintenanceBypass,
             deviceModel = deviceModel,
             ipAddress = ipAddress,
+            dateOfBirth = dateOfBirth,
+            age = age,
+            isUnder18 = isUnder18,
+            eligibleForCashTournaments = eligibleForCashTournaments,
+            ageConfirmed = ageConfirmed,
             lastActive = lastActive,
             createdAt = createdAt,
             gameId = if (gameId.isNotBlank()) gameId else directIgn,
@@ -606,12 +681,12 @@ service cloud.firestore {
             ?: child("heading").value?.toString()
             ?: "Tournament"
 
-        val game = child("game").value?.toString() 
+        val rawGame = child("game").value?.toString() 
             ?: child("gameName").value?.toString() 
             ?: child("game_name").value?.toString()
             ?: child("game_title").value?.toString() 
-            ?: child("category").value?.toString()
             ?: "Free Fire"
+        val game = if (rawGame.equals("BR", true) || rawGame.equals("CS", true) || rawGame.equals("LONE_WOLF", true) || rawGame.equals("SCRIMS", true)) "Free Fire" else rawGame
 
         val entryFee = safeFloat(child("entryFee").value ?: child("entry_fee").value ?: child("fee").value ?: child("entry").value ?: child("ticketPrice").value ?: child("coins").value ?: child("price").value)
         val prizePool = safeFloat(child("prizePool").value ?: child("prize_pool").value ?: child("prize").value ?: child("prizepool").value ?: child("totalPrize").value ?: child("winningPrize").value ?: child("pool").value)
@@ -631,6 +706,20 @@ service cloud.firestore {
         val format = child("format").value?.toString() ?: child("matchType").value?.toString() ?: child("match_type").value?.toString() ?: child("type").value?.toString() ?: child("mode").value?.toString() ?: child("gameMode").value?.toString() ?: "SOLO"
         val status = child("status").value?.toString() ?: child("matchStatus").value?.toString() ?: child("match_status").value?.toString() ?: child("state").value?.toString() ?: child("tournamentStatus").value?.toString() ?: "UPCOMING"
         val mapName = child("map").value?.toString() ?: child("mapName").value?.toString() ?: child("map_name").value?.toString() ?: child("arena").value?.toString() ?: "Bermuda"
+
+        val rawCategory = child("category").value?.toString()
+            ?: child("canonicalCategory").value?.toString()
+            ?: child("tournamentCategory").value?.toString()
+            ?: child("gameCategory").value?.toString()
+            ?: child("category_key").value?.toString()
+            ?: ""
+
+        val category = when {
+            rawCategory.equals("CS", ignoreCase = true) || rawCategory.contains("CLASH", ignoreCase = true) || format.contains("CS", ignoreCase = true) || title.contains("CS", ignoreCase = true) || title.contains("Clash Squad", ignoreCase = true) -> "CS"
+            rawCategory.equals("LONE_WOLF", ignoreCase = true) || rawCategory.contains("LONE", ignoreCase = true) || format.contains("Lone", ignoreCase = true) || title.contains("Lone Wolf", ignoreCase = true) || title.contains("1v1", ignoreCase = true) && !format.contains("CS", ignoreCase = true) || mapName.contains("Iron Cage", ignoreCase = true) -> "LONE_WOLF"
+            rawCategory.equals("SCRIMS", ignoreCase = true) || rawCategory.contains("SCRIM", ignoreCase = true) || rawCategory.contains("TRAINING", ignoreCase = true) || title.contains("Scrim", ignoreCase = true) || title.contains("Training", ignoreCase = true) -> "SCRIMS"
+            else -> "BR"
+        }
         val startsAt = child("startsAt").value?.toString() ?: child("startTime").value?.toString() ?: child("start_time").value?.toString() ?: child("schedule").value?.toString() ?: child("date").value?.toString() ?: child("time").value?.toString() ?: child("matchTime").value?.toString() ?: child("match_time").value?.toString() ?: child("startAt").value?.toString() ?: child("timestamp").value?.toString()
         val endsAt = child("endsAt").value?.toString() ?: child("endTime").value?.toString() ?: child("end_time").value?.toString()
 
@@ -733,6 +822,7 @@ service cloud.firestore {
             id = tId,
             title = title,
             game = game,
+            category = category,
             map = mapName,
             entryFee = entryFee,
             prizePool = prizePool,
@@ -781,7 +871,8 @@ service cloud.firestore {
         if (!exists()) return null
         val tId = getString("id") ?: getString("tournamentId") ?: getString("tournament_id") ?: getString("matchId") ?: getString("match_id") ?: id
         val title = getString("title") ?: getString("name") ?: getString("tournamentName") ?: getString("tournament_name") ?: getString("matchTitle") ?: getString("match_title") ?: "Tournament"
-        val game = getString("game") ?: getString("gameName") ?: getString("game_name") ?: getString("category") ?: "Free Fire"
+        val rawGame = getString("game") ?: getString("gameName") ?: getString("game_name") ?: "Free Fire"
+        val game = if (rawGame.equals("BR", true) || rawGame.equals("CS", true) || rawGame.equals("LONE_WOLF", true) || rawGame.equals("SCRIMS", true)) "Free Fire" else rawGame
         val mapName = getString("map") ?: getString("mapName") ?: getString("map_name") ?: getString("arena") ?: "Bermuda"
         val entryFee = safeFloat(get("entryFee") ?: get("entry_fee") ?: get("fee") ?: get("entry") ?: get("ticketPrice") ?: get("coins") ?: get("price"))
         val prizePool = safeFloat(get("prizePool") ?: get("prize_pool") ?: get("prize") ?: get("prizepool") ?: get("totalPrize") ?: get("pool"))
@@ -795,6 +886,20 @@ service cloud.firestore {
         val maxPlayers = safeInt(get("maxPlayers") ?: get("max_players") ?: get("slots") ?: get("totalSlots") ?: get("total_slots") ?: get("maxSlots") ?: get("capacity"), 48)
         val format = getString("format") ?: getString("matchType") ?: getString("match_type") ?: getString("type") ?: getString("mode") ?: "SOLO"
         val status = getString("status") ?: getString("matchStatus") ?: getString("match_status") ?: getString("state") ?: "UPCOMING"
+
+        val rawCategory = getString("category")
+            ?: getString("canonicalCategory")
+            ?: getString("tournamentCategory")
+            ?: getString("gameCategory")
+            ?: getString("category_key")
+            ?: ""
+
+        val category = when {
+            rawCategory.equals("CS", ignoreCase = true) || rawCategory.contains("CLASH", ignoreCase = true) || format.contains("CS", ignoreCase = true) || title.contains("CS", ignoreCase = true) || title.contains("Clash Squad", ignoreCase = true) -> "CS"
+            rawCategory.equals("LONE_WOLF", ignoreCase = true) || rawCategory.contains("LONE", ignoreCase = true) || format.contains("Lone", ignoreCase = true) || title.contains("Lone Wolf", ignoreCase = true) || title.contains("1v1", ignoreCase = true) && !format.contains("CS", ignoreCase = true) || mapName.contains("Iron Cage", ignoreCase = true) -> "LONE_WOLF"
+            rawCategory.equals("SCRIMS", ignoreCase = true) || rawCategory.contains("SCRIM", ignoreCase = true) || rawCategory.contains("TRAINING", ignoreCase = true) || title.contains("Scrim", ignoreCase = true) || title.contains("Training", ignoreCase = true) -> "SCRIMS"
+            else -> "BR"
+        }
         val startsAt = getString("startsAt") ?: getString("startTime") ?: getString("start_time") ?: getString("schedule") ?: getString("date") ?: getString("time") ?: getString("matchTime")
         val endsAt = getString("endsAt") ?: getString("endTime") ?: getString("end_time")
 
@@ -848,6 +953,7 @@ service cloud.firestore {
             id = tId,
             title = title,
             game = game,
+            category = category,
             map = mapName,
             entryFee = entryFee,
             prizePool = prizePool,
@@ -1198,6 +1304,19 @@ service cloud.firestore {
         val referralCount = safeInt(get("referralCount") ?: get("referral_count") ?: get("referrals"))
         val referralBonusEarned = safeDouble(get("referralBonusEarned") ?: get("referral_bonus") ?: get("referral_earnings"))
 
+        val dateOfBirth = findString("dateOfBirth", "dob", "birthDate", "birth_date", "date_of_birth") ?: ""
+        var age = safeInt(get("age") ?: get("userAge") ?: get("user_age"))
+        if (age <= 0 && dateOfBirth.isNotBlank()) {
+            age = com.example.data.validation.TournamentBackendValidator.calculateAgeFromDob(dateOfBirth)
+        }
+        val isUnder18 = getBoolean("isUnder18")
+            ?: getBoolean("under18")
+            ?: (age in 1..17)
+        val eligibleForCashTournaments = getBoolean("eligibleForCashTournaments")
+            ?: (!isUnder18 && (age >= 18 || age <= 0))
+        val ageConfirmed = getBoolean("ageConfirmed")
+            ?: (dateOfBirth.isNotBlank())
+
         val rawMap = mutableMapOf<String, String>()
         fun flattenMap(prefix: String, map: Map<*, *>) {
             map.forEach { (k, v) ->
@@ -1239,6 +1358,11 @@ service cloud.firestore {
             isMaintenanceBypass = isMaintenanceBypass,
             deviceModel = deviceModel,
             ipAddress = ipAddress,
+            dateOfBirth = dateOfBirth,
+            age = age,
+            isUnder18 = isUnder18,
+            eligibleForCashTournaments = eligibleForCashTournaments,
+            ageConfirmed = ageConfirmed,
             lastActive = lastActive,
             createdAt = createdAt,
             gameId = gameId,
@@ -1719,8 +1843,12 @@ service cloud.firestore {
             "active_tournaments" to database.child("active_tournaments"),
             "all_tournaments" to database.child("all_tournaments"),
             "published_matches" to database.child("published_matches"),
+            "categories" to database.child("categories"),
+            "tournaments_by_category" to database.child("tournaments_by_category"),
+            "matches_by_category" to database.child("matches_by_category"),
             "FreeFire_matches" to database.child("FreeFire").child("matches"),
             "FreeFire_tournaments" to database.child("FreeFire").child("tournaments"),
+            "FreeFire_categories" to database.child("FreeFire").child("categories"),
             "BGMI_matches" to database.child("BGMI").child("matches"),
             "BGMI_tournaments" to database.child("BGMI").child("tournaments"),
             "custom_rooms" to database.child("custom_rooms"),
@@ -1978,6 +2106,8 @@ service cloud.firestore {
 
     fun buildTournamentMap(tournament: Tournament): Map<String, Any?> {
         val canonicalGame = tournament.game.ifBlank { "Free Fire" }
+        val canonicalCategory = tournament.canonicalCategory
+        val categoryDisplayName = tournament.categoryDisplayName
         val canonicalTitle = tournament.title.ifBlank { "Velorix Esports Match" }
         val canonicalMap = tournament.map.ifBlank { "Bermuda" }
         val canonicalStatus = tournament.status.ifBlank { "UPCOMING" }
@@ -2013,16 +2143,24 @@ service cloud.firestore {
             "matchTitle" to canonicalTitle,
             "match_title" to canonicalTitle,
 
-            // Game & Categories (supporting both exact and uppercase filter matching)
+            // Game & Categories (supporting both exact, uppercase and subcategory matching)
             "game" to canonicalGame,
             "gameName" to canonicalGame,
             "game_name" to canonicalGame,
             "gameTitle" to canonicalGame,
             "game_title" to canonicalGame,
-            "category" to canonicalGame.uppercase(),
-            "gameCategory" to canonicalGame.uppercase(),
-            "game_category" to canonicalGame.uppercase(),
-            "categoryName" to canonicalGame,
+            "category" to canonicalCategory,
+            "canonicalCategory" to canonicalCategory,
+            "canonical_category" to canonicalCategory,
+            "categoryName" to categoryDisplayName,
+            "category_name" to categoryDisplayName,
+            "categoryShort" to canonicalCategory,
+            "gameCategory" to canonicalCategory,
+            "game_category" to canonicalCategory,
+            "tournamentCategory" to canonicalCategory,
+            "tournament_category" to canonicalCategory,
+            "categoryKey" to canonicalCategory,
+            "category_key" to canonicalCategory,
 
             // Map
             "map" to canonicalMap,
@@ -2177,8 +2315,14 @@ service cloud.firestore {
         )
     }
 
-    private fun getSyncRtdbPaths(tournamentId: String, gameName: String): List<String> {
+    private fun getSyncRtdbPaths(tournamentId: String, gameName: String, categoryName: String = "BR"): List<String> {
         val canonicalGame = gameName.ifBlank { "Free Fire" }
+        val cat = when {
+            categoryName.equals("CS", true) || categoryName.contains("CLASH", true) -> "CS"
+            categoryName.equals("LONE_WOLF", true) || categoryName.contains("LONE", true) -> "LONE_WOLF"
+            categoryName.equals("SCRIMS", true) || categoryName.contains("SCRIM", true) -> "SCRIMS"
+            else -> "BR"
+        }
         val paths = mutableListOf(
             "tournaments/$tournamentId",
             "Tournaments/$tournamentId",
@@ -2189,7 +2333,18 @@ service cloud.firestore {
             "published_matches/$tournamentId",
             "games/$canonicalGame/tournaments/$tournamentId",
             "games/$canonicalGame/matches/$tournamentId",
-            "game_tournaments/$canonicalGame/$tournamentId"
+            "game_tournaments/$canonicalGame/$tournamentId",
+            // Direct category root trees for User Panel category tab synchronization
+            "categories/$cat/$tournamentId",
+            "categories/${cat.lowercase()}/$tournamentId",
+            "tournaments_by_category/$cat/$tournamentId",
+            "tournaments_by_category/${cat.lowercase()}/$tournamentId",
+            "matches_by_category/$cat/$tournamentId",
+            "matches_by_category/${cat.lowercase()}/$tournamentId",
+            "FreeFire/categories/$cat/$tournamentId",
+            "Free Fire/categories/$cat/$tournamentId",
+            "games/$canonicalGame/categories/$cat/$tournamentId",
+            "games/$canonicalGame/categories/${cat.lowercase()}/$tournamentId"
         )
         if (canonicalGame.contains("Free Fire", ignoreCase = true) || canonicalGame.contains("FreeFire", ignoreCase = true)) {
             paths.add("FreeFire/matches/$tournamentId")
@@ -2198,10 +2353,14 @@ service cloud.firestore {
             paths.add("Free Fire/tournaments/$tournamentId")
             paths.add("FREE FIRE/matches/$tournamentId")
             paths.add("FREE FIRE/tournaments/$tournamentId")
+            paths.add("FreeFire/$cat/$tournamentId")
+            paths.add("FreeFire/${cat.lowercase()}/$tournamentId")
+            paths.add("Free Fire/$cat/$tournamentId")
         } else if (canonicalGame.contains("BGMI", ignoreCase = true)) {
             paths.add("BGMI/matches/$tournamentId")
             paths.add("BGMI/tournaments/$tournamentId")
             paths.add("bgmi/matches/$tournamentId")
+            paths.add("BGMI/categories/$cat/$tournamentId")
         }
         return paths
     }
@@ -2306,7 +2465,7 @@ service cloud.firestore {
         val map = buildTournamentMap(tournament)
 
         // Write to all primary, category, and companion RTDB paths
-        val paths = getSyncRtdbPaths(tournament.id, tournament.game)
+        val paths = getSyncRtdbPaths(tournament.id, tournament.game, tournament.canonicalCategory)
         for (path in paths) {
             try {
                 database.child(path).setValue(map).await()
@@ -2317,8 +2476,16 @@ service cloud.firestore {
             }
         }
 
-        // Write to Firestore collections
-        val fsCollections = listOf("tournaments", "matches", "active_tournaments", "all_tournaments")
+        // Write to Firestore collections (including category-specific sub-collections)
+        val fsCollections = listOf(
+            "tournaments", "matches", "active_tournaments", "all_tournaments",
+            "categories/${tournament.canonicalCategory}/matches",
+            "categories/${tournament.canonicalCategory.lowercase()}/matches",
+            "categories/${tournament.canonicalCategory}/tournaments",
+            "categories/${tournament.canonicalCategory.lowercase()}/tournaments",
+            "tournaments_by_category/${tournament.canonicalCategory}/items",
+            "tournaments_by_category/${tournament.canonicalCategory.lowercase()}/items"
+        )
         for (col in fsCollections) {
             try {
                 firestore.collection(col).document(tournament.id).set(map).await()
@@ -2370,7 +2537,7 @@ service cloud.firestore {
 
         val map = buildTournamentMap(tournament)
 
-        val paths = getSyncRtdbPaths(tournament.id, tournament.game)
+        val paths = getSyncRtdbPaths(tournament.id, tournament.game, tournament.canonicalCategory)
         for (path in paths) {
             try {
                 database.child(path).updateChildren(map).await()
@@ -2380,7 +2547,15 @@ service cloud.firestore {
             }
         }
 
-        val fsCollections = listOf("tournaments", "matches", "active_tournaments", "all_tournaments")
+        val fsCollections = listOf(
+            "tournaments", "matches", "active_tournaments", "all_tournaments",
+            "categories/${tournament.canonicalCategory}/matches",
+            "categories/${tournament.canonicalCategory.lowercase()}/matches",
+            "categories/${tournament.canonicalCategory}/tournaments",
+            "categories/${tournament.canonicalCategory.lowercase()}/tournaments",
+            "tournaments_by_category/${tournament.canonicalCategory}/items",
+            "tournaments_by_category/${tournament.canonicalCategory.lowercase()}/items"
+        )
         for (col in fsCollections) {
             try {
                 firestore.collection(col).document(tournament.id).set(map).await()
@@ -2446,13 +2621,25 @@ service cloud.firestore {
             "cancellationReason" to reason,
             "cancelledAt" to System.currentTimeMillis()
         )
-        val paths = getSyncRtdbPaths(tournamentId, "Free Fire") + getSyncRtdbPaths(tournamentId, "BGMI")
-        for (path in paths.distinct()) {
+        val paths = (
+            getSyncRtdbPaths(tournamentId, "Free Fire", "BR") +
+            getSyncRtdbPaths(tournamentId, "Free Fire", "CS") +
+            getSyncRtdbPaths(tournamentId, "Free Fire", "LONE_WOLF") +
+            getSyncRtdbPaths(tournamentId, "Free Fire", "SCRIMS") +
+            getSyncRtdbPaths(tournamentId, "BGMI")
+        ).distinct()
+        for (path in paths) {
             try {
                 database.child(path).updateChildren(cancelMap).await()
             } catch (_: Exception) {}
         }
-        val fsCollections = listOf("tournaments", "matches", "active_tournaments", "all_tournaments")
+        val fsCollections = listOf(
+            "tournaments", "matches", "active_tournaments", "all_tournaments",
+            "categories/BR/matches", "categories/CS/matches", "categories/LONE_WOLF/matches", "categories/SCRIMS/matches",
+            "categories/br/matches", "categories/cs/matches", "categories/lone_wolf/matches", "categories/scrims/matches",
+            "categories/BR/tournaments", "categories/CS/tournaments", "categories/LONE_WOLF/tournaments", "categories/SCRIMS/tournaments",
+            "tournaments_by_category/BR/items", "tournaments_by_category/CS/items", "tournaments_by_category/LONE_WOLF/items", "tournaments_by_category/SCRIMS/items"
+        )
         for (col in fsCollections) {
             try {
                 firestore.collection(col).document(tournamentId).update(cancelMap).await()
@@ -2481,8 +2668,14 @@ service cloud.firestore {
         var deleted = false
         var lastError: Exception? = null
 
-        val paths = getSyncRtdbPaths(tournamentId, "Free Fire") + getSyncRtdbPaths(tournamentId, "BGMI")
-        for (path in paths.distinct()) {
+        val paths = (
+            getSyncRtdbPaths(tournamentId, "Free Fire", "BR") +
+            getSyncRtdbPaths(tournamentId, "Free Fire", "CS") +
+            getSyncRtdbPaths(tournamentId, "Free Fire", "LONE_WOLF") +
+            getSyncRtdbPaths(tournamentId, "Free Fire", "SCRIMS") +
+            getSyncRtdbPaths(tournamentId, "BGMI")
+        ).distinct()
+        for (path in paths) {
             try {
                 database.child(path).removeValue().await()
                 deleted = true
@@ -2491,7 +2684,13 @@ service cloud.firestore {
             }
         }
 
-        val fsCollections = listOf("tournaments", "matches", "active_tournaments", "all_tournaments")
+        val fsCollections = listOf(
+            "tournaments", "matches", "active_tournaments", "all_tournaments",
+            "categories/BR/matches", "categories/CS/matches", "categories/LONE_WOLF/matches", "categories/SCRIMS/matches",
+            "categories/br/matches", "categories/cs/matches", "categories/lone_wolf/matches", "categories/scrims/matches",
+            "categories/BR/tournaments", "categories/CS/tournaments", "categories/LONE_WOLF/tournaments", "categories/SCRIMS/tournaments",
+            "tournaments_by_category/BR/items", "tournaments_by_category/CS/items", "tournaments_by_category/LONE_WOLF/items", "tournaments_by_category/SCRIMS/items"
+        )
         for (col in fsCollections) {
             try {
                 firestore.collection(col).document(tournamentId).delete().await()
@@ -2573,10 +2772,19 @@ service cloud.firestore {
         val description = obj.optString("description", "Velorix Esports Match")
         val rules = obj.optString("rules", "Standard tournament rules apply.")
 
+        val rawCategory = obj.optString("category", obj.optString("canonicalCategory", obj.optString("gameCategory", "")))
+        val category = when {
+            rawCategory.equals("CS", ignoreCase = true) || rawCategory.contains("CLASH", ignoreCase = true) || format.contains("CS", ignoreCase = true) || title.contains("CS", ignoreCase = true) || title.contains("Clash Squad", ignoreCase = true) -> "CS"
+            rawCategory.equals("LONE_WOLF", ignoreCase = true) || rawCategory.contains("LONE", ignoreCase = true) || format.contains("Lone", ignoreCase = true) || title.contains("Lone Wolf", ignoreCase = true) || mapName.contains("Iron Cage", ignoreCase = true) -> "LONE_WOLF"
+            rawCategory.equals("SCRIMS", ignoreCase = true) || rawCategory.contains("SCRIM", ignoreCase = true) || rawCategory.contains("TRAINING", ignoreCase = true) || title.contains("Scrim", ignoreCase = true) || title.contains("Training", ignoreCase = true) -> "SCRIMS"
+            else -> "BR"
+        }
+
         return Tournament(
             id = tId,
             title = title,
             game = game,
+            category = category,
             map = mapName,
             entryFee = entryFee,
             prizePool = prizePool,
@@ -2610,18 +2818,26 @@ service cloud.firestore {
             var pushed = 0
             for (t in list) {
                 val map = buildTournamentMap(t)
-                val paths = getSyncRtdbPaths(t.id, t.game)
+                val paths = getSyncRtdbPaths(t.id, t.game, t.canonicalCategory)
                 for (path in paths) {
                     try { database.child(path).setValue(map).await() } catch (_: Exception) {}
                 }
-                val fsCollections = listOf("tournaments", "matches", "active_tournaments", "all_tournaments")
+                val fsCollections = listOf(
+                    "tournaments", "matches", "active_tournaments", "all_tournaments",
+                    "categories/${t.canonicalCategory}/matches",
+                    "categories/${t.canonicalCategory.lowercase()}/matches",
+                    "categories/${t.canonicalCategory}/tournaments",
+                    "categories/${t.canonicalCategory.lowercase()}/tournaments",
+                    "tournaments_by_category/${t.canonicalCategory}/items",
+                    "tournaments_by_category/${t.canonicalCategory.lowercase()}/items"
+                )
                 for (col in fsCollections) {
                     try { firestore.collection(col).document(t.id).set(map).await() } catch (_: Exception) {}
                 }
                 pushed++
             }
-            GlobalErrorManager.emitSuccess("Synced $pushed tournaments to all cloud nodes!")
-            Pair(pushed, "Synced $pushed tournaments successfully across all endpoints.")
+            GlobalErrorManager.emitSuccess("Synced $pushed tournaments with all categories live!")
+            Pair(pushed, "Synced $pushed tournaments successfully across all endpoints & categories.")
         } catch (e: Exception) {
             Pair(0, "Sync error: ${e.message}")
         }
@@ -4391,6 +4607,28 @@ service cloud.firestore {
                 return false
             }
 
+            // Legal Age-Gating Security Enforcement: Minors (<18) can only join Training/Scrim matches!
+            val prizePoolVal = safeDouble(tourneySnap.child("prizePool").value)
+            val isMoneyTournament = (entryFee > 0f) || (prizePoolVal > 0.0)
+            if (isMoneyTournament) {
+                val userRefForAge = database.child("users").child(playerUid)
+                val userSnapForAge = userRefForAge.get().await()
+                val isMinorInDb = userSnapForAge.child("isUnder18").value as? Boolean
+                val ageInDb = safeInt(userSnapForAge.child("age").value, 0)
+                val isMinorFromAge = if (ageInDb in 1..17) true else false
+                val isMinorFromPlayerObj = (player.age != null && player.age!! in 1..17)
+                val isMinorFromProfile = player.profile?.isUnder18 == true
+
+                val isPlayerMinor = (isMinorInDb == true) || isMinorFromAge || isMinorFromPlayerObj || isMinorFromProfile
+
+                if (isPlayerMinor) {
+                    val displayName = player.playerName.ifBlank { player.gameUsername.ifBlank { "Player" } }
+                    val err = "Legal Age Restriction: $displayName is under 18 years old. Minors are permitted to join Free Training & Scrim matches only. Participation in real-money tournaments (Entry ₹$entryFee / Prize ₹$prizePoolVal) requires age 18+."
+                    GlobalErrorManager.emitError(err)
+                    return false
+                }
+            }
+
             // If entry fee > 0, safely deduct from 2D wallet (Bonus -> Deposit -> Winnings)
             if (entryFee > 0f) {
                 val userRef = database.child("users").child(player.id)
@@ -4497,14 +4735,25 @@ service cloud.firestore {
                 "remaining_slots" to (maxSlots - currentCount).coerceAtLeast(0)
             )
 
-            val paths = getSyncRtdbPaths(tournamentId, gameName)
+            val paths = (
+                getSyncRtdbPaths(tournamentId, gameName, "BR") +
+                getSyncRtdbPaths(tournamentId, gameName, "CS") +
+                getSyncRtdbPaths(tournamentId, gameName, "LONE_WOLF") +
+                getSyncRtdbPaths(tournamentId, gameName, "SCRIMS")
+            ).distinct()
             for (path in paths) {
                 try {
                     database.child(path).updateChildren(slotUpdates).await()
                 } catch (_: Exception) {}
             }
 
-            val fsCollections = listOf("tournaments", "matches", "active_tournaments", "all_tournaments")
+            val fsCollections = listOf(
+                "tournaments", "matches", "active_tournaments", "all_tournaments",
+                "categories/BR/matches", "categories/CS/matches", "categories/LONE_WOLF/matches", "categories/SCRIMS/matches",
+                "categories/br/matches", "categories/cs/matches", "categories/lone_wolf/matches", "categories/scrims/matches",
+                "categories/BR/tournaments", "categories/CS/tournaments", "categories/LONE_WOLF/tournaments", "categories/SCRIMS/tournaments",
+                "tournaments_by_category/BR/items", "tournaments_by_category/CS/items", "tournaments_by_category/LONE_WOLF/items", "tournaments_by_category/SCRIMS/items"
+            )
             for (col in fsCollections) {
                 try {
                     firestore.collection(col).document(tournamentId).update(slotUpdates).await()

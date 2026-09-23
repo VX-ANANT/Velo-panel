@@ -127,7 +127,7 @@ object GlassTokens {
 }
 
 /**
- * Minimalist Dark Canvas with subtle ambient monochrome/violet bloom (Vercel/Lovable inspired).
+ * Minimalist Canvas with subtle ambient bloom supporting dynamic animated Light (Xiaomi/Vercel) & Dark transitions.
  */
 @Composable
 fun GlassBackgroundBox(
@@ -135,19 +135,29 @@ fun GlassBackgroundBox(
     accentColor: Color = VelorixAccent,
     content: @Composable BoxScope.() -> Unit
 ) {
+    val isDark = com.example.ui.theme.LocalIsDarkTheme.current
+    val canvasBg by animateColorAsState(
+        targetValue = if (isDark) Color(0xFF000000) else Color(0xFFF8FAFC),
+        animationSpec = tween(durationMillis = 350), label = "canvasBg"
+    )
+    val topBloomColor by animateColorAsState(
+        targetValue = if (isDark) Color(0xFF1E1E24) else Color(0xFFE2E8F0),
+        animationSpec = tween(durationMillis = 350), label = "topBloom"
+    )
+
     Box(
         modifier = modifier
             .fillMaxSize()
             .drawBehind {
-                // 1. Deep Pitch Black Canvas
-                drawRect(Color(0xFF000000))
+                // 1. Dynamic Canvas Background
+                drawRect(canvasBg)
 
                 // 2. Subtle Top Ambient Bloom
                 drawCircle(
                     brush = Brush.radialGradient(
                         colors = listOf(
-                            Color(0xFF1E1E24).copy(alpha = 0.45f),
-                            Color(0xFF121216).copy(alpha = 0.20f),
+                            topBloomColor.copy(alpha = if (isDark) 0.45f else 0.55f),
+                            topBloomColor.copy(alpha = if (isDark) 0.20f else 0.15f),
                             Color.Transparent
                         ),
                         center = Offset(size.width * 0.5f, -size.height * 0.05f),
@@ -155,11 +165,11 @@ fun GlassBackgroundBox(
                     )
                 )
 
-                // 3. Subtle Violet Accent Glow in corner
+                // 3. Subtle Accent Glow in corner
                 drawCircle(
                     brush = Brush.radialGradient(
                         colors = listOf(
-                            Color(0xFF8B5CF6).copy(alpha = 0.08f),
+                            (if (isDark) Color(0xFF8B5CF6) else Color(0xFF6366F1)).copy(alpha = if (isDark) 0.08f else 0.06f),
                             Color.Transparent
                         ),
                         center = Offset(size.width * 0.9f, size.height * 0.25f),
@@ -167,13 +177,12 @@ fun GlassBackgroundBox(
                     )
                 )
 
-                // 4. Luminous Bottom Ambient Glow Mesh behind the floating dock (illuminates translucent glass)
+                // 4. Luminous Bottom Ambient Glow Mesh behind dock
                 drawCircle(
                     brush = Brush.radialGradient(
                         colors = listOf(
-                            accentColor.copy(alpha = 0.28f),
-                            Color(0xFF6366F1).copy(alpha = 0.16f),
-                            Color(0xFF0F172A).copy(alpha = 0.05f),
+                            (if (isDark) accentColor else Color(0xFF7C3AED)).copy(alpha = if (isDark) 0.24f else 0.14f),
+                            (if (isDark) Color(0xFF6366F1) else Color(0xFF38BDF8)).copy(alpha = if (isDark) 0.14f else 0.08f),
                             Color.Transparent
                         ),
                         center = Offset(size.width * 0.5f, size.height * 0.92f),
@@ -186,12 +195,12 @@ fun GlassBackgroundBox(
 }
 
 /**
- * Premium Minimalist Dark Card with crisp Zinc borders and subtle gradient.
+ * Premium Minimalist Card with Xiaomi roundedness and crisp Vercel borders.
  */
 @Composable
 fun GlassCard(
     modifier: Modifier = Modifier,
-    shape: Shape = RoundedCornerShape(16.dp),
+    shape: Shape = RoundedCornerShape(20.dp),
     brush: Brush = GlassTokens.GlassSurfacePrimary,
     borderBrush: Brush = GlassTokens.GlassBorderGradient,
     borderWidth: Dp = 1.dp,
@@ -199,6 +208,15 @@ fun GlassCard(
     onClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
+    val isDark = com.example.ui.theme.LocalIsDarkTheme.current
+    val effectiveBrush = if (brush == GlassTokens.GlassSurfacePrimary) {
+        if (isDark) GlassTokens.GlassSurfacePrimary else Brush.linearGradient(listOf(Color(0xFFFFFFFF), Color(0xFFF8FAFC)))
+    } else brush
+
+    val effectiveBorderBrush = if (borderBrush == GlassTokens.GlassBorderGradient) {
+        if (isDark) GlassTokens.GlassBorderGradient else Brush.linearGradient(listOf(Color(0xFFE2E8F0), Color(0xFFCBD5E1)))
+    } else borderBrush
+
     val clickModifier = if (onClick != null) {
         Modifier.bounceClick(scaleDown = 0.98f, onClick = onClick)
     } else {
@@ -207,7 +225,7 @@ fun GlassCard(
 
     Surface(
         modifier = modifier
-            .border(borderWidth, borderBrush, shape)
+            .border(borderWidth, effectiveBorderBrush, shape)
             .clip(shape)
             .then(clickModifier),
         shape = shape,
@@ -215,7 +233,7 @@ fun GlassCard(
     ) {
         Box(
             modifier = Modifier
-                .background(brush)
+                .background(effectiveBrush)
         ) {
             Column(
                 modifier = Modifier.padding(16.dp),
@@ -873,3 +891,52 @@ fun GlassOutlinedButton(
         }
     }
 }
+
+/**
+ * Xiaomi HyperOS & Vercel minimal theme toggle with animated rotation and haptic response.
+ */
+@Composable
+fun ThemeToggleSwitch(
+    modifier: Modifier = Modifier
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val isDark = com.example.ui.theme.LocalIsDarkTheme.current
+    val rotation by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (isDark) 0f else 180f,
+        animationSpec = androidx.compose.animation.core.spring(dampingRatio = 0.75f, stiffness = 300f),
+        label = "themeRotation"
+    )
+
+    Surface(
+        modifier = modifier
+            .clip(RoundedCornerShape(20.dp))
+            .bounceClick(scaleDown = 0.92f) {
+                com.example.ui.theme.ThemeManager.toggleTheme(context)
+            },
+        color = if (isDark) Color(0xFF141418) else Color(0xFFF1F5F9),
+        border = BorderStroke(1.dp, if (isDark) Color(0xFF27272A) else Color(0xFFE2E8F0)),
+        shape = RoundedCornerShape(20.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            Icon(
+                imageVector = if (isDark) Icons.Default.DarkMode else Icons.Default.LightMode,
+                contentDescription = if (isDark) "Switch to Light Theme" else "Switch to Dark Theme",
+                tint = if (isDark) Color(0xFFA78BFA) else Color(0xFFF59E0B),
+                modifier = Modifier
+                    .size(15.dp)
+                    .graphicsLayer(rotationZ = rotation)
+            )
+            Text(
+                text = if (isDark) "Dark" else "Light",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (isDark) Color(0xFFEDEDED) else Color(0xFF0F172A)
+            )
+        }
+    }
+}
+

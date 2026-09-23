@@ -24,11 +24,13 @@ class VelorixApplication : Application() {
 
         try {
             FirebaseApp.initializeApp(this)
+            com.example.data.ai.FirebaseAiManager.initializeAppCheck(this)
             com.example.analytics.VelorixAnalytics.initialize(this)
             com.example.notification.VelorixNotificationManager.initChannels(this)
             com.example.config.VelorixRemoteConfigManager.initialize()
             com.example.notification.VelorixFcmManager.initialize(this)
             com.example.data.validation.UserRateLimiter.initialize(this)
+            com.example.data.repository.ApiKeyManager.initialize(this)
         } catch (e: Exception) {
             Log.e("VelorixApp", "Firebase initialization error: ${e.message}", e)
         }

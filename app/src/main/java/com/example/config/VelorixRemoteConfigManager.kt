@@ -1,13 +1,11 @@
 package com.example.config
 
 import android.util.Log
-import com.google.firebase.ktx.Firebase
 import com.google.firebase.remoteconfig.ConfigUpdate
 import com.google.firebase.remoteconfig.ConfigUpdateListener
 import com.google.firebase.remoteconfig.FirebaseRemoteConfig
 import com.google.firebase.remoteconfig.FirebaseRemoteConfigException
-import com.google.firebase.remoteconfig.ktx.remoteConfig
-import com.google.firebase.remoteconfig.ktx.remoteConfigSettings
+import com.google.firebase.remoteconfig.FirebaseRemoteConfigSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -47,13 +45,12 @@ object VelorixRemoteConfigManager {
      */
     fun initialize() {
         try {
-            val config = Firebase.remoteConfig
+            val config = FirebaseRemoteConfig.getInstance()
             remoteConfig = config
 
-            val configSettings = remoteConfigSettings {
-                // Minimum fetch interval 0 allows instant updates in development & testing
-                minimumFetchIntervalInSeconds = 0
-            }
+            val configSettings = FirebaseRemoteConfigSettings.Builder()
+                .setMinimumFetchIntervalInSeconds(0)
+                .build()
             config.setConfigSettingsAsync(configSettings)
 
             // Define in-code defaults for immediate offline & startup usability

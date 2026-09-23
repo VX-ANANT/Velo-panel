@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.data.validation.SecuritySanitizer
+import com.example.domain.model.FreeFireCategories
 import com.example.domain.model.Tournament
 import com.example.domain.model.TournamentBannerPresets
 import com.example.ui.common.GameLogoBadge
@@ -55,6 +56,7 @@ fun CreateTournamentScreen(
     var title by remember { mutableStateOf("") }
     var bannerUrl by remember { mutableStateOf("") }
     var game by remember { mutableStateOf("Free Fire") }
+    var category by remember { mutableStateOf("BR") }
     var mapName by remember { mutableStateOf("Bermuda") }
     var format by remember { mutableStateOf("SOLO") }
     var status by remember { mutableStateOf("UPCOMING") }
@@ -449,6 +451,96 @@ fun CreateTournamentScreen(
                 }
             }
 
+            // Tournament Category Selector
+            item {
+                SettingsCard {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "Free Fire Tournament Category *",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = VelorixTextPrimary
+                        )
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = VelorixAccent.copy(alpha = 0.2f),
+                            border = BorderStroke(1.dp, VelorixAccent)
+                        ) {
+                            Text(
+                                text = FreeFireCategories.getCategoryMeta(category).shortName,
+                                color = VelorixAccentLight,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                    Text(
+                        "Synchronizes immediately into player category tabs (BR, Clash Squad, Lone Wolf, Scrims).",
+                        fontSize = 11.sp,
+                        color = VelorixTextSecondary,
+                        modifier = Modifier.padding(top = 2.dp, bottom = 10.dp)
+                    )
+
+                    // 4 Category selection cards / chips
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FreeFireCategories.ALL_CATEGORIES.forEach { catMeta ->
+                            val isSelected = category == catMeta.key
+                            Surface(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable {
+                                        category = catMeta.key
+                                        // Auto-populate sensible defaults
+                                        if (mapName == "Bermuda" || mapName.isBlank()) {
+                                            mapName = catMeta.defaultMaps.firstOrNull() ?: "Bermuda"
+                                        }
+                                        format = catMeta.defaultFormats.firstOrNull() ?: "SOLO"
+                                        maxPlayers = catMeta.defaultMaxPlayers.toString()
+                                        if (title.isBlank() || title.contains("Free Fire", ignoreCase = true)) {
+                                            title = "Free Fire ${catMeta.label} Tournament"
+                                        }
+                                    },
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (isSelected) VelorixAccent.copy(alpha = 0.2f) else Color(0xFF1E1630),
+                                border = BorderStroke(
+                                    width = if (isSelected) 1.5.dp else 1.dp,
+                                    color = if (isSelected) VelorixAccent else CardVerifyBorder
+                                )
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center
+                                ) {
+                                    Text(
+                                        text = catMeta.shortName,
+                                        color = if (isSelected) VelorixAccentLight else Color.White,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = catMeta.defaultFormats.firstOrNull() ?: "",
+                                        color = if (isSelected) Color(0xFF69F0AE) else VelorixTextSecondary,
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // Basic Info
             item {
                 SettingsCard {
@@ -752,6 +844,7 @@ fun CreateTournamentScreen(
                             title = cleanTitle,
                             bannerUrl = bannerUrl.trim(),
                             game = cleanGame,
+                            category = category,
                             map = cleanMap,
                             format = cleanFormat,
                             status = status,

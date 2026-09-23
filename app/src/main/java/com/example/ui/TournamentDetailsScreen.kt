@@ -71,6 +71,9 @@ fun TournamentDetailsScreen(
     // Participant manual add states
     var manualPlayerIgn by remember { mutableStateOf("") }
     var manualPlayerUid by remember { mutableStateOf("") }
+    var manualPlayerAge by remember { mutableStateOf("18") }
+    var manualPlayerIsMinor by remember { mutableStateOf(false) }
+    var isJoiningMatch by remember { mutableStateOf(false) }
 
     var roomIdInput by remember { mutableStateOf(tournament.roomDetails?.roomId ?: "") }
     var roomPassInput by remember { mutableStateOf(tournament.roomDetails?.roomPassword ?: "") }
@@ -449,6 +452,226 @@ fun TournamentDetailsScreen(
                                     modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
                                     color = VelorixAccent,
                                     trackColor = CardVerifyBorder
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ==========================================
+            // AGE COMPLIANCE & ELIGIBILITY GATEWAY
+            // ==========================================
+            item {
+                val isMoneyMatch = (tournament.entryFee > 0f) || (tournament.prizePool > 0.0)
+                val userAge = currentUserProfile?.age ?: 0
+                val isUserMinor = (currentUserProfile?.isUnder18 == true) || (userAge in 1..17)
+                val userAlreadyJoined = tournament.registrations.any { reg ->
+                    (currentUserProfile != null && reg.playerId == currentUserProfile.id) ||
+                    (currentUserProfile != null && reg.userId == currentUserProfile.id) ||
+                    (currentUserProfile?.email?.isNotBlank() == true && reg.profile?.email.equals(currentUserProfile.email, ignoreCase = true))
+                }
+
+                GlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(18.dp),
+                    borderBrush = if (isMoneyMatch && isUserMinor) {
+                        Brush.linearGradient(listOf(Color(0xFFEF4444), Color(0xFFF59E0B)))
+                    } else if (isMoneyMatch) {
+                        Brush.linearGradient(listOf(Color(0xFF10B981).copy(alpha = 0.5f), Color(0xFF059669).copy(alpha = 0.3f)))
+                    } else {
+                        Brush.linearGradient(listOf(Color(0xFF38BDF8).copy(alpha = 0.5f), Color(0xFF0284C7).copy(alpha = 0.3f)))
+                    }
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = if (isMoneyMatch && isUserMinor) Icons.Default.Lock
+                                    else if (isMoneyMatch) Icons.Default.Verified
+                                    else Icons.Default.SportsEsports,
+                                    contentDescription = null,
+                                    tint = if (isMoneyMatch && isUserMinor) Color(0xFFF87171)
+                                    else if (isMoneyMatch) Color(0xFF34D399)
+                                    else Color(0xFF38BDF8),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = if (isMoneyMatch && isUserMinor) "AGE RESTRICTION NOTICE (18+)"
+                                    else if (isMoneyMatch) "AGE VERIFIED (18+ ELIGIBLE)"
+                                    else "TRAINING MATCH (OPEN TO ALL AGES)",
+                                    fontSize = 12.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isMoneyMatch && isUserMinor) Color(0xFFFCA5A5)
+                                    else if (isMoneyMatch) Color(0xFF6EE7B7)
+                                    else Color(0xFF7DD3FC),
+                                    letterSpacing = 0.5.sp
+                                )
+                            }
+
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = if (isMoneyMatch && isUserMinor) Color(0xFF7F1D1D).copy(alpha = 0.4f)
+                                else if (isMoneyMatch) Color(0xFF065F46).copy(alpha = 0.4f)
+                                else Color(0xFF0C4A6E).copy(alpha = 0.4f),
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (isMoneyMatch && isUserMinor) Color(0xFFDC2626)
+                                    else if (isMoneyMatch) Color(0xFF059669)
+                                    else Color(0xFF0284C7)
+                                )
+                            ) {
+                                Text(
+                                    text = if (isMoneyMatch && isUserMinor) "MINOR DETECTED"
+                                    else if (isMoneyMatch) "18+ VERIFIED"
+                                    else "ALL AGES",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = if (isMoneyMatch && isUserMinor) Color(0xFFFCA5A5)
+                                    else if (isMoneyMatch) Color(0xFF6EE7B7)
+                                    else Color(0xFF7DD3FC),
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        val explanationText = if (isMoneyMatch && isUserMinor) {
+                            "This is a real-money tournament with a ₹${tournament.prizePool.toInt()} prize pool and ₹${tournament.entryFee.toInt()} entry fee. Legal regulations prohibit players under 18 from participating in cash contests. You are eligible to compete in all Free Training & Scrim matches."
+                        } else if (isMoneyMatch) {
+                            "You are verified as 18+ (Age: ${if (userAge > 0) userAge else "18+"}) and eligible to compete for the ₹${tournament.prizePool.toInt()} cash prize pool. Real-money wallet entry of ₹${tournament.entryFee.toInt()} will be processed upon joining."
+                        } else {
+                            "This is a Free Training & Scrim match without cash entry fees or monetary prizes. Players of all ages (including under 18) are welcome to practice, test team lineups, and compete for leaderboards."
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = Color(0xFF0B0E14),
+                            border = BorderStroke(1.dp, Color(0xFF1E2530)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(
+                                    text = explanationText,
+                                    color = if (isMoneyMatch && isUserMinor) Color(0xFFFCA5A5) else Color(0xFFCBD5E1),
+                                    fontSize = 11.5.sp,
+                                    lineHeight = 16.sp
+                                )
+
+                                Spacer(modifier = Modifier.height(10.dp))
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = Color(0xFF131822),
+                                        border = BorderStroke(1.dp, Color(0xFF222B3D)),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Column(modifier = Modifier.padding(6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Text("Match Type", color = VelorixTextSecondary, fontSize = 9.sp)
+                                            Text(if (isMoneyMatch) "Cash Tournament" else "Training / Scrim", color = Color.White, fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = Color(0xFF131822),
+                                        border = BorderStroke(1.dp, Color(0xFF222B3D)),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Column(modifier = Modifier.padding(6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Text("Age Rule", color = VelorixTextSecondary, fontSize = 9.sp)
+                                            Text(if (isMoneyMatch) "18+ Mandatory" else "Minors Permitted", color = if (isMoneyMatch) Color(0xFFFBBF24) else Color(0xFF34D399), fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        if (userAlreadyJoined) {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = Color(0xFF065F46).copy(alpha = 0.3f),
+                                border = BorderStroke(1.dp, Color(0xFF059669)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF34D399), modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("YOU ARE REGISTERED IN THIS TOURNAMENT", color = Color(0xFF6EE7B7), fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        } else if (isMoneyMatch && isUserMinor) {
+                            Button(
+                                onClick = {
+                                    Toast.makeText(context, "Entry Blocked: Real-money tournaments require 18+. You can join Free Training matches.", Toast.LENGTH_LONG).show()
+                                },
+                                enabled = false,
+                                modifier = Modifier.fillMaxWidth().height(44.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    disabledContainerColor = Color(0xFF2A1515),
+                                    disabledContentColor = Color(0xFFEF4444)
+                                )
+                            ) {
+                                Icon(Icons.Default.Block, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("LOCKED FOR MINORS (18+ CASH ONLY)", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                            }
+                        } else {
+                            Button(
+                                onClick = {
+                                    if (currentUserProfile == null) {
+                                        Toast.makeText(context, "Please sign in to register for tournaments.", Toast.LENGTH_SHORT).show()
+                                        return@Button
+                                    }
+                                    val newReg = PlayerRegistration(
+                                        id = "${tournament.id}_${currentUserProfile.id}",
+                                        userId = currentUserProfile.id,
+                                        playerId = currentUserProfile.id,
+                                        playerName = currentUserProfile.username.ifBlank { currentUserProfile.ign.ifBlank { "Player" } },
+                                        gameUsername = currentUserProfile.ign.ifBlank { currentUserProfile.username },
+                                        gameId = currentUserProfile.gameId.ifBlank { currentUserProfile.id },
+                                        age = userAge,
+                                        paymentStatus = if (isMoneyMatch) "PAID" else "FREE_TRAINING",
+                                        status = "confirmed",
+                                        registeredAt = System.currentTimeMillis()
+                                    )
+                                    onAddParticipant?.invoke(tournament.id, newReg)
+                                    Toast.makeText(context, "Registration submitted successfully!", Toast.LENGTH_SHORT).show()
+                                },
+                                modifier = Modifier.fillMaxWidth().height(44.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (isMoneyMatch) VelorixAccent else Color(0xFF38BDF8)
+                                )
+                            ) {
+                                Icon(
+                                    imageVector = if (isMoneyMatch) Icons.Default.Paid else Icons.Default.PlayArrow,
+                                    contentDescription = null,
+                                    tint = Color.Black,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = if (isMoneyMatch) "JOIN CASH TOURNAMENT (₹${tournament.entryFee.toInt()})" else "JOIN TRAINING MATCH (FREE)",
+                                    color = Color.Black,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp
                                 )
                             }
                         }
@@ -1178,8 +1401,12 @@ fun TournamentDetailsScreen(
             },
             text = {
                 Column(modifier = Modifier.fillMaxWidth()) {
+                    val isMoneyMatch = (tournament.entryFee > 0f) || (tournament.prizePool > 0.0)
+                    val parsedAge = manualPlayerAge.toIntOrNull() ?: 18
+                    val isPlayerUnder18 = manualPlayerIsMinor || (parsedAge in 1..17)
+
                     Text("Manually register a VIP, offline, or invited player to this tournament.", fontSize = 12.sp, color = VelorixTextSecondary)
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
                     OutlinedTextField(
                         value = manualPlayerIgn,
                         onValueChange = { manualPlayerIgn = it },
@@ -1197,13 +1424,71 @@ fun TournamentDetailsScreen(
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
                     )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = manualPlayerAge,
+                            onValueChange = { if (it.length <= 3 && it.all { ch -> ch.isDigit() }) manualPlayerAge = it },
+                            label = { Text("Player Age") },
+                            placeholder = { Text("18") },
+                            modifier = Modifier.weight(1f),
+                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
+                        )
+                        Row(
+                            modifier = Modifier
+                                .weight(1.3f)
+                                .clickable { manualPlayerIsMinor = !manualPlayerIsMinor },
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = isPlayerUnder18,
+                                onCheckedChange = { manualPlayerIsMinor = it },
+                                colors = CheckboxDefaults.colors(checkedColor = if (isMoneyMatch) Color(0xFFEF4444) else VelorixAccent)
+                            )
+                            Text("Under 18 (Minor)", fontSize = 11.sp, color = if (isMoneyMatch && isPlayerUnder18) Color(0xFFFCA5A5) else VelorixTextSecondary)
+                        }
+                    }
+
+                    if (isMoneyMatch && isPlayerUnder18) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color(0xFF2A1515),
+                            border = BorderStroke(1.dp, Color(0xFFEF4444)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(modifier = Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Block, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    "Minor Age Restriction: Under-18 players cannot participate in real-money matches (Prize ₹${tournament.prizePool.toInt()}). Enroll them in Training matches only.",
+                                    color = Color(0xFFFCA5A5),
+                                    fontSize = 10.sp,
+                                    lineHeight = 14.sp
+                                )
+                            }
+                        }
+                    }
                 }
             },
             confirmButton = {
+                val isMoneyMatch = (tournament.entryFee > 0f) || (tournament.prizePool > 0.0)
+                val parsedAge = manualPlayerAge.toIntOrNull() ?: 18
+                val isPlayerUnder18 = manualPlayerIsMinor || (parsedAge in 1..17)
+                val canSubmit = !(isMoneyMatch && isPlayerUnder18)
+
                 Button(
                     onClick = {
                         if (manualPlayerIgn.isBlank() || manualPlayerUid.isBlank()) {
                             Toast.makeText(context, "Please enter Player IGN & UID", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        if (isMoneyMatch && isPlayerUnder18) {
+                            Toast.makeText(context, "Registration blocked: Minors cannot join cash prize matches.", Toast.LENGTH_LONG).show()
                             return@Button
                         }
                         val newReg = PlayerRegistration(
@@ -1211,18 +1496,26 @@ fun TournamentDetailsScreen(
                             playerName = manualPlayerIgn.trim(),
                             gameUsername = manualPlayerIgn.trim(),
                             gameId = manualPlayerUid.trim(),
-                            paymentStatus = "ADMIN_ADDED",
+                            age = parsedAge,
+                            paymentStatus = if (isMoneyMatch) "ADMIN_ADDED" else "FREE_TRAINING",
                             registeredAt = System.currentTimeMillis()
                         )
                         onAddParticipant?.invoke(tournament.id, newReg)
                         manualPlayerIgn = ""
                         manualPlayerUid = ""
+                        manualPlayerAge = "18"
+                        manualPlayerIsMinor = false
                         showAddParticipantDialog = false
                         Toast.makeText(context, "Player added to tournament roster!", Toast.LENGTH_SHORT).show()
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent)
+                    enabled = canSubmit,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = VelorixAccent,
+                        disabledContainerColor = Color(0xFF27272A),
+                        disabledContentColor = Color(0xFF71717A)
+                    )
                 ) {
-                    Text("Add to Match", color = Color.Black, fontWeight = FontWeight.Bold)
+                    Text(if (isMoneyMatch && isPlayerUnder18) "Age Restricted" else "Add to Match", color = if (canSubmit) Color.Black else Color(0xFF71717A), fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {

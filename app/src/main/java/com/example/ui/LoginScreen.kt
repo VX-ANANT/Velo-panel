@@ -48,6 +48,9 @@ import androidx.credentials.exceptions.GetCredentialException
 import com.example.data.auth.DeviceAccountBindingManager
 import com.example.data.auth.BoundAccount
 import com.example.data.repository.TournamentRepositoryImpl
+import com.example.ui.common.ThemeToggleSwitch
+import com.example.ui.theme.rememberAnimatedThemeColors
+import com.example.ui.theme.LocalIsDarkTheme
 import com.example.domain.model.AdminVerificationResult
 import com.example.data.validation.SecuritySanitizer
 import com.example.data.validation.UserRateLimiter
@@ -117,6 +120,12 @@ fun LoginScreen(
     var confirmPassword by remember { mutableStateOf("") }
     var username by remember { mutableStateOf(boundAccount?.username ?: "") }
     var gameId by remember { mutableStateOf("") }
+    var dateOfBirth by remember { mutableStateOf("") }
+    val calculatedAge = remember(dateOfBirth) {
+        if (dateOfBirth.trim().length >= 8) {
+            com.example.data.validation.TournamentBackendValidator.calculateAgeFromDob(dateOfBirth)
+        } else 0
+    }
     var phoneNumber by remember { mutableStateOf("") }
     var otpCode by remember { mutableStateOf("") }
     var verificationId by remember { mutableStateOf<String?>(null) }
@@ -777,6 +786,81 @@ fun LoginScreen(
                                     unfocusedContainerColor = Color(0xFF090B12)
                                 )
                             )
+
+                            // Date of Birth input for COPPA & Legal Tournament Compliance
+                            OutlinedTextField(
+                                value = dateOfBirth,
+                                onValueChange = { input ->
+                                    if (input.length <= 10) {
+                                        dateOfBirth = input
+                                    }
+                                },
+                                label = { Text("Date of Birth (DD/MM/YYYY)", color = Color(0xFF64748B), fontSize = 12.sp) },
+                                placeholder = { Text("DD/MM/YYYY (e.g. 15/08/2005)", color = Color(0xFF475569), fontSize = 12.sp) },
+                                leadingIcon = { Icon(Icons.Outlined.Cake, contentDescription = null, tint = Color(0xFF64748B), modifier = Modifier.size(18.dp)) },
+                                trailingIcon = {
+                                    if (calculatedAge > 0) {
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = if (calculatedAge >= 18) Color(0xFF10B981).copy(alpha = 0.2f) else Color(0xFFF59E0B).copy(alpha = 0.2f),
+                                            border = BorderStroke(1.dp, if (calculatedAge >= 18) Color(0xFF10B981) else Color(0xFFF59E0B)),
+                                            modifier = Modifier.padding(end = 8.dp)
+                                        ) {
+                                            Text(
+                                                text = "${calculatedAge}y • ${if (calculatedAge >= 18) "18+" else "Minor"}",
+                                                color = if (calculatedAge >= 18) Color(0xFF34D399) else Color(0xFFFBBF24),
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next),
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = Color(0xFF6366F1),
+                                    unfocusedBorderColor = Color(0xFF222B3D),
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White,
+                                    focusedContainerColor = Color(0xFF090B12),
+                                    unfocusedContainerColor = Color(0xFF090B12)
+                                )
+                            )
+
+                            // Explanatory age policy compliance notice
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (calculatedAge in 1..17) Color(0xFF2A1B0E) else Color(0xFF0D121E),
+                                border = BorderStroke(1.dp, if (calculatedAge in 1..17) Color(0xFFB45309) else Color(0xFF1E293B)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = if (calculatedAge in 1..17) Icons.Default.Info else Icons.Outlined.Shield,
+                                        contentDescription = null,
+                                        tint = if (calculatedAge in 1..17) Color(0xFFF59E0B) else Color(0xFF94A3B8),
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = if (calculatedAge in 1..17)
+                                            "Age ${calculatedAge}: Under-18 players can join Free Training & Scrim matches. Cash tournaments require 18+."
+                                        else if (calculatedAge >= 18)
+                                            "Age ${calculatedAge} (Verified): Full access granted to both Training and Real-Money Tournaments."
+                                        else
+                                            "Age Policy: Players under 18 can enter training matches; money tournaments require 18+.",
+                                        color = if (calculatedAge in 1..17) Color(0xFFFBBF24) else Color(0xFF94A3B8),
+                                        fontSize = 10.5.sp,
+                                        lineHeight = 14.sp
+                                    )
+                                }
+                            }
                         }
 
                         if (authMode == AuthMode.PHONE) {
@@ -1355,6 +1439,24 @@ fun LoginScreen(
                                     return@Button
                                 }
 
+                                val cleanDob = dateOfBirth.trim()
+                                if (cleanDob.isBlank()) {
+                                    errorMessage = "Please enter your Date of Birth (DD/MM/YYYY) to complete registration."
+                                    return@Button
+                                }
+
+                                val calculatedUserAge = com.example.data.validation.TournamentBackendValidator.calculateAgeFromDob(cleanDob)
+                                if (calculatedUserAge <= 0) {
+                                    errorMessage = "Please enter a valid Date of Birth (e.g. 15/08/2005)."
+                                    return@Button
+                                }
+
+                                val rateCheck = UserRateLimiter.checkAndRecord(UserRateLimiter.ActionType.AUTH_REGISTER_ATTEMPT, cleanEmail)
+                                if (!rateCheck.isAllowed) {
+                                    errorMessage = rateCheck.reasonMessage
+                                    return@Button
+                                }
+
                                 coroutineScope.launch {
                                     isLoading = true
                                     errorMessage = null
@@ -1378,7 +1480,22 @@ fun LoginScreen(
                                                 firebaseUser.updateProfile(userProfileChangeRequest { displayName = cleanUsername }).await()
                                             } catch (_: Exception) {}
 
-                                            val verification = tournamentRepository.verifyAndRegisterAdmin(uid, cleanEmail, cleanUsername)
+                                            val isUserMinor = (calculatedUserAge < 18)
+                                            val verification = tournamentRepository.verifyAndRegisterAdmin(
+                                                uid = uid,
+                                                email = cleanEmail,
+                                                displayName = cleanUsername,
+                                                dateOfBirth = cleanDob,
+                                                age = calculatedUserAge,
+                                                isUnder18 = isUserMinor
+                                            )
+
+                                            sharedPrefs.edit()
+                                                .putString("user_dob_${cleanEmail}", cleanDob)
+                                                .putInt("user_age_${cleanEmail}", calculatedUserAge)
+                                                .putBoolean("user_minor_${cleanEmail}", isUserMinor)
+                                                .apply()
+
                                             if (verification.isAuthorized) {
                                                 bindingManager.bindAccount(cleanEmail, role = verification.role, autoLogin = isRememberDeviceChecked, uid = uid)
                                                 isLoading = false
