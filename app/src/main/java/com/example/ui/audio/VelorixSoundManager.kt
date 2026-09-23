@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
+import android.media.MediaPlayer
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
@@ -11,16 +12,18 @@ import com.example.R
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.InputStream
 import java.util.concurrent.ConcurrentHashMap
 
 /**
  * VelorixSoundManager
- * High-performance, low-latency audio sound effects engine for Velorix Super Admin & Tournaments.
+ * High-performance, dual-engine audio sound effects engine for Velorix Super Admin & Tournaments.
  *
- * Uses direct PCM AudioTrack playback instead of SoundPool to completely avoid MediaCodec / OMX
- * component interface queries on virtual devices and cloud emulators.
+ * Uses direct Android MediaPlayer on USAGE_MEDIA / STREAM_MUSIC as primary engine
+ * (ensuring loud, crisp playback on real hardware even if touch sounds are disabled in OS settings),
+ * with instant-fallback to low-latency raw PCM AudioTrack.
  */
 class VelorixSoundManager private constructor(context: Context) {
 
@@ -30,15 +33,16 @@ class VelorixSoundManager private constructor(context: Context) {
     // Cached raw PCM byte arrays in memory (total < 250 KB)
     private val pcmCache = ConcurrentHashMap<Int, ByteArray>()
 
-    // Track pools for polyphonic, instant audio playback
-    private val activeTracks = ConcurrentHashMap<Int, AudioTrack>()
+    // Track active players for smooth teardown
+    private val activeMediaPlayers = ConcurrentHashMap<Int, MediaPlayer>()
+    private val activeAudioTracks = ConcurrentHashMap<Int, AudioTrack>()
 
-    // Volume level: soft and tasteful (0.0 to 1.0)
-    var masterVolume: Float = 0.50f
+    // Volume level: audible and pleasant (0.0 to 1.0)
+    var masterVolume: Float = 0.75f
     var isMuted: Boolean = false
 
     init {
-        // Pre-load PCM byte buffers in IO coroutine to ensure 0ms latency on first click
+        // Pre-load PCM byte buffers in IO coroutine
         scope.launch {
             loadPcmBuffer(SOUND_BEAT_TAP, R.raw.sfx_mj_beat_tap)
             loadPcmBuffer(SOUND_SNAP_POP, R.raw.sfx_mj_snap_pop)
@@ -124,67 +128,148 @@ class VelorixSoundManager private constructor(context: Context) {
         if (finalVol <= 0.001f) return
 
         scope.launch {
-            try {
-                var pcm = pcmCache[soundId]
-                if (pcm == null) {
-                    loadPcmBuffer(soundId, resId)
-                    pcm = pcmCache[soundId]
-                }
-                if (pcm == null || pcm.isEmpty()) return@launch
+            // Attempt 1: Direct MediaPlayer via raw resource FD (Plays on USAGE_MEDIA / STREAM_MUSIC)
+            val played = playViaMediaPlayer(soundId, resId, finalVol)
+            if (!played) {
+                // Attempt 2: High-speed PCM AudioTrack fallback
+                playViaAudioTrack(soundId, resId, finalVol)
+            }
+        }
+    }
 
-                // Clean up previous track for this sound slot if finished or playing
-                val existing = activeTracks[soundId]
-                if (existing != null) {
+    private fun playViaMediaPlayer(soundId: Int, resId: Int, volume: Float): Boolean {
+        return try {
+            val afd = appContext.resources.openRawResourceFd(resId) ?: return false
+            val mp = MediaPlayer()
+
+            // Stop any active player for this specific slot
+            activeMediaPlayers[soundId]?.let { oldMp ->
+                try {
+                    oldMp.stop()
+                    oldMp.reset()
+                    oldMp.release()
+                } catch (_: Throwable) {}
+            }
+
+            mp.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .build()
+            )
+            mp.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+            afd.close()
+            mp.setVolume(volume, volume)
+
+            mp.setOnCompletionListener { player ->
+                try {
+                    activeMediaPlayers.remove(soundId)
+                    player.reset()
+                    player.release()
+                } catch (_: Throwable) {}
+            }
+            mp.setOnErrorListener { player, _, _ ->
+                try {
+                    activeMediaPlayers.remove(soundId)
+                    player.reset()
+                    player.release()
+                } catch (_: Throwable) {}
+                true
+            }
+
+            mp.prepare()
+            mp.start()
+            activeMediaPlayers[soundId] = mp
+            true
+        } catch (e: Throwable) {
+            android.util.Log.d("VelorixSoundManager", "MediaPlayer playback fallback: ${e.message}")
+            false
+        }
+    }
+
+    private fun playViaAudioTrack(soundId: Int, resId: Int, volume: Float) {
+        try {
+            var pcm = pcmCache[soundId]
+            if (pcm == null) {
+                loadPcmBuffer(soundId, resId)
+                pcm = pcmCache[soundId]
+            }
+            if (pcm == null || pcm.isEmpty()) return
+
+            // Stop existing track if active
+            activeAudioTracks[soundId]?.let { oldTrack ->
+                try {
+                    if (oldTrack.playState == AudioTrack.PLAYSTATE_PLAYING) {
+                        oldTrack.stop()
+                    }
+                    oldTrack.release()
+                } catch (_: Throwable) {}
+            }
+
+            val audioAttributes = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                .build()
+
+            val audioFormat = AudioFormat.Builder()
+                .setSampleRate(44100)
+                .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                .build()
+
+            val minBufferSize = AudioTrack.getMinBufferSize(44100, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
+            val bufferSize = maxOf(minBufferSize, pcm.size)
+
+            val track = AudioTrack.Builder()
+                .setAudioAttributes(audioAttributes)
+                .setAudioFormat(audioFormat)
+                .setBufferSizeInBytes(bufferSize)
+                .setTransferMode(AudioTrack.MODE_STATIC)
+                .build()
+
+            if (track.state == AudioTrack.STATE_INITIALIZED) {
+                track.write(pcm, 0, pcm.size, AudioTrack.WRITE_BLOCKING)
+                track.setVolume(volume)
+                track.play()
+                activeAudioTracks[soundId] = track
+
+                // Clean up track after duration (audio clips are < 1000ms)
+                scope.launch {
+                    delay(1200)
                     try {
-                        if (existing.playState == AudioTrack.PLAYSTATE_PLAYING) {
-                            existing.stop()
+                        if (track.playState == AudioTrack.PLAYSTATE_PLAYING) {
+                            track.stop()
                         }
-                        existing.release()
+                        track.release()
+                        activeAudioTracks.remove(soundId)
                     } catch (_: Throwable) {}
                 }
-
-                val audioAttributes = AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .build()
-
-                val audioFormat = AudioFormat.Builder()
-                    .setSampleRate(44100)
-                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                    .build()
-
-                val track = AudioTrack.Builder()
-                    .setAudioAttributes(audioAttributes)
-                    .setAudioFormat(audioFormat)
-                    .setBufferSizeInBytes(pcm.size)
-                    .setTransferMode(AudioTrack.MODE_STATIC)
-                    .build()
-
-                if (track.state == AudioTrack.STATE_INITIALIZED) {
-                    track.write(pcm, 0, pcm.size)
-                    track.setVolume(finalVol)
-                    track.play()
-                    activeTracks[soundId] = track
-                } else {
-                    track.release()
-                }
-            } catch (t: Throwable) {
-                // Audio subsystem unavailable or muted in headless container - silent fallback
-                android.util.Log.d("VelorixSoundManager", "Playback handled safely: ${t.message}")
+            } else {
+                track.release()
             }
+        } catch (t: Throwable) {
+            android.util.Log.d("VelorixSoundManager", "AudioTrack playback fallback: ${t.message}")
         }
     }
 
     fun release() {
         try {
-            activeTracks.values.forEach { track ->
+            activeMediaPlayers.values.forEach { mp ->
+                try {
+                    mp.stop()
+                    mp.reset()
+                    mp.release()
+                } catch (_: Throwable) {}
+            }
+            activeMediaPlayers.clear()
+
+            activeAudioTracks.values.forEach { track ->
                 try {
                     track.stop()
                     track.release()
                 } catch (_: Throwable) {}
             }
-            activeTracks.clear()
+            activeAudioTracks.clear()
             pcmCache.clear()
         } catch (_: Throwable) {}
     }
