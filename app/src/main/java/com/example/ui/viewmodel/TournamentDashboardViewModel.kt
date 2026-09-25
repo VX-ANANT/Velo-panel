@@ -39,7 +39,9 @@ sealed class DashboardState {
         val pendingRegistrationsCount: Int = 0,
         val totalRegistrationsCount: Int = 0,
         val payoutPool: Float = 0f,
-        val currentUserEmail: String? = null
+        val currentUserEmail: String? = null,
+        val isSyncing: Boolean = false,
+        val lastSyncTimestamp: Long = System.currentTimeMillis()
     ) : DashboardState() {
         val complaints: List<ComplaintTicket> get() = supportTickets
         val cashouts: List<PayoutRequest> get() = payoutRequests
@@ -111,12 +113,67 @@ class TournamentDashboardViewModel(
     }
 
     fun fetchData() {
-        startStreams(forceRestart = true)
+        extractAndSyncRealDataFromBackend()
     }
 
     fun refreshRealtimeData() {
-        startStreams(forceRestart = true)
-        GlobalErrorManager.emitSuccess("Live Data Synced: Tournaments, Users & Finance Active!")
+        extractAndSyncRealDataFromBackend()
+    }
+
+    fun extractAndSyncRealDataFromBackend(onComplete: ((com.example.domain.model.BackendExtractionResult) -> Unit)? = null) {
+        // 1. Clear all in-memory lock states and stale caches
+        lockedUserStates.clear()
+        lockedAdminStates.clear()
+        lockedDeletedUserIds.clear()
+        lockedDeletedAdminUids.clear()
+        repository.locallyDeletedUserIds.clear()
+        repository.locallyDeletedTournamentIds.clear()
+
+        // 2. Set syncing state in UI
+        val currState = _uiState.value as? DashboardState.Success
+        if (currState != null) {
+            _uiState.value = currState.copy(isSyncing = true)
+        }
+
+        viewModelScope.launch {
+            try {
+                GlobalErrorManager.emitSuccess("Extracting real data from Firebase RTDB & Cloud Firestore...")
+                val result = repository.extractRealDataFromBackend(forceServer = true)
+
+                val initialEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
+                val curr = _uiState.value as? DashboardState.Success ?: DashboardState.Success(currentUserEmail = initialEmail)
+
+                val payout = result.tournaments.sumOf { it.prizePool.toDouble() }.toFloat()
+                _uiState.value = curr.copy(
+                    tournaments = result.tournaments,
+                    users = result.users,
+                    totalRegistrationsCount = result.tournaments.sumOf { it.registeredPlayers },
+                    payoutPool = payout,
+                    isSyncing = false,
+                    lastSyncTimestamp = System.currentTimeMillis()
+                )
+
+                // Restart live stream listeners so real-time updates continue
+                startStreams(forceRestart = true)
+
+                val msg = if (result.success) {
+                    "Live extraction complete: ${result.tournamentsCount} Tournaments & ${result.usersCount} Players synced from Firebase!"
+                } else {
+                    result.message
+                }
+                GlobalErrorManager.emitSuccess(msg)
+                onComplete?.invoke(result)
+            } catch (e: Exception) {
+                e.printStackTrace()
+                val curr = _uiState.value as? DashboardState.Success
+                if (curr != null) {
+                    _uiState.value = curr.copy(isSyncing = false)
+                }
+                GlobalErrorManager.emitError("Backend sync error: ${e.message}")
+                startStreams(forceRestart = true)
+                onComplete?.invoke(com.example.domain.model.BackendExtractionResult(success = false, message = e.message ?: "Sync error"))
+            }
+        }
     }
 
     private fun startStreams(forceRestart: Boolean) {
@@ -677,14 +734,8 @@ class TournamentDashboardViewModel(
     fun loadUserData(onFinished: (() -> Unit)? = null) {
         viewModelScope.launch {
             try {
-                repository.loadUserData { liveUsers ->
-                    val curr = _uiState.value as? DashboardState.Success
-                    if (curr != null && liveUsers.isNotEmpty()) {
-                        val merged = (curr.users + liveUsers).distinctBy { it.id }
-                        _uiState.value = curr.copy(users = merged)
-                    }
-                    onFinished?.invoke()
-                }
+                refreshRealtimeData()
+                onFinished?.invoke()
             } catch (e: Exception) {
                 e.printStackTrace()
                 onFinished?.invoke()
@@ -960,9 +1011,8 @@ class TournamentDashboardViewModel(
     }
 
     fun syncAllTournamentsToCloud(onResult: (Pair<Int, String>) -> Unit) {
-        viewModelScope.launch {
-            val result = repository.syncAllTournamentsToCloud()
-            onResult(result)
+        extractAndSyncRealDataFromBackend { result ->
+            onResult(Pair(result.tournamentsCount, "Extracted ${result.tournamentsCount} tournaments & ${result.usersCount} players directly from Firebase backend!"))
         }
     }
 

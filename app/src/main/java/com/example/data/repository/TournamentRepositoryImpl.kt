@@ -20,8 +20,10 @@ import com.example.domain.model.AppAnnouncementBanner
 import com.example.domain.model.MatchProofSubmission
 import com.example.domain.model.GlobalAnnouncement
 import com.example.domain.model.AppNotification
+import com.example.domain.model.BackendExtractionResult
 import com.example.notification.VelorixNotificationManager
 import com.google.firebase.firestore.DocumentSnapshot
+import com.google.firebase.firestore.Source
 import com.example.ui.common.GlobalErrorManager
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
@@ -449,14 +451,35 @@ service cloud.firestore {
         if (!exists()) return null
         
         fun findString(vararg keys: String): String? {
+            // 1. Exact direct key
             for (k in keys) {
                 val direct = child(k).value?.toString()
                 if (!direct.isNullOrBlank()) return direct
-                
-                // check nested common containers
-                for (container in listOf("profile", "account", "data", "info", "user", "userData", "wallet", "basic_info", "details")) {
-                    val nested = child(container).child(k).value?.toString()
-                    if (!nested.isNullOrBlank()) return nested
+            }
+            // 2. Case-insensitive direct key
+            for (k in keys) {
+                for (c in children) {
+                    if (c.key.equals(k, ignoreCase = true)) {
+                        val v = c.value?.toString()
+                        if (!v.isNullOrBlank()) return v
+                    }
+                }
+            }
+            // 3. Common nested containers (exact & case-insensitive)
+            for (containerName in listOf("profile", "account", "data", "info", "user", "userData", "wallet", "basic_info", "details", "player")) {
+                val container = child(containerName).takeIf { it.exists() }
+                    ?: children.find { it.key.equals(containerName, ignoreCase = true) }
+                if (container != null && container.exists()) {
+                    for (k in keys) {
+                        val vDirect = container.child(k).value?.toString()
+                        if (!vDirect.isNullOrBlank()) return vDirect
+                        for (c in container.children) {
+                            if (c.key.equals(k, ignoreCase = true)) {
+                                val v = c.value?.toString()
+                                if (!v.isNullOrBlank()) return v
+                            }
+                        }
+                    }
                 }
             }
             return null
@@ -469,11 +492,37 @@ service cloud.firestore {
                     val d = safeDouble(v)
                     if (d != 0.0) return d
                 }
-                for (container in listOf("profile", "account", "data", "info", "wallet", "balances", "funds", "money")) {
-                    val nested = child(container).child(k).value
-                    if (nested != null) {
-                        val d = safeDouble(nested)
-                        if (d != 0.0) return d
+            }
+            for (k in keys) {
+                for (c in children) {
+                    if (c.key.equals(k, ignoreCase = true)) {
+                        val v = c.value
+                        if (v != null) {
+                            val d = safeDouble(v)
+                            if (d != 0.0) return d
+                        }
+                    }
+                }
+            }
+            for (containerName in listOf("profile", "account", "data", "info", "wallet", "balances", "funds", "money")) {
+                val container = child(containerName).takeIf { it.exists() }
+                    ?: children.find { it.key.equals(containerName, ignoreCase = true) }
+                if (container != null && container.exists()) {
+                    for (k in keys) {
+                        val nested = container.child(k).value
+                        if (nested != null) {
+                            val d = safeDouble(nested)
+                            if (d != 0.0) return d
+                        }
+                        for (c in container.children) {
+                            if (c.key.equals(k, ignoreCase = true)) {
+                                val cv = c.value
+                                if (cv != null) {
+                                    val d = safeDouble(cv)
+                                    if (d != 0.0) return d
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -489,17 +538,66 @@ service cloud.firestore {
             else -> foundId ?: return null
         }
 
-        val uName = findString(
-            "name", "username", "displayName", "display_name", "ign",
+        val directIgn = findString("ign", "IGN", "inGameName", "InGameName", "in_game_name", "playerName", "PlayerName", "player_name", "ff_ign", "ffIgn", "FF_IGN", "ff_name", "ffName", "gameUsername", "nick", "nickname", "freeFireName", "free_fire_name") ?: ""
+        val rawEmail = findString("email", "Email", "user_email", "userEmail", "UserEmail", "mail", "Mail", "emailAddress", "EmailAddress", "contactEmail", "userMail", "email_id", "emailId", "accountEmail", "loginEmail", "gmail") ?: ""
+        val phoneOrEmailVal = findString("phoneOrEmail", "phone_or_email", "PhoneOrEmail") ?: ""
+        var email = if (rawEmail.isNotBlank()) rawEmail else if (phoneOrEmailVal.contains("@")) phoneOrEmailVal else ""
+        if (email.isBlank()) {
+            for (c in children) {
+                val str = c.value?.toString()?.trim() ?: ""
+                if (str.contains("@") && str.contains(".") && !str.contains(" ") && str.length >= 6) {
+                    email = str
+                    break
+                }
+            }
+        }
+
+        val directPhone = findString("phone", "Phone", "phoneNumber", "PhoneNumber", "phone_number", "mobile", "Mobile", "contact", "contactNumber", "tel", "phone_no", "mobileNumber")
+            ?: (if (!phoneOrEmailVal.contains("@") && phoneOrEmailVal.isNotBlank()) phoneOrEmailVal else "")
+        var phone = directPhone
+        if (phone.isBlank()) {
+            for (c in children) {
+                val str = c.value?.toString()?.trim() ?: ""
+                if ((str.startsWith("+91") && str.length >= 12) || (str.length in 10..12 && str.all { it.isDigit() || it == '+' })) {
+                    phone = str
+                    break
+                }
+            }
+        }
+
+        val directUName = findString(
+            "name", "Name", "username", "Username", "displayName", "DisplayName", "display_name", "ign", "IGN",
             "inGameName", "in_game_name", "playerName", "player_name",
-            "user_name", "ff_name", "nick", "nickname"
-        ) ?: findString("email")?.substringBefore("@") ?: "Player"
+            "user_name", "ff_name", "nick", "nickname", "fullName", "FullName", "gamerTag"
+        )
+        val uName = when {
+            !directUName.isNullOrBlank() && directUName != "Player" && !directUName.startsWith("Player (") -> directUName
+            directIgn.isNotBlank() && directIgn != "Player" -> directIgn
+            email.isNotBlank() && email.contains("@") -> email.substringBefore("@")
+            phone.isNotBlank() -> "Player (${phone.takeLast(4)})"
+            !directUName.isNullOrBlank() && directUName != "Player" -> directUName
+            uId.isNotBlank() && !uId.startsWith("usr_") && !uId.startsWith("acc_") && !uId.startsWith("admin_") -> "Player (${uId.take(6)})"
+            else -> "Player"
+        }
 
-        val avatarUrl = findString("avatarUrl", "avatar_url", "photoUrl", "photo_url", "profilePic", "image", "avatar")
+        var avatarUrl = findString(
+            "avatarUrl", "avatar_url", "photoUrl", "photo_url", "photoURL",
+            "profilePic", "profile_pic", "profilePicture", "profile_picture",
+            "profileImage", "profile_image", "avatar", "image", "userAvatar", "user_avatar",
+            "picture", "profilePicUrl", "profile_pic_url", "icon", "imageUrl", "image_url", "userPhoto"
+        )
+        if (avatarUrl.isNullOrBlank()) {
+            for (c in children) {
+                val str = c.value?.toString()?.trim() ?: ""
+                if ((str.startsWith("http://") || str.startsWith("https://")) && 
+                    (str.contains("googleusercontent") || str.contains("firebasestorage") || str.contains("avatar") || str.contains("profile") || str.contains("photo") || str.contains("image"))
+                ) {
+                    avatarUrl = str
+                    break
+                }
+            }
+        }
         val role = findString("role", "user_role", "type", "userType") ?: "player"
-        val email = findString("email", "user_email", "userEmail", "mail", "emailAddress") ?: ""
-
-        val phone = findString("phone", "phoneNumber", "phone_number", "mobile", "contact", "tel") ?: ""
 
         val depositFunds = findDouble("depositFunds", "deposit_funds", "depositBalance", "deposit_balance", "deposits")
         val winningFunds = findDouble("winningFunds", "winning_funds", "winnings", "winningBalance", "winning_balance", "earnings")
@@ -567,7 +665,7 @@ service cloud.firestore {
             0L
         )
 
-        val gameId = findString("gameId", "game_id", "gameAccountId", "freeFireId", "free_fire_id", "ffId", "ff_id", "playerUid", "inGameId", "ign", "in_game_id") ?: ""
+        val gameId = findString("gameId", "game_id", "gameAccountId", "freeFireId", "free_fire_id", "ffId", "ff_id", "playerUid", "inGameId", "in_game_id") ?: ""
 
         val wins = safeInt(child("wins").value ?: child("totalWins").value ?: child("total_wins").value ?: child("matchesWon").value)
         val kills = safeInt(child("kills").value ?: child("totalKills").value ?: child("total_kills").value)
@@ -579,7 +677,6 @@ service cloud.firestore {
         val referralCount = safeInt(child("referralCount").value ?: child("referral_count").value ?: child("referrals").value)
         val referralBonusEarned = safeDouble(child("referralBonusEarned").value ?: child("referral_bonus").value ?: child("referral_earnings").value)
 
-        val directIgn = (child("ign").value as? String) ?: (child("IGN").value as? String) ?: findString("ign", "IGN", "inGameName", "in_game_name") ?: ""
         val directBalanceLong = (child("balance").value as? Long) ?: (child("balance").value as? Number)?.toLong()
         val directBalance = directBalanceLong?.toDouble() ?: findDouble("balance", "funds", "wallet", "walletBalance", "wallet_balance", "coins", "vtCoins", "amount", "money", "credits")
 
@@ -613,13 +710,24 @@ service cloud.firestore {
         }
         extractChildren("", this)
 
+        val resolvedUsername = when {
+            uName.isNotBlank() && uName != "Player" && !uName.startsWith("Player (") -> uName
+            directIgn.isNotBlank() && directIgn != "Player" -> directIgn
+            email.isNotBlank() && email.contains("@") -> email.substringBefore("@")
+            directIgn.isNotBlank() -> directIgn
+            uName.isNotBlank() && uName != "Player" -> uName
+            uId.isNotBlank() && !uId.startsWith("usr_") && !uId.startsWith("acc_") -> "Player (${uId.take(6)})"
+            else -> "Player"
+        }
+
         return UserProfile(
             id = uId,
-            username = if (uName == "Player" && directIgn.isNotBlank()) directIgn else uName,
+            username = resolvedUsername,
             avatarUrl = avatarUrl,
             role = role,
             email = email,
             phone = phone,
+            phoneOrEmail = phoneOrEmailVal.ifBlank { email.ifBlank { phone } },
             depositFunds = depositFunds,
             winningFunds = winningFunds,
             bonusFunds = bonusFunds,
@@ -649,8 +757,8 @@ service cloud.firestore {
             ageConfirmed = ageConfirmed,
             lastActive = lastActive,
             createdAt = createdAt,
-            gameId = if (gameId.isNotBlank()) gameId else directIgn,
-            ign = directIgn,
+            gameId = gameId,
+            ign = directIgn.ifBlank { if (resolvedUsername != "Player") resolvedUsername else "" },
             referralCode = referralCode,
             referredBy = referredBy,
             referralCount = referralCount,
@@ -1203,15 +1311,31 @@ service cloud.firestore {
     private fun DocumentSnapshot.toUserProfile(): UserProfile? {
         if (!exists()) return null
 
+        val dataMap = data ?: emptyMap<String, Any?>()
+
         fun findString(vararg keys: String): String? {
+            // 1. Direct exact key
             for (k in keys) {
                 val direct = getString(k) ?: get(k)?.toString()
                 if (!direct.isNullOrBlank()) return direct
-
-                for (container in listOf("profile", "account", "data", "info", "user", "userData", "wallet", "basic_info", "details")) {
-                    val map = get(container) as? Map<*, *>
-                    val nested = map?.get(k)?.toString()
-                    if (!nested.isNullOrBlank()) return nested
+            }
+            // 2. Direct case-insensitive key in root map
+            for (k in keys) {
+                val entry = dataMap.entries.find { it.key.equals(k, ignoreCase = true) }
+                val v = entry?.value?.toString()
+                if (!v.isNullOrBlank()) return v
+            }
+            // 3. Nested containers (exact & case-insensitive)
+            for (containerName in listOf("profile", "account", "data", "info", "user", "userData", "wallet", "basic_info", "details", "player")) {
+                val map = (get(containerName) as? Map<*, *>)
+                    ?: (dataMap.entries.find { it.key.equals(containerName, ignoreCase = true) }?.value as? Map<*, *>)
+                if (map != null) {
+                    for (k in keys) {
+                        val nested = map[k]?.toString()
+                        if (!nested.isNullOrBlank()) return nested
+                        val nestedInsensitive = map.entries.find { it.key?.toString()?.equals(k, ignoreCase = true) == true }?.value?.toString()
+                        if (!nestedInsensitive.isNullOrBlank()) return nestedInsensitive
+                    }
                 }
             }
             return null
@@ -1224,12 +1348,30 @@ service cloud.firestore {
                     val d = safeDouble(v)
                     if (d != 0.0) return d
                 }
-                for (container in listOf("profile", "account", "data", "info", "wallet", "balances", "funds", "money")) {
-                    val map = get(container) as? Map<*, *>
-                    val nested = map?.get(k)
-                    if (nested != null) {
-                        val d = safeDouble(nested)
-                        if (d != 0.0) return d
+            }
+            for (k in keys) {
+                val entry = dataMap.entries.find { it.key.equals(k, ignoreCase = true) }
+                val v = entry?.value
+                if (v != null) {
+                    val d = safeDouble(v)
+                    if (d != 0.0) return d
+                }
+            }
+            for (containerName in listOf("profile", "account", "data", "info", "wallet", "balances", "funds", "money")) {
+                val map = (get(containerName) as? Map<*, *>)
+                    ?: (dataMap.entries.find { it.key.equals(containerName, ignoreCase = true) }?.value as? Map<*, *>)
+                if (map != null) {
+                    for (k in keys) {
+                        val nested = map[k]
+                        if (nested != null) {
+                            val d = safeDouble(nested)
+                            if (d != 0.0) return d
+                        }
+                        val nestedInsensitive = map.entries.find { it.key?.toString()?.equals(k, ignoreCase = true) == true }?.value
+                        if (nestedInsensitive != null) {
+                            val d = safeDouble(nestedInsensitive)
+                            if (d != 0.0) return d
+                        }
                     }
                 }
             }
@@ -1245,15 +1387,65 @@ service cloud.firestore {
             else -> foundId ?: id
         }
 
-        val uName = findString(
-            "username", "displayName", "name", "user_name", "ign",
-            "inGameName", "in_game_name", "playerName", "player_name", "nick", "nickname"
-        ) ?: findString("email")?.substringBefore("@") ?: "Player"
+        val directIgn = findString("ign", "IGN", "inGameName", "InGameName", "in_game_name", "playerName", "PlayerName", "player_name", "ff_ign", "ffIgn", "FF_IGN", "ff_name", "ffName", "gameUsername", "nick", "nickname", "freeFireName", "free_fire_name") ?: ""
+        val rawEmail = findString("email", "Email", "user_email", "userEmail", "UserEmail", "mail", "Mail", "emailAddress", "EmailAddress", "contactEmail", "userMail", "email_id", "emailId", "accountEmail", "loginEmail", "gmail") ?: ""
+        val phoneOrEmailVal = findString("phoneOrEmail", "phone_or_email", "PhoneOrEmail") ?: ""
+        var email = if (rawEmail.isNotBlank()) rawEmail else if (phoneOrEmailVal.contains("@")) phoneOrEmailVal else ""
+        if (email.isBlank()) {
+            for ((_, v) in dataMap) {
+                val str = v?.toString()?.trim() ?: ""
+                if (str.contains("@") && str.contains(".") && !str.contains(" ") && str.length >= 6) {
+                    email = str
+                    break
+                }
+            }
+        }
 
-        val avatarUrl = findString("avatarUrl", "avatar_url", "photoUrl", "photo_url", "profilePic", "image", "avatar")
+        val directPhone = findString("phone", "Phone", "phoneNumber", "PhoneNumber", "phone_number", "mobile", "Mobile", "contact", "contactNumber", "tel", "phone_no", "mobileNumber")
+            ?: (if (!phoneOrEmailVal.contains("@") && phoneOrEmailVal.isNotBlank()) phoneOrEmailVal else "")
+        var phone = directPhone
+        if (phone.isBlank()) {
+            for ((_, v) in dataMap) {
+                val str = v?.toString()?.trim() ?: ""
+                if ((str.startsWith("+91") && str.length >= 12) || (str.length in 10..12 && str.all { it.isDigit() || it == '+' })) {
+                    phone = str
+                    break
+                }
+            }
+        }
+
+        val directUName = findString(
+            "username", "Username", "displayName", "DisplayName", "name", "Name", "user_name", "ign", "IGN",
+            "inGameName", "in_game_name", "playerName", "player_name", "nick", "nickname", "fullName", "FullName", "gamerTag"
+        )
+        val uName = when {
+            !directUName.isNullOrBlank() && directUName != "Player" && !directUName.startsWith("Player (") -> directUName
+            directIgn.isNotBlank() && directIgn != "Player" -> directIgn
+            email.isNotBlank() && email.contains("@") -> email.substringBefore("@")
+            phone.isNotBlank() -> "Player (${phone.takeLast(4)})"
+            !directUName.isNullOrBlank() && directUName != "Player" -> directUName
+            rawDocId.isNotBlank() && !rawDocId.startsWith("acc_") && !rawDocId.startsWith("usr_") && !rawDocId.startsWith("admin_") -> "Player (${rawDocId.take(6)})"
+            else -> "Player"
+        }
+
+        var avatarUrl = findString(
+            "avatarUrl", "avatar_url", "photoUrl", "photo_url", "photoURL",
+            "profilePic", "profile_pic", "profilePicture", "profile_picture",
+            "profileImage", "profile_image", "avatar", "image", "userAvatar", "user_avatar",
+            "picture", "profilePicUrl", "profile_pic_url", "icon", "imageUrl", "image_url", "userPhoto"
+        )
+        if (avatarUrl.isNullOrBlank()) {
+            for ((_, v) in dataMap) {
+                val str = v?.toString()?.trim() ?: ""
+                if ((str.startsWith("http://") || str.startsWith("https://")) && 
+                    (str.contains("googleusercontent") || str.contains("firebasestorage") || str.contains("avatar") || str.contains("profile") || str.contains("photo") || str.contains("image"))
+                ) {
+                    avatarUrl = str
+                    break
+                }
+            }
+        }
         val role = findString("role", "user_role", "type", "userType") ?: "player"
-        val email = findString("email", "user_email", "userEmail", "mail", "emailAddress") ?: ""
-        val phone = findString("phone", "phoneNumber", "phone_number", "mobile", "contact", "tel") ?: ""
 
         val depositFunds = findDouble("depositFunds", "deposit_funds", "depositBalance", "deposit_balance", "deposits")
         val winningFunds = findDouble("winningFunds", "winning_funds", "winnings", "winningBalance", "winning_balance", "earnings")
@@ -1293,7 +1485,7 @@ service cloud.firestore {
 
         val lastActive = safeLong(get("lastActive") ?: get("lastLoginAt") ?: get("updatedAt") ?: get("createdAt"), System.currentTimeMillis())
         val createdAt = safeLong(get("createdAt") ?: get("created_at") ?: get("registeredAt") ?: get("joinedAt"), 0L)
-        val gameId = findString("gameId", "game_id", "gameAccountId", "freeFireId", "free_fire_id", "ffId", "ff_id", "playerUid", "inGameId", "ign", "in_game_id") ?: ""
+        val gameId = findString("gameId", "game_id", "gameAccountId", "freeFireId", "free_fire_id", "ffId", "ff_id", "playerUid", "inGameId", "in_game_id") ?: ""
         
         val wins = safeInt(get("wins") ?: get("totalWins") ?: get("total_wins") ?: get("matchesWon"))
         val kills = safeInt(get("kills") ?: get("totalKills") ?: get("total_kills"))
@@ -1330,17 +1522,29 @@ service cloud.firestore {
         }
         data?.let { flattenMap("", it) }
 
+        val resolvedUsername = when {
+            uName.isNotBlank() && uName != "Player" && !uName.startsWith("Player (") -> uName
+            directIgn.isNotBlank() && directIgn != "Player" -> directIgn
+            email.isNotBlank() && email.contains("@") -> email.substringBefore("@")
+            directIgn.isNotBlank() -> directIgn
+            uName.isNotBlank() && uName != "Player" -> uName
+            rawDocId.isNotBlank() && !rawDocId.startsWith("usr_") && !rawDocId.startsWith("acc_") && !rawDocId.startsWith("admin_") -> "Player (${rawDocId.take(6)})"
+            else -> "Player"
+        }
+
         return UserProfile(
             id = uId,
-            username = uName,
+            username = resolvedUsername,
             avatarUrl = avatarUrl,
             role = role,
             email = email,
             phone = phone,
+            phoneOrEmail = phoneOrEmailVal.ifBlank { email.ifBlank { phone } },
             depositFunds = depositFunds,
             winningFunds = winningFunds,
             bonusFunds = bonusFunds,
             funds = funds,
+            balance = funds,
             wins = wins,
             kills = kills,
             activityPoints = activityPoints,
@@ -1366,6 +1570,7 @@ service cloud.firestore {
             lastActive = lastActive,
             createdAt = createdAt,
             gameId = gameId,
+            ign = directIgn.ifBlank { if (resolvedUsername != "Player") resolvedUsername else "" },
             referralCode = referralCode,
             referredBy = referredBy,
             referralCount = referralCount,
@@ -1383,29 +1588,69 @@ service cloud.firestore {
         }
         val usersRef = rtdb.getReference("users")
 
-        // Use a listener to read data from the "users" path
         usersRef.addListenerForSingleValueEvent(object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                val list = mutableListOf<UserProfile>()
+                val rtdbList = mutableListOf<UserProfile>()
                 for (userSnapshot in snapshot.children) {
-                    val userId = (userSnapshot.child("id").value as? String) ?: (userSnapshot.child("uid").value as? String) ?: userSnapshot.key
-                    val email = userSnapshot.child("email").value as? String
-                    val ign = (userSnapshot.child("ign").value as? String) ?: (userSnapshot.child("IGN").value as? String)
-                    val balance = (userSnapshot.child("balance").value as? Long) ?: (userSnapshot.child("balance").value as? Number)?.toLong()
-                    
-                    // Bind this data to your Admin Panel's UI components
-                    android.util.Log.d("AdminPanel", "User: $userId | Email: $email | IGN: $ign | Balance: $balance")
-
                     val profile = userSnapshot.toUserProfile()
-                    if (profile != null) {
-                        list.add(profile)
+                    if (profile != null && !locallyDeletedUserIds.contains(profile.id)) {
+                        rtdbList.add(profile)
                     }
                 }
-                onComplete?.invoke(list)
+
+                // Reconcile with Firestore users so RTDB & Firestore stay in 100% lockstep
+                firestore.collection("users").get().addOnCompleteListener { fsTask ->
+                    val combined = mutableListOf<UserProfile>()
+                    combined.addAll(rtdbList)
+                    if (fsTask.isSuccessful && fsTask.result != null) {
+                        for (doc in fsTask.result.documents) {
+                            val p = doc.toUserProfile()
+                            if (p != null && !locallyDeletedUserIds.contains(p.id)) {
+                                combined.add(p)
+                            }
+                        }
+                    }
+
+                    val finalMerged = mutableListOf<UserProfile>()
+                    for (u in combined) {
+                        val cid = u.id.trim()
+                        val cmail = u.email.trim().lowercase()
+                        val idx = finalMerged.indexOfFirst { ex ->
+                            (cid.isNotBlank() && ex.id.isNotBlank() && ex.id == cid) ||
+                            (cmail.isNotBlank() && cmail.contains("@") && ex.email.isNotBlank() && ex.email.trim().lowercase() == cmail)
+                        }
+                        if (idx == -1) {
+                            finalMerged.add(u)
+                        } else {
+                            val ex = finalMerged[idx]
+                            val prefName = when {
+                                ex.username.isNotBlank() && ex.username != "Player" && !ex.username.startsWith("Player (") -> ex.username
+                                u.username.isNotBlank() && u.username != "Player" && !u.username.startsWith("Player (") -> u.username
+                                ex.ign.isNotBlank() && ex.ign != "Player" -> ex.ign
+                                u.ign.isNotBlank() && u.ign != "Player" -> u.ign
+                                else -> ex.username.ifBlank { u.username }
+                            }
+                            val prefMail = if (ex.email.isNotBlank() && ex.email.contains("@")) ex.email else u.email
+                            val prefIgn = if (ex.ign.isNotBlank()) ex.ign else u.ign
+                            val prefGameId = if (ex.gameId.isNotBlank()) ex.gameId else u.gameId
+                            val prefFunds = maxOf(ex.funds, u.funds)
+                            finalMerged[idx] = ex.copy(
+                                username = prefName,
+                                email = prefMail,
+                                ign = prefIgn,
+                                gameId = prefGameId,
+                                funds = prefFunds,
+                                isBanned = ex.isBanned || u.isBanned
+                            )
+                        }
+                    }
+                    onComplete?.invoke(finalMerged)
+                }
             }
 
             override fun onCancelled(error: DatabaseError) {
                 android.util.Log.e("AdminPanel", "Database read blocked: ${error.message}")
+                onComplete?.invoke(emptyList())
             }
         })
     }
@@ -1454,80 +1699,140 @@ service cloud.firestore {
                 }
             }
 
-            // Group and deduplicate users by normalized email (or user ID if no email)
-            val mergedMap = mutableMapOf<String, UserProfile>()
+            // Group and deduplicate users by unique identity (matching by ID, Email, Phone, or Game ID)
+            val mergedList = mutableListOf<UserProfile>()
             for (user in allRawUsers) {
-                val normEmail = user.email.trim().lowercase()
-                val dedupeKey = if (normEmail.isNotBlank() && normEmail.contains("@")) {
-                    "email:$normEmail"
-                } else {
-                    "id:${user.id}"
+                val cleanId = user.id.trim()
+                val cleanEmail = user.email.trim().lowercase()
+                val cleanPhone = user.phone.trim().replace(Regex("[^0-9]"), "")
+                val cleanGameId = user.gameId.trim().replace(Regex("[^0-9]"), "")
+
+                val existingIndex = mergedList.indexOfFirst { existing ->
+                    (cleanId.isNotBlank() && existing.id.isNotBlank() && existing.id == cleanId) ||
+                    (cleanEmail.isNotBlank() && cleanEmail.contains("@") && existing.email.isNotBlank() && existing.email.trim().lowercase() == cleanEmail) ||
+                    (cleanPhone.length >= 10 && existing.phone.replace(Regex("[^0-9]"), "").takeLast(10) == cleanPhone.takeLast(10)) ||
+                    (cleanGameId.isNotBlank() && cleanGameId.length >= 5 && existing.gameId.replace(Regex("[^0-9]"), "") == cleanGameId)
                 }
 
-                val existing = mergedMap[dedupeKey]
-                if (existing == null) {
-                    mergedMap[dedupeKey] = user
+                if (existingIndex == -1) {
+                    mergedList.add(user)
                 } else {
+                    val existing = mergedList[existingIndex]
                     // Smart field reconciliation - prefer genuine Firebase IDs over any legacy prefixes:
                     val preferredId = when {
-                        !user.id.contains("@") && !user.id.startsWith("admin_") && !user.id.startsWith("acc_") && user.id.isNotBlank() -> user.id
-                        !existing.id.contains("@") && !existing.id.startsWith("admin_") && !existing.id.startsWith("acc_") && existing.id.isNotBlank() -> existing.id
+                        existing.id.isNotBlank() && !existing.id.contains("@") && !existing.id.startsWith("admin_") && !existing.id.startsWith("acc_") && !existing.id.startsWith("usr_") -> existing.id
+                        user.id.isNotBlank() && !user.id.contains("@") && !user.id.startsWith("admin_") && !user.id.startsWith("acc_") && !user.id.startsWith("usr_") -> user.id
+                        existing.id.isNotBlank() && !existing.id.contains("@") -> existing.id
                         user.id.isNotBlank() && !user.id.contains("@") -> user.id
-                        else -> existing.id
+                        existing.id.isNotBlank() -> existing.id
+                        else -> user.id
                     }
 
                     val preferredUsername = when {
-                        user.username.isNotBlank() && user.username != "Player" && user.username != "Admin" && !user.username.contains("@") -> user.username
-                        existing.username.isNotBlank() && existing.username != "Player" && existing.username != "Admin" && !existing.username.contains("@") -> existing.username
+                        existing.username.isNotBlank() && existing.username != "Player" && !existing.username.startsWith("Player (") && existing.username != "Admin" && !existing.username.contains("@") -> existing.username
+                        user.username.isNotBlank() && user.username != "Player" && !user.username.startsWith("Player (") && user.username != "Admin" && !user.username.contains("@") -> user.username
+                        existing.ign.isNotBlank() && existing.ign != "Player" -> existing.ign
+                        user.ign.isNotBlank() && user.ign != "Player" -> user.ign
+                        existing.email.isNotBlank() && existing.email.contains("@") -> existing.email.substringBefore("@")
+                        user.email.isNotBlank() && user.email.contains("@") -> user.email.substringBefore("@")
+                        existing.gameId.isNotBlank() -> "FF ID: ${existing.gameId}"
+                        user.gameId.isNotBlank() -> "FF ID: ${user.gameId}"
+                        existing.username.isNotBlank() && existing.username != "Player" -> existing.username
                         user.username.isNotBlank() && user.username != "Player" -> user.username
-                        else -> existing.username
+                        else -> existing.username.ifBlank { user.username.ifBlank { "Player" } }
+                    }
+
+                    val preferredEmail = when {
+                        existing.email.isNotBlank() && existing.email.contains("@") -> existing.email
+                        user.email.isNotBlank() && user.email.contains("@") -> user.email
+                        existing.phoneOrEmail.isNotBlank() && existing.phoneOrEmail.contains("@") -> existing.phoneOrEmail
+                        user.phoneOrEmail.isNotBlank() && user.phoneOrEmail.contains("@") -> user.phoneOrEmail
+                        existing.email.isNotBlank() -> existing.email
+                        else -> user.email
+                    }
+
+                    val preferredIgn = when {
+                        existing.ign.isNotBlank() && existing.ign != "Player" -> existing.ign
+                        user.ign.isNotBlank() && user.ign != "Player" -> user.ign
+                        existing.ign.isNotBlank() -> existing.ign
+                        else -> user.ign
                     }
 
                     val preferredRole = when {
-                        user.role.contains("super", ignoreCase = true) || existing.role.contains("super", ignoreCase = true) -> "super_admin"
-                        user.role.contains("tournament", ignoreCase = true) || existing.role.contains("tournament", ignoreCase = true) -> "tournament_admin"
-                        user.role.contains("admin", ignoreCase = true) || existing.role.contains("admin", ignoreCase = true) -> "admin"
-                        user.role.isNotBlank() && user.role != "user" -> user.role
+                        existing.role.contains("super", ignoreCase = true) || user.role.contains("super", ignoreCase = true) -> "super_admin"
+                        existing.role.contains("tournament", ignoreCase = true) || user.role.contains("tournament", ignoreCase = true) -> "tournament_admin"
+                        existing.role.contains("admin", ignoreCase = true) || user.role.contains("admin", ignoreCase = true) -> "admin"
+                        existing.role.isNotBlank() && existing.role != "player" && existing.role != "user" -> existing.role
+                        user.role.isNotBlank() -> user.role
                         else -> existing.role
                     }
 
                     val preferredFunds = maxOf(user.funds, existing.funds)
+                    val preferredBalance = maxOf(user.balance, existing.balance)
+                    val preferredDepositFunds = maxOf(user.depositFunds, existing.depositFunds)
+                    val preferredWinningFunds = maxOf(user.winningFunds, existing.winningFunds)
+                    val preferredBonusFunds = maxOf(user.bonusFunds, existing.bonusFunds)
                     val preferredEarnings = maxOf(user.totalEarnings, existing.totalEarnings)
                     val preferredWins = maxOf(user.wins, existing.wins)
                     val preferredKills = maxOf(user.kills, existing.kills)
                     val preferredActivityPoints = maxOf(user.activityPoints, existing.activityPoints)
-                    val preferredGameId = if (user.gameId.isNotBlank()) user.gameId else existing.gameId
-                    val preferredEmail = if (user.email.isNotBlank()) user.email else existing.email
-                    val preferredPhone = if (user.phone.isNotBlank()) user.phone else existing.phone
-                    val preferredBanReason = if (user.banReason.isNotBlank()) user.banReason else existing.banReason
-                    val preferredBanCaseId = if (user.banCaseId.isNotBlank()) user.banCaseId else existing.banCaseId
+                    val preferredGameId = if (existing.gameId.isNotBlank()) existing.gameId else user.gameId
+                    val preferredPhone = if (existing.phone.isNotBlank()) existing.phone else user.phone
+                    val preferredBanReason = if (existing.banReason.isNotBlank()) existing.banReason else user.banReason
+                    val preferredBanCaseId = if (existing.banCaseId.isNotBlank()) existing.banCaseId else user.banCaseId
                     val preferredBannedAt = maxOf(user.bannedAt, existing.bannedAt)
                     val preferredIsSuspended = user.isSuspended || existing.isSuspended
                     val preferredSuspendedUntil = maxOf(user.suspendedUntil, existing.suspendedUntil)
-                    val preferredSuspensionReason = if (user.suspensionReason.isNotBlank()) user.suspensionReason else existing.suspensionReason
+                    val preferredSuspensionReason = if (existing.suspensionReason.isNotBlank()) existing.suspensionReason else user.suspensionReason
                     val preferredIsVpnBlocked = user.isVpnBlocked || existing.isVpnBlocked
                     val preferredIsForceUpdate = user.isForceUpdateRequired || existing.isForceUpdateRequired
-                    val preferredMinVersion = if (user.minVersionRequired.isNotBlank()) user.minVersionRequired else existing.minVersionRequired
+                    val preferredMinVersion = if (existing.minVersionRequired.isNotBlank()) existing.minVersionRequired else user.minVersionRequired
                     val preferredIsMaintenanceBypass = user.isMaintenanceBypass || existing.isMaintenanceBypass
-                    val preferredDeviceModel = if (user.deviceModel.isNotBlank()) user.deviceModel else existing.deviceModel
-                    val preferredIpAddress = if (user.ipAddress.isNotBlank()) user.ipAddress else existing.ipAddress
+                    val preferredDeviceModel = if (existing.deviceModel.isNotBlank()) existing.deviceModel else user.deviceModel
+                    val preferredIpAddress = if (existing.ipAddress.isNotBlank()) existing.ipAddress else user.ipAddress
                     val preferredCreatedAt = if (user.createdAt > 0 && existing.createdAt > 0) minOf(user.createdAt, existing.createdAt) else maxOf(user.createdAt, existing.createdAt)
                     val preferredLastActive = maxOf(user.lastActive, existing.lastActive)
 
+                    val preferredAvatarUrl = when {
+                        !existing.avatarUrl.isNullOrBlank() -> existing.avatarUrl
+                        !user.avatarUrl.isNullOrBlank() -> user.avatarUrl
+                        else -> null
+                    }
+                    val preferredTokens = maxOf(user.tokens, existing.tokens)
+                    val preferredLoginStreak = maxOf(user.loginStreak, existing.loginStreak)
+                    val preferredReferralCode = if (existing.referralCode.isNotBlank()) existing.referralCode else user.referralCode
+                    val preferredReferralCount = maxOf(user.referralCount, existing.referralCount)
+                    val preferredReferralBonus = maxOf(user.referralBonusEarned, existing.referralBonusEarned)
+                    val preferredAge = if (existing.age > 0) existing.age else user.age
+                    val preferredDob = if (existing.dateOfBirth.isNotBlank()) existing.dateOfBirth else user.dateOfBirth
+
                     val mergedRaw = (existing.rawAttributes + user.rawAttributes).toMutableMap()
 
-                    mergedMap[dedupeKey] = existing.copy(
+                    mergedList[existingIndex] = existing.copy(
                         id = preferredId,
                         username = preferredUsername,
+                        avatarUrl = preferredAvatarUrl,
                         email = preferredEmail,
-                        role = preferredRole,
                         phone = preferredPhone,
+                        gameId = preferredGameId,
+                        ign = preferredIgn,
+                        role = preferredRole,
                         funds = preferredFunds,
+                        balance = preferredBalance,
+                        depositFunds = preferredDepositFunds,
+                        winningFunds = preferredWinningFunds,
+                        bonusFunds = preferredBonusFunds,
                         totalEarnings = preferredEarnings,
                         wins = preferredWins,
                         kills = preferredKills,
                         activityPoints = preferredActivityPoints,
-                        gameId = preferredGameId,
+                        tokens = preferredTokens,
+                        loginStreak = preferredLoginStreak,
+                        referralCode = preferredReferralCode,
+                        referralCount = preferredReferralCount,
+                        referralBonusEarned = preferredReferralBonus,
+                        age = preferredAge,
+                        dateOfBirth = preferredDob,
                         isBanned = user.isBanned || existing.isBanned,
                         banReason = preferredBanReason,
                         banCaseId = preferredBanCaseId,
@@ -1553,25 +1858,33 @@ service cloud.firestore {
             val currentEmail = currentFirebaseUser?.email?.ifBlank { null } ?: activeAdminEmail
             val currentUid = currentFirebaseUser?.uid?.ifBlank { null } ?: activeAdminUid.takeIf { it.isNotBlank() && !it.startsWith("admin_") && !it.startsWith("acc_") }
             if (!currentEmail.isNullOrBlank() && !currentUid.isNullOrBlank() && !locallyDeletedUserIds.contains(currentUid)) {
-                val dedupeKey = "email:${currentEmail.trim().lowercase()}"
-                val existing = mergedMap[dedupeKey]
-                if (existing == null) {
+                val cleanEmail = currentEmail.trim().lowercase()
+                val existingIndex = mergedList.indexOfFirst { existing ->
+                    (existing.id == currentUid) ||
+                    (existing.email.trim().lowercase() == cleanEmail)
+                }
+                if (existingIndex == -1) {
                     val username = currentFirebaseUser?.displayName?.ifBlank { null } ?: currentEmail.substringBefore("@").ifBlank { "Super Admin" }
-                    mergedMap[dedupeKey] = UserProfile(
-                        id = currentUid,
-                        username = username,
-                        email = currentEmail,
-                        role = "super_admin",
-                        funds = 0.0,
-                        gameId = ""
+                    mergedList.add(
+                        UserProfile(
+                            id = currentUid,
+                            username = username,
+                            email = currentEmail,
+                            role = "super_admin",
+                            funds = 0.0,
+                            gameId = ""
+                        )
                     )
-                } else if ((existing.role.isBlank() || existing.role == "user") && !existing.isBanned) {
-                    mergedMap[dedupeKey] = existing.copy(role = "super_admin")
+                } else {
+                    val existing = mergedList[existingIndex]
+                    if ((existing.role.isBlank() || existing.role == "player" || existing.role == "user") && !existing.isBanned) {
+                        mergedList[existingIndex] = existing.copy(role = "super_admin")
+                    }
                 }
             }
 
             // Real-time synchronization of ban status against banned_users table
-            val reconciledList = mergedMap.values.map { u ->
+            val reconciledList = mergedList.map { u ->
                 val emailLower = u.email.trim().lowercase()
                 val isBannedMatch = u.isBanned ||
                     bannedUids.contains(u.id) ||
@@ -1698,7 +2011,7 @@ service cloud.firestore {
         val adminsRef = database.child("admins")
         adminsRef.addValueEventListener(adminsListener)
 
-        // Tournament registrations listener to include participating players
+        // Tournament registrations listener - only enrich real players, never create dummy phantom accounts
         val regListener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 val sourceMap = mutableMapOf<String, UserProfile>()
@@ -1706,31 +2019,38 @@ service cloud.firestore {
                     tourneyNode.children.forEach { regChild ->
                         val regUid = regChild.child("userId").value?.toString()
                             ?: regChild.child("uid").value?.toString()
-                            ?: regChild.key ?: ""
+                            ?: regChild.child("playerUid").value?.toString()
+                            ?: ""
                         val ign = regChild.child("ign").value?.toString()
                             ?: regChild.child("name").value?.toString()
                             ?: regChild.child("playerName").value?.toString()
                             ?: regChild.child("username").value?.toString()
-                            ?: "Player"
+                            ?: ""
                         val gameId = regChild.child("gameId").value?.toString()
                             ?: regChild.child("freeFireId").value?.toString()
                             ?: regChild.child("ffId").value?.toString()
                             ?: regChild.child("gameAccountId").value?.toString() ?: ""
-                        val email = regChild.child("email").value?.toString() ?: ""
+                        val email = regChild.child("email").value?.toString()?.trim() ?: ""
                         val phone = regChild.child("phone").value?.toString()
                             ?: regChild.child("phoneNumber").value?.toString()
                             ?: regChild.child("mobile").value?.toString() ?: ""
 
-                        val rawMap = mutableMapOf<String, String>()
-                        regChild.children.forEach { c ->
-                            val v = c.value
-                            if (v != null) rawMap[c.key ?: ""] = v.toString()
-                        }
+                        // Prevent internal registration keys / dummy slots from polluting the user accounts directory
+                        val isAuthenticUid = regUid.isNotBlank() &&
+                            !regUid.startsWith("-") &&
+                            !regUid.startsWith("slot_") &&
+                            !regUid.startsWith("reg_") &&
+                            !locallyDeletedUserIds.contains(regUid)
 
-                        if (regUid.isNotBlank() && !locallyDeletedUserIds.contains(regUid)) {
+                        if (isAuthenticUid && (email.contains("@") || (ign.isNotBlank() && ign != "Player") || (gameId.isNotBlank() && gameId.length >= 6))) {
+                            val rawMap = mutableMapOf<String, String>()
+                            regChild.children.forEach { c ->
+                                val v = c.value
+                                if (v != null) rawMap[c.key ?: ""] = v.toString()
+                            }
                             sourceMap[regUid] = UserProfile(
                                 id = regUid,
-                                username = ign,
+                                username = ign.ifBlank { if (email.contains("@")) email.substringBefore("@") else "Player" },
                                 email = email,
                                 phone = phone,
                                 role = "player",
@@ -1753,6 +2073,24 @@ service cloud.firestore {
         // Firestore real user collection listeners
         val fsCollections = listOf("users", "userProfiles")
         val fsListeners = mutableListOf<com.google.firebase.firestore.ListenerRegistration>()
+
+        // Initial one-shot fetch from Firestore so users load immediately in lockstep with RTDB
+        fsCollections.forEach { collName ->
+            try {
+                firestore.collection(collName).get().addOnSuccessListener { snapshot ->
+                    if (snapshot != null && !snapshot.isEmpty) {
+                        val sourceMap = mutableMapOf<String, UserProfile>()
+                        snapshot.documents.mapNotNull { it.toUserProfile() }.forEach { user ->
+                            if (user.id.isNotBlank() && !locallyDeletedUserIds.contains(user.id) && !user.email.contains("@example.com")) {
+                                sourceMap[user.id] = user
+                            }
+                        }
+                        usersSources["fs_$collName"] = sourceMap
+                        emitCombinedUsers()
+                    }
+                }
+            } catch (_: Exception) {}
+        }
 
         fsCollections.forEach { collName ->
             try {
@@ -1968,11 +2306,15 @@ service cloud.firestore {
             } catch (_: Exception) {}
         }
 
-        // Firestore aggregate fallback
+        // Firestore aggregate fallback with Source.SERVER
         val fsCollections = listOf("tournaments", "Tournaments", "matches", "Matches", "active_tournaments", "all_tournaments", "published_matches")
         for (col in fsCollections) {
             try {
-                val fsSnap = firestore.collection(col).get().await()
+                val fsSnap = try {
+                    firestore.collection(col).get(Source.SERVER).await()
+                } catch (_: Exception) {
+                    firestore.collection(col).get().await()
+                }
                 fsSnap.documents.mapNotNull { it.toTournament() }.forEach { t ->
                     if (t.id.isNotBlank()) {
                         result[t.id] = t
@@ -1982,6 +2324,239 @@ service cloud.firestore {
         }
 
         return result.values.toList().sortedBy { it.id }
+    }
+
+    /**
+     * Authoritative Live Backend Extraction Engine.
+     * Directly queries Firebase Realtime Database (RTDB) and Cloud Firestore (using Source.SERVER to bypass cache).
+     * Bypasses all local in-memory lock states and extracts genuine server-side tournaments, users, and stats.
+     */
+    suspend fun extractRealDataFromBackend(forceServer: Boolean = true): BackendExtractionResult = withContext(Dispatchers.IO) {
+        try {
+            // 1. Force network reconnection on RTDB
+            try {
+                database.database.goOnline()
+            } catch (_: Exception) {}
+
+            // 2. Clear all local exclusion caches
+            locallyDeletedUserIds.clear()
+            locallyDeletedTournamentIds.clear()
+
+            val isMockTournament: (Tournament) -> Boolean = { t ->
+                val id = t.id.trim().lowercase()
+                val title = t.title.trim().lowercase()
+                id.startsWith("mock_") || id.startsWith("demo_") || id.startsWith("test_") || id.startsWith("sample_") ||
+                title.contains("[mock]") || title.contains("[demo]") || title.contains("[test]") ||
+                title.startsWith("mock ") || title.startsWith("demo ") || title.startsWith("test ") ||
+                title.contains("mock tournament") || title.contains("demo tournament") || title.contains("test tournament")
+            }
+
+            // 3. Extract Tournaments directly from Realtime Database (all paths)
+            val extractedTournaments = mutableMapOf<String, Tournament>()
+            val rtdbTournamentNodes = listOf(
+                "tournaments", "Tournaments", "tournament", "matches", "Matches",
+                "active_tournaments", "all_tournaments", "published_matches",
+                "categories", "tournaments_by_category", "matches_by_category",
+                "FreeFire/tournaments", "FreeFire/matches", "FreeFire/categories",
+                "BGMI/tournaments", "BGMI/matches", "custom_rooms", "game_tournaments"
+            )
+            for (node in rtdbTournamentNodes) {
+                try {
+                    val snap = database.child(node).get().await()
+                    snap.children.forEach { child ->
+                        val t = child.toTournament()
+                        if (t != null && t.id.isNotBlank() && !isMockTournament(t)) {
+                            extractedTournaments[t.id] = t
+                        } else if (child.hasChildren()) {
+                            child.children.forEach { subChild ->
+                                val subT = subChild.toTournament()
+                                if (subT != null && subT.id.isNotBlank() && !isMockTournament(subT)) {
+                                    extractedTournaments[subT.id] = subT
+                                }
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "RTDB extract node $node: ${e.message}")
+                }
+            }
+
+            // 4. Extract Tournaments directly from Firestore (using Source.SERVER to bypass cache)
+            val fsCollections = listOf(
+                "tournaments", "Tournaments", "matches", "Matches",
+                "active_tournaments", "all_tournaments", "published_matches"
+            )
+            for (col in fsCollections) {
+                try {
+                    val fsSnap = if (forceServer) {
+                        try {
+                            firestore.collection(col).get(Source.SERVER).await()
+                        } catch (_: Exception) {
+                            firestore.collection(col).get().await()
+                        }
+                    } else {
+                        firestore.collection(col).get().await()
+                    }
+                    fsSnap.documents.mapNotNull { it.toTournament() }.forEach { t ->
+                        if (t.id.isNotBlank() && !isMockTournament(t)) {
+                            extractedTournaments[t.id] = t
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Firestore extract col $col: ${e.message}")
+                }
+            }
+
+            // 5. Extract Users directly from RTDB
+            val extractedUsers = mutableMapOf<String, UserProfile>()
+            val rtdbUserNodes = listOf("users", "userProfiles", "players")
+            for (node in rtdbUserNodes) {
+                try {
+                    val snap = database.child(node).get().await()
+                    snap.children.forEach { child ->
+                        val u = child.toUserProfile()
+                        if (u != null && u.id.isNotBlank() && !u.email.contains("@example.com")) {
+                            extractedUsers[u.id] = u
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "RTDB extract user node $node: ${e.message}")
+                }
+            }
+
+            // Extract admins from RTDB
+            try {
+                val adminSnap = database.child("admins").get().await()
+                adminSnap.children.forEach { child ->
+                    val adminUid = child.key ?: ""
+                    val email = child.child("email").value?.toString() ?: ""
+                    val name = child.child("name").value?.toString()
+                        ?: child.child("username").value?.toString()
+                        ?: email.substringBefore("@").ifBlank { "Admin" }
+                    val role = child.child("role").value?.toString() ?: "tournament_admin"
+                    if (adminUid.isNotBlank() && !email.contains("@example.com")) {
+                        val existing = extractedUsers[adminUid]
+                        extractedUsers[adminUid] = existing?.copy(role = role) ?: UserProfile(
+                            id = adminUid,
+                            username = name,
+                            email = email,
+                            role = role
+                        )
+                    }
+                }
+            } catch (_: Exception) {}
+
+            // Extract tournament registrations to capture active players
+            try {
+                val regSnap = database.child("registrations").get().await()
+                regSnap.children.forEach { tourneyNode ->
+                    tourneyNode.children.forEach { regChild ->
+                        val regUid = regChild.child("userId").value?.toString()
+                            ?: regChild.child("uid").value?.toString()
+                            ?: ""
+                        val ign = regChild.child("ign").value?.toString()
+                            ?: regChild.child("name").value?.toString()
+                            ?: ""
+                        val email = regChild.child("email").value?.toString()?.trim() ?: ""
+                        val gameId = regChild.child("gameId").value?.toString() ?: ""
+                        if (regUid.isNotBlank() && !regUid.startsWith("-") && !regUid.startsWith("slot_")) {
+                            if (!extractedUsers.containsKey(regUid)) {
+                                extractedUsers[regUid] = UserProfile(
+                                    id = regUid,
+                                    username = ign.ifBlank { if (email.contains("@")) email.substringBefore("@") else "Player" },
+                                    email = email,
+                                    gameId = gameId,
+                                    role = "player"
+                                )
+                            }
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+
+            // 6. Extract Users from Cloud Firestore with Source.SERVER
+            val fsUserCols = listOf("users", "userProfiles")
+            for (col in fsUserCols) {
+                try {
+                    val snap = if (forceServer) {
+                        try {
+                            firestore.collection(col).get(Source.SERVER).await()
+                        } catch (_: Exception) {
+                            firestore.collection(col).get().await()
+                        }
+                    } else {
+                        firestore.collection(col).get().await()
+                    }
+                    snap.documents.mapNotNull { it.toUserProfile() }.forEach { u ->
+                        if (u.id.isNotBlank() && !u.email.contains("@example.com")) {
+                            val existing = extractedUsers[u.id]
+                            if (existing != null) {
+                                extractedUsers[u.id] = existing.copy(
+                                    funds = maxOf(existing.funds, u.funds),
+                                    winningFunds = maxOf(existing.winningFunds, u.winningFunds),
+                                    depositFunds = maxOf(existing.depositFunds, u.depositFunds),
+                                    tokens = maxOf(existing.tokens, u.tokens),
+                                    wins = maxOf(existing.wins, u.wins),
+                                    kills = maxOf(existing.kills, u.kills),
+                                    avatarUrl = existing.avatarUrl ?: u.avatarUrl,
+                                    role = if (existing.role.contains("admin", ignoreCase = true)) existing.role else u.role
+                                )
+                            } else {
+                                extractedUsers[u.id] = u
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Firestore extract users col $col: ${e.message}")
+                }
+            }
+
+            // 7. Check Banned Users status from RTDB
+            try {
+                val banSnap = database.child("banned_users").get().await()
+                val bannedIds = banSnap.children.mapNotNull { it.key }.toSet()
+                if (bannedIds.isNotEmpty()) {
+                    extractedUsers.values.forEach { u ->
+                        if (bannedIds.contains(u.id) || (u.email.isNotBlank() && bannedIds.contains(u.email.replace(".", "_")))) {
+                            extractedUsers[u.id] = u.copy(isBanned = true)
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+
+            // 8. Count support tickets & payout requests
+            var ticketsCount = 0
+            var payoutsCount = 0
+            try {
+                ticketsCount = database.child("support_tickets").get().await().childrenCount.toInt()
+            } catch (_: Exception) {}
+            try {
+                payoutsCount = database.child("payout_requests").get().await().childrenCount.toInt()
+            } catch (_: Exception) {}
+
+            val cleanTourneys = extractedTournaments.values.toList().sortedByDescending { it.startsAt ?: "0" }
+            val cleanUserList = extractedUsers.values.toList().sortedWith(compareByDescending<UserProfile> { it.isBanned }.thenBy { it.username.lowercase() })
+
+            Log.i(TAG, "Backend extraction complete: ${cleanTourneys.size} tournaments, ${cleanUserList.size} users extracted live from Firebase.")
+            BackendExtractionResult(
+                success = true,
+                tournamentsCount = cleanTourneys.size,
+                usersCount = cleanUserList.size,
+                supportTicketsCount = ticketsCount,
+                payoutRequestsCount = payoutsCount,
+                tournaments = cleanTourneys,
+                users = cleanUserList,
+                message = "Successfully extracted ${cleanTourneys.size} tournaments & ${cleanUserList.size} users from Firebase backend!"
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Backend extraction failed: ${e.message}", e)
+            BackendExtractionResult(
+                success = false,
+                tournamentsCount = 0,
+                usersCount = 0,
+                message = "Extraction error: ${e.message}"
+            )
+        }
     }
 
     suspend fun getPendingRegistrations(): List<PlayerRegistration> {

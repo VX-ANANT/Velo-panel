@@ -106,6 +106,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
+import androidx.compose.ui.draw.rotate
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
 import com.example.ui.theme.*
@@ -206,7 +208,8 @@ fun DashboardScreen(
                     onRefreshClick = { onRefreshClick?.invoke() },
                     unreadNotificationCount = (uiState as? DashboardState.Success)?.unreadNotificationCount ?: 0,
                     currentUserEmail = (uiState as? DashboardState.Success)?.currentUserEmail,
-                    accentColor = currentHyperTheme.primaryColor
+                    accentColor = currentHyperTheme.primaryColor,
+                    isSyncing = (uiState as? DashboardState.Success)?.isSyncing ?: false
                 )
             
             when (uiState) {
@@ -248,7 +251,8 @@ fun DashboardScreen(
                                     onFinancialAuditClick = { onNavClick("daily_revenue") },
                                     onCreateTournamentClick = onCreateTournamentClick,
                                     onPublishAnnouncement = { onPublishAnnouncement?.invoke(it) },
-                                    onDeleteAnnouncement = { onDeleteAnnouncement?.invoke(it) }
+                                    onDeleteAnnouncement = { onDeleteAnnouncement?.invoke(it) },
+                                    onRefreshClick = { onRefreshClick?.invoke() }
                                 )
                             }
                             "tournaments_list" -> {
@@ -625,7 +629,8 @@ fun DashboardHeader(
     onRefreshClick: () -> Unit = {},
     unreadNotificationCount: Int = 0,
     currentUserEmail: String? = null,
-    accentColor: Color = VelorixAccent
+    accentColor: Color = VelorixAccent,
+    isSyncing: Boolean = false
 ) {
     Surface(
         modifier = Modifier
@@ -689,10 +694,25 @@ fun DashboardHeader(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // Live Sync / Refresh Button
+                val infiniteTransition = rememberInfiniteTransition(label = "sync_spin")
+                val spinAngle by infiniteTransition.animateFloat(
+                    initialValue = 0f,
+                    targetValue = 360f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(800, easing = LinearEasing),
+                        repeatMode = RepeatMode.Restart
+                    ),
+                    label = "spin_angle"
+                )
+
                 Surface(
                     modifier = Modifier
                         .size(36.dp)
-                        .border(1.dp, Color(0xFF27272A), RoundedCornerShape(10.dp))
+                        .border(
+                            1.dp,
+                            if (isSyncing) VelorixAccent else Color(0xFF27272A),
+                            RoundedCornerShape(10.dp)
+                        )
                         .clip(RoundedCornerShape(10.dp))
                         .bounceClick(scaleDown = 0.90f) { onRefreshClick() },
                     color = Color(0xFF141416)
@@ -701,8 +721,10 @@ fun DashboardHeader(
                         Icon(
                             imageVector = Icons.Default.Refresh,
                             contentDescription = "Sync Realtime Data",
-                            tint = Color.White,
-                            modifier = Modifier.size(18.dp)
+                            tint = if (isSyncing) VelorixAccent else Color.White,
+                            modifier = Modifier
+                                .size(18.dp)
+                                .rotate(if (isSyncing) spinAngle else 0f)
                         )
                     }
                 }
@@ -757,19 +779,18 @@ fun DashboardHeader(
                 Surface(
                     modifier = Modifier
                         .size(36.dp)
-                        .border(1.dp, Color(0xFF27272A), RoundedCornerShape(10.dp))
-                        .clip(RoundedCornerShape(10.dp))
+                        .clip(CircleShape)
                         .bounceClick(scaleDown = 0.90f) { onProfileClick() },
-                    color = Color(0xFF141416)
+                    color = Color.Transparent
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Default.AccountCircle,
-                            contentDescription = "Profile",
-                            tint = Color.White,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
+                    UserAvatarView(
+                        avatarUrl = null,
+                        name = currentUserEmail ?: "Admin",
+                        size = 36.dp,
+                        role = "super_admin",
+                        isActiveRecently = true,
+                        showGlow = false
+                    )
                 }
             }
         }
@@ -794,7 +815,8 @@ fun DashboardContent(
     onFinancialAuditClick: () -> Unit = {},
     onCreateTournamentClick: () -> Unit = {},
     onPublishAnnouncement: ((com.example.domain.model.GlobalAnnouncement) -> Unit)? = null,
-    onDeleteAnnouncement: ((String) -> Unit)? = null
+    onDeleteAnnouncement: ((String) -> Unit)? = null,
+    onRefreshClick: (() -> Unit)? = null
 ) {
     val liveTournament = uiState.tournaments.firstOrNull()
     var showPublishAnnouncementDialog by remember { mutableStateOf(false) }
@@ -838,10 +860,12 @@ fun DashboardContent(
                         letterSpacing = 1.sp
                     )
                 }
-                UntitledBadge(
-                    text = "REALTIME SYNC",
-                    color = Color(0xFF10B981)
-                )
+                Box(modifier = Modifier.bounceClick(scaleDown = 0.95f) { onRefreshClick?.invoke() }) {
+                    UntitledBadge(
+                        text = if (uiState.isSyncing) "EXTRACTING LIVE..." else "REALTIME SYNC",
+                        color = if (uiState.isSyncing) Color(0xFF00E5FF) else Color(0xFF10B981)
+                    )
+                }
             }
 
             if (isTablet) {
@@ -988,8 +1012,7 @@ fun DashboardContent(
                         Surface(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
-                                .bounceClick(scaleDown = 0.94f) { onCreateTournamentClick() }
-                                .clickable { onCreateTournamentClick() },
+                                .bounceClick(scaleDown = 0.96f) { onCreateTournamentClick() },
                             color = VelorixAccent,
                             shape = RoundedCornerShape(8.dp)
                         ) {
@@ -2063,23 +2086,14 @@ fun AdminProfileDialog(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .background(
-                                Brush.linearGradient(listOf(accentColor, Color(0xFF6366F1))),
-                                CircleShape
-                            )
-                            .border(1.5.dp, Color.White.copy(alpha = 0.5f), CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = (email.firstOrNull() ?: 'A').uppercase(),
-                            color = Color.White,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Black
-                        )
-                    }
+                    UserAvatarView(
+                        avatarUrl = null,
+                        name = email,
+                        size = 46.dp,
+                        role = "super_admin",
+                        isActiveRecently = true,
+                        showGlow = true
+                    )
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {
                         Text(

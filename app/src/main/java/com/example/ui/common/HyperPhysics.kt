@@ -79,14 +79,18 @@ object HyperPhysics {
 enum class HyperPressState { Pressed, Idle }
 
 fun Modifier.bounceClick(
-    scaleDown: Float = 0.94f,
+    scaleDown: Float = 0.97f,
     onClick: (() -> Unit)? = null
 ): Modifier = composed {
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
+    val lastClickTimestamp = remember { androidx.compose.runtime.mutableLongStateOf(0L) }
     val scale by animateFloatAsState(
         targetValue = if (isPressed) scaleDown else 1.0f,
-        animationSpec = HyperPhysics.BouncySpring,
+        animationSpec = androidx.compose.animation.core.spring(
+            dampingRatio = 0.8f,
+            stiffness = 500f
+        ),
         label = "hyperBounceScale"
     )
 
@@ -100,7 +104,14 @@ fun Modifier.bounceClick(
                 Modifier.clickable(
                     interactionSource = interactionSource,
                     indication = null,
-                    onClick = onClick
+                    onClick = {
+                        val now = System.currentTimeMillis()
+                        // 350ms debouncing guard to prevent rapid double-clicks from duplicating state mutations
+                        if (now - lastClickTimestamp.longValue > 350L) {
+                            lastClickTimestamp.longValue = now
+                            onClick()
+                        }
+                    }
                 )
             } else Modifier
         )

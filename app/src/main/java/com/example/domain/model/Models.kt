@@ -46,6 +46,18 @@ data class UserProfile(
     var ign: String = "",
     @get:PropertyName("balance") @set:PropertyName("balance")
     var balance: Double = 0.0,
+    @get:PropertyName("tokens") @set:PropertyName("tokens")
+    var tokens: Int = 0,
+    @get:PropertyName("loginStreak") @set:PropertyName("loginStreak")
+    var loginStreak: Int = 0,
+    @get:PropertyName("lastLoginClaimDate") @set:PropertyName("lastLoginClaimDate")
+    var lastLoginClaimDate: String = "",
+    @get:PropertyName("lastMissionClaimDate") @set:PropertyName("lastMissionClaimDate")
+    var lastMissionClaimDate: String = "",
+    @get:PropertyName("dailyMissionsTokensClaimed") @set:PropertyName("dailyMissionsTokensClaimed")
+    var dailyMissionsTokensClaimed: Int = 0,
+    @get:PropertyName("phoneOrEmail") @set:PropertyName("phoneOrEmail")
+    var phoneOrEmail: String = "",
     @get:PropertyName("referralCode") @set:PropertyName("referralCode")
     var referralCode: String = "",
     @get:PropertyName("referredBy") @set:PropertyName("referredBy")
@@ -100,14 +112,43 @@ data class UserProfile(
         else -> funds
     }
     val walletBalance: Double get() = totalWalletBalance
-    val effectiveIgn: String get() = if (ign.isNotBlank()) ign else if (gameId.isNotBlank()) gameId else username
+    val effectiveIgn: String get() = when {
+        ign.isNotBlank() && ign != "Player" -> ign
+        username.isNotBlank() && username != "Player" && !username.startsWith("Player (") && !username.contains("@") -> username
+        gameId.isNotBlank() -> "FF ID: $gameId"
+        else -> ign.ifBlank { username.ifBlank { "Player" } }
+    }
+    val bestDisplayName: String
+        get() = when {
+            username.isNotBlank() && username != "Player" && !username.startsWith("Player (") && !username.contains("@") -> username
+            ign.isNotBlank() && ign != "Player" && !ign.startsWith("Player (") -> ign
+            email.isNotBlank() && email.contains("@") -> email.substringBefore("@")
+            gameId.isNotBlank() -> "FF ID: $gameId"
+            phone.isNotBlank() -> "Player (${phone.takeLast(4)})"
+            phoneOrEmail.isNotBlank() && !phoneOrEmail.contains("@") -> "Player (${phoneOrEmail.takeLast(4)})"
+            username.isNotBlank() && username != "Player" -> username
+            ign.isNotBlank() -> ign
+            id.isNotBlank() && !id.startsWith("usr_") && !id.startsWith("acc_") -> "Player (${id.take(6)})"
+            else -> "Player"
+        }
+    val bestEmailOrPhone: String
+        get() = when {
+            email.isNotBlank() && email.contains("@") -> email
+            phoneOrEmail.isNotBlank() && phoneOrEmail.contains("@") -> phoneOrEmail
+            phone.isNotBlank() -> phone
+            phoneOrEmail.isNotBlank() -> phoneOrEmail
+            email.isNotBlank() -> email
+            gameId.isNotBlank() -> "FF UID: $gameId"
+            id.isNotBlank() -> "UID: ${id.take(10)}"
+            else -> "No email/phone linked"
+        }
     val matchesWon: Int get() = wins
     val totalKills: Int get() = kills
     val matchesPlayed: Int get() = wins + activityPoints
-    val phoneNumber: String get() = ""
+    val phoneNumber: String get() = phone.ifBlank { if (!phoneOrEmail.contains("@")) phoneOrEmail else "" }
     val gameAccountId: String get() = gameId
     val uid: String get() = id
-    val gameUsername: String get() = username
+    val gameUsername: String get() = bestDisplayName
     val freeFireUid: String get() = gameId
 }
 
@@ -257,6 +298,27 @@ data class PayoutRequest(
     val upiId: String get() = paymentId
     val createdAt: Long get() = requestedAt
 }
+
+@IgnoreExtraProperties
+@Serializable
+data class DepositRequest(
+    @get:PropertyName("id") @set:PropertyName("id")
+    var id: String = "",
+    @get:PropertyName("uid") @set:PropertyName("uid")
+    var uid: String = "",
+    @get:PropertyName("username") @set:PropertyName("username")
+    var username: String = "",
+    @get:PropertyName("amount") @set:PropertyName("amount")
+    var amount: Double = 0.0,
+    @get:PropertyName("utrNumber") @set:PropertyName("utrNumber")
+    var utrNumber: String = "",
+    @get:PropertyName("paymentScreenshotUrl") @set:PropertyName("paymentScreenshotUrl")
+    var paymentScreenshotUrl: String = "",
+    @get:PropertyName("status") @set:PropertyName("status")
+    var status: String = "PENDING", // PENDING, SUCCESS, REJECTED
+    @get:PropertyName("timestamp") @set:PropertyName("timestamp")
+    var timestamp: Long = System.currentTimeMillis()
+)
 
 @IgnoreExtraProperties
 @Serializable
@@ -747,6 +809,20 @@ data class AuditLogEntry(
     var category: String = "SYSTEM", // TOURNAMENT, SECURITY, CASHOUT, SUPPORT, SYSTEM
     @get:PropertyName("timestamp") @set:PropertyName("timestamp")
     var timestamp: Long = System.currentTimeMillis()
+)
+
+@IgnoreExtraProperties
+@Serializable
+data class BackendExtractionResult(
+    val success: Boolean = true,
+    val tournamentsCount: Int = 0,
+    val usersCount: Int = 0,
+    val supportTicketsCount: Int = 0,
+    val payoutRequestsCount: Int = 0,
+    val tournaments: List<Tournament> = emptyList(),
+    val users: List<UserProfile> = emptyList(),
+    val message: String = "",
+    val timestamp: Long = System.currentTimeMillis()
 )
 
 

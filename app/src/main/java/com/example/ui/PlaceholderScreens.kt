@@ -2,7 +2,8 @@ package com.example.ui
 
 import android.widget.Toast
 import kotlinx.coroutines.launch
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -209,14 +210,28 @@ fun TournamentsListScreenContent(
                         Icon(Icons.Default.FileUpload, contentDescription = "Import / Push JSON", tint = Color(0xFF38BDF8), modifier = Modifier.size(15.dp))
                     }
 
+                    val isCloudSyncing = (uiState as? DashboardState.Success)?.isSyncing ?: false
                     IconButton(
                         onClick = {
+                            syncStatusMessage = "Extracting live tournaments directly from Firebase backend..."
                             onSyncCloud?.invoke()
-                            syncStatusMessage = "Multi-node Cloud Sync dispatched!"
                         },
-                        modifier = Modifier.size(28.dp)
+                        modifier = Modifier.size(28.dp).bounceClick(scaleDown = 0.90f)
                     ) {
-                        Icon(Icons.Default.CloudSync, contentDescription = "Sync All", tint = Color(0xFF4ADE80), modifier = Modifier.size(15.dp))
+                        if (isCloudSyncing) {
+                            CircularProgressIndicator(
+                                color = Color(0xFF4ADE80),
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        } else {
+                            Icon(
+                                Icons.Default.CloudSync,
+                                contentDescription = "Extract & Sync Backend",
+                                tint = Color(0xFF4ADE80),
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -701,7 +716,6 @@ fun GlobalSettingsScreenContent(
     onOpenRateLimiter: (() -> Unit)? = null
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val manager = remember { opticsManager ?: LiquidGlassOpticsManager(context) }
     val repository = remember { com.example.data.repository.TournamentRepositoryImpl(context) }
     val coroutineScope = rememberCoroutineScope()
     val clipboardManager = LocalClipboardManager.current
@@ -723,13 +737,13 @@ fun GlobalSettingsScreenContent(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.Security, contentDescription = null, tint = VelorixAccent)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Realtime Database RLS Rules", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text("Realtime Database Security Rules", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 }
             },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        "Paste this JSON into Firebase Console -> Realtime Database -> Rules. This protects player data while granting super-admin rights to anantisback47@gmail.com and active admins.",
+                        "Paste this JSON into Firebase Console -> Realtime Database -> Rules. This protects slot locks and room details while giving admin full authority.",
                         color = Color(0xFF94A3B8),
                         fontSize = 12.sp,
                         lineHeight = 16.sp
@@ -761,6 +775,7 @@ fun GlobalSettingsScreenContent(
             confirmButton = {
                 Button(
                     onClick = {
+                        soundManager.playSnapPop()
                         clipboardManager.setText(AnnotatedString(rtdbRules))
                         Toast.makeText(context, "RTDB Rules copied to clipboard!", Toast.LENGTH_SHORT).show()
                         showRtdbRulesDialog = false
@@ -769,7 +784,7 @@ fun GlobalSettingsScreenContent(
                 ) {
                     Icon(Icons.Default.ContentCopy, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Copy JSON Rules", color = Color.White, fontWeight = FontWeight.Bold)
+                    Text("Copy Rules", color = Color.White, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -795,7 +810,7 @@ fun GlobalSettingsScreenContent(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        "Paste this into Firebase Console -> Firestore Database -> Rules. Provides row-level security while authorizing anantisback47@gmail.com and dashboard admins.",
+                        "Paste this into Firebase Console -> Firestore Database -> Rules. Enforces Row-Level Security for wallets and user data.",
                         color = Color(0xFF94A3B8),
                         fontSize = 12.sp,
                         lineHeight = 16.sp
@@ -827,6 +842,7 @@ fun GlobalSettingsScreenContent(
             confirmButton = {
                 Button(
                     onClick = {
+                        soundManager.playSnapPop()
                         clipboardManager.setText(AnnotatedString(firestoreRules))
                         Toast.makeText(context, "Firestore Rules copied to clipboard!", Toast.LENGTH_SHORT).show()
                         showFirestoreRulesDialog = false
@@ -835,7 +851,7 @@ fun GlobalSettingsScreenContent(
                 ) {
                     Icon(Icons.Default.ContentCopy, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Copy Firestore Rules", color = Color.Black, fontWeight = FontWeight.Bold)
+                    Text("Copy Rules", color = Color.Black, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -854,12 +870,12 @@ fun GlobalSettingsScreenContent(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.ExitToApp, contentDescription = null, tint = Color(0xFFEF4444))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Sign Out of Super Admin", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text("Sign Out Admin", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 }
             },
             text = {
                 Text(
-                    "Are you sure you want to end your administrator session? You will be signed out of Firebase and returned to the sign-in screen.",
+                    "Are you sure you want to end your administrator session? You will be signed out of Firebase and returned to the login screen.",
                     color = Color(0xFF94A3B8),
                     fontSize = 13.sp,
                     lineHeight = 18.sp
@@ -873,7 +889,7 @@ fun GlobalSettingsScreenContent(
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444))
                 ) {
-                    Text("Yes, Sign Out", color = Color.White, fontWeight = FontWeight.Bold)
+                    Text("Sign Out", color = Color.White, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -892,12 +908,12 @@ fun GlobalSettingsScreenContent(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFEF4444))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Purge Mock & Demo Data", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text("Clean Mock Data", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 }
             },
             text = {
                 Text(
-                    "This will delete all tournaments, match proofs, support tickets, and test dummy records from Firebase Realtime Database and Firestore, resetting the database to a clean production state.\n\nYour active admin account and credentials will remain preserved.",
+                    "This will clear temporary test mock tournaments and dummy records from Firebase, resetting to clean live production data.\n\nYour admin credentials and real users remain safe.",
                     color = Color(0xFF94A3B8),
                     fontSize = 13.sp,
                     lineHeight = 18.sp
@@ -906,12 +922,13 @@ fun GlobalSettingsScreenContent(
             confirmButton = {
                 Button(
                     onClick = {
+                        soundManager.playOrchestraHit()
                         showPurgeConfirmationDialog = false
                         onPurgeDemoData?.invoke()
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444))
                 ) {
-                    Text("Yes, Purge All Demo Data", color = Color.White, fontWeight = FontWeight.Bold)
+                    Text("Confirm Wipe", color = Color.White, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -927,27 +944,27 @@ fun GlobalSettingsScreenContent(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp)
-            .padding(bottom = 100.dp)
+            .padding(bottom = 120.dp)
     ) {
-        // Header
+        // Page Header
         item {
-            Column(modifier = Modifier.padding(top = 12.dp, bottom = 2.dp)) {
+            Column(modifier = Modifier.padding(top = 16.dp, bottom = 4.dp)) {
                 Text(
                     text = "Settings",
                     color = Color.White,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 24.sp
+                    fontSize = 22.sp
                 )
-                Spacer(modifier = Modifier.height(2.dp))
+                Spacer(modifier = Modifier.height(3.dp))
                 Text(
-                    text = "System preferences, security policies & admin controls",
+                    text = "System preferences, audio feedback & admin control panel",
                     color = Color(0xFF94A3B8),
                     fontSize = 12.5.sp
                 )
             }
         }
 
-        // 1. Super Administrator Account Profile
+        // Section 1: Super Admin Profile Card
         item {
             Surface(
                 modifier = Modifier.fillMaxWidth(),
@@ -958,38 +975,43 @@ fun GlobalSettingsScreenContent(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(16.dp),
+                        .padding(14.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(
                         modifier = Modifier
                             .size(46.dp)
-                            .background(Color(0xFF27272A), CircleShape)
-                            .border(1.dp, Color(0xFF3F3F46), CircleShape),
+                            .background(
+                                Brush.linearGradient(
+                                    listOf(accentColor, Color(0xFF6366F1))
+                                ),
+                                CircleShape
+                            )
+                            .border(1.5.dp, Color.White.copy(alpha = 0.4f), CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = (currentUserEmail?.firstOrNull() ?: 'A').uppercase(),
                             color = Color.White,
-                            fontSize = 20.sp,
+                            fontSize = 19.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
                     Spacer(modifier = Modifier.width(14.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Super Administrator", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            Text("Super Administrator", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                             Spacer(modifier = Modifier.width(8.dp))
                             Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = Color(0xFF166534).copy(alpha = 0.35f),
-                                border = BorderStroke(0.5.dp, Color(0xFF22C55E).copy(alpha = 0.5f))
+                                shape = RoundedCornerShape(4.dp),
+                                color = Color(0xFF102A1E),
+                                border = BorderStroke(0.5.dp, Color(0xFF166534))
                             ) {
                                 Text(
-                                    "ACTIVE",
+                                    "ONLINE",
                                     color = Color(0xFF86EFAC),
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 8.5.sp,
+                                    fontWeight = FontWeight.ExtraBold,
                                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                 )
                             }
@@ -1007,17 +1029,9 @@ fun GlobalSettingsScreenContent(
             }
         }
 
-        // 2. Audio & Sound Effects (SFX)
+        // Section 2: Audio & Sound Effects
         item {
-            Text(
-                "AUDIO & SOUND EFFECTS (SFX)",
-                color = Color(0xFF94A3B8),
-                fontWeight = FontWeight.Bold,
-                fontSize = 11.sp,
-                letterSpacing = 1.sp
-            )
-        }
-        item {
+            SettingsSectionHeader("AUDIO & FEEDBACK")
             var sfxMuted by remember { mutableStateOf(soundManager.isMuted) }
             var sfxVol by remember { mutableFloatStateOf(soundManager.masterVolume) }
 
@@ -1027,7 +1041,7 @@ fun GlobalSettingsScreenContent(
                 color = Color(0xFF141416),
                 border = BorderStroke(1.dp, Color(0xFF27272A))
             ) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -1036,16 +1050,16 @@ fun GlobalSettingsScreenContent(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(
                                 modifier = Modifier
-                                    .size(36.dp)
-                                    .background(Color(0xFF27272A), RoundedCornerShape(10.dp)),
+                                    .size(34.dp)
+                                    .background(Color(0xFF202024), RoundedCornerShape(8.dp)),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(Icons.Default.VolumeUp, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
                             }
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
-                                Text("App Sound Effects", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
-                                Text("Acoustic beats & funk snaps on actions", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
+                                Text("In-App Sound Effects", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+                                Text("Tactile button taps, snaps & alerts", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
                             }
                         }
                         Switch(
@@ -1064,11 +1078,12 @@ fun GlobalSettingsScreenContent(
                     }
 
                     if (!sfxMuted) {
+                        HorizontalDivider(color = Color(0xFF27272A), thickness = 0.5.dp)
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("Volume", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
+                            Text("Volume", color = Color(0xFF94A3B8), fontSize = 12.sp)
                             Spacer(modifier = Modifier.width(12.dp))
                             Slider(
                                 value = sfxVol,
@@ -1089,94 +1104,42 @@ fun GlobalSettingsScreenContent(
                         }
                     }
 
-                    OutlinedButton(
-                        onClick = { onOpenAudioLab?.invoke() },
-                        shape = RoundedCornerShape(10.dp),
-                        border = BorderStroke(1.dp, Color(0xFF3F3F46)),
-                        colors = ButtonDefaults.outlinedButtonColors(containerColor = Color(0xFF18181B)),
-                        modifier = Modifier.fillMaxWidth()
+                    HorizontalDivider(color = Color(0xFF27272A), thickness = 0.5.dp)
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                soundManager.playBeatTap()
+                                onOpenAudioLab?.invoke()
+                            }
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.Headphones, contentDescription = null, tint = Color(0xFFD49A3D), modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Open SFX Audio Lab (Test Beats)", color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Headphones, contentDescription = null, tint = Color(0xFFD49A3D), modifier = Modifier.size(17.dp))
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text("SFX Audio Lab (Test Sound Effects)", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        }
+                        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(15.dp))
                     }
                 }
             }
         }
 
-        // 3. AI Assistant & Credentials
+        // Section 3: Appearance & Accent Theme
         item {
-            Text(
-                "INTELLIGENCE & AI ENGINE",
-                color = Color(0xFF94A3B8),
-                fontWeight = FontWeight.Bold,
-                fontSize = 11.sp,
-                letterSpacing = 1.sp
-            )
-        }
-        item {
+            SettingsSectionHeader("APPEARANCE & THEME")
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
                 color = Color(0xFF141416),
                 border = BorderStroke(1.dp, Color(0xFF27272A))
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .background(Color(0xFF2E1065).copy(alpha = 0.5f), RoundedCornerShape(10.dp))
-                                .border(1.dp, Color(0xFF7C3AED).copy(alpha = 0.5f), RoundedCornerShape(10.dp)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = Color(0xFFA78BFA), modifier = Modifier.size(18.dp))
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text("Gemini AI Mediator", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
-                            Text("Automated dispute handling & rules", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
-                        }
-                    }
-                    Button(
-                        onClick = { onOpenApiKeyDialog?.invoke() },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF27272A)),
-                        border = BorderStroke(1.dp, Color(0xFF3F3F46)),
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                    ) {
-                        Icon(Icons.Default.Key, contentDescription = null, tint = Color(0xFFA78BFA), modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("API Key", color = Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
-
-        // 4. UI Theme Accent (Subtle & Minimal)
-        item {
-            Text(
-                "APPEARANCE & THEME",
-                color = Color(0xFF94A3B8),
-                fontWeight = FontWeight.Bold,
-                fontSize = 11.sp,
-                letterSpacing = 1.sp
-            )
-        }
-        item {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                color = Color(0xFF141416),
-                border = BorderStroke(1.dp, Color(0xFF27272A))
-            ) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Theme Palette", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
-                    Text("Subtle ambient accents for dashboard surfaces", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Theme Palette", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Subtle ambient accents for surfaces and active tabs", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -1186,18 +1149,21 @@ fun GlobalSettingsScreenContent(
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(42.dp)
-                                    .clip(RoundedCornerShape(10.dp))
+                                    .height(38.dp)
+                                    .clip(RoundedCornerShape(8.dp))
                                     .background(
                                         if (isSelected) theme.primaryColor.copy(alpha = 0.25f)
-                                        else Color(0xFF1E1E22)
+                                        else Color(0xFF1C1C20)
                                     )
                                     .border(
                                         width = if (isSelected) 1.5.dp else 1.dp,
-                                        color = if (isSelected) theme.primaryColor else Color(0xFF2E2E34),
-                                        shape = RoundedCornerShape(10.dp)
+                                        color = if (isSelected) theme.primaryColor else Color(0xFF2A2A30),
+                                        shape = RoundedCornerShape(8.dp)
                                     )
-                                    .clickable { onThemeSelect(theme) },
+                                    .clickable {
+                                        soundManager.playSnapPop()
+                                        onThemeSelect(theme)
+                                    },
                                 contentAlignment = Alignment.Center
                             ) {
                                 Row(
@@ -1206,14 +1172,14 @@ fun GlobalSettingsScreenContent(
                                 ) {
                                     Box(
                                         modifier = Modifier
-                                            .size(8.dp)
+                                            .size(7.dp)
                                             .clip(CircleShape)
                                             .background(theme.primaryColor)
                                     )
                                     Text(
                                         text = theme.themeName.replace("Hyper ", ""),
                                         color = if (isSelected) Color.White else Color(0xFFD4D4D8),
-                                        fontSize = 10.5.sp,
+                                        fontSize = 10.sp,
                                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                                     )
                                 }
@@ -1224,96 +1190,177 @@ fun GlobalSettingsScreenContent(
             }
         }
 
-        // 5. Platform & Tournament Policies
+        // Section 4: Tournament Defaults & Match Rules (Grouped Card)
         item {
-            Text(
-                "TOURNAMENT & PLATFORM CONTROLS",
-                color = Color(0xFF94A3B8),
-                fontWeight = FontWeight.Bold,
-                fontSize = 11.sp,
-                letterSpacing = 1.sp
-            )
-        }
-        item { SettingsToggle("Allow Direct Player Registration", true, "Players can self-register without admin pre-approval") }
-        item { SettingsToggle("Require ID Verification", false, "Mandatory Aadhaar/ID photo before cash prize withdrawal") }
-        item { SettingsToggle("Auto-Approve Prize Payouts", false, "Automatically process UPI payouts under Rs 1,000") }
-        item { SettingsToggle("Tournament Start Alerts", true, "Send automated FCM push notification 15m before start") }
-        item { SettingsToggle("Admin Dispute Notifications", true, "Notify on incoming support dispute tickets") }
-
-        // 6. System & Administrative Tools
-        item {
-            Text(
-                "ADMINISTRATIVE MODULES",
-                color = Color(0xFF94A3B8),
-                fontWeight = FontWeight.Bold,
-                fontSize = 11.sp,
-                letterSpacing = 1.sp
-            )
-        }
-        item {
+            SettingsSectionHeader("TOURNAMENT POLICIES")
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
                 color = Color(0xFF141416),
                 border = BorderStroke(1.dp, Color(0xFF27272A))
             ) {
-                Column(modifier = Modifier.padding(6.dp)) {
+                Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                    SettingsGroupedToggle(
+                        label = "Direct Player Registration",
+                        subtitle = "Players can join without prior admin check",
+                        initial = true,
+                        onSound = { soundManager.playSnapPop() }
+                    )
+                    HorizontalDivider(color = Color(0xFF27272A), thickness = 0.5.dp)
+                    SettingsGroupedToggle(
+                        label = "Require ID Verification",
+                        subtitle = "Mandatory KYC before cash withdrawals",
+                        initial = false,
+                        onSound = { soundManager.playSnapPop() }
+                    )
+                    HorizontalDivider(color = Color(0xFF27272A), thickness = 0.5.dp)
+                    SettingsGroupedToggle(
+                        label = "Auto-Approve Payouts",
+                        subtitle = "Instantly process UPI transfers below ₹1,000",
+                        initial = false,
+                        onSound = { soundManager.playSnapPop() }
+                    )
+                    HorizontalDivider(color = Color(0xFF27272A), thickness = 0.5.dp)
+                    SettingsGroupedToggle(
+                        label = "Match Countdown Alerts",
+                        subtitle = "Automated push notification 15m before start",
+                        initial = true,
+                        onSound = { soundManager.playSnapPop() }
+                    )
+                    HorizontalDivider(color = Color(0xFF27272A), thickness = 0.5.dp)
+                    SettingsGroupedToggle(
+                        label = "Support Dispute Notifications",
+                        subtitle = "Notify admins on incoming player disputes",
+                        initial = true,
+                        onSound = { soundManager.playSnapPop() }
+                    )
+                }
+            }
+        }
+
+        // Section 5: AI & Gemini Engine
+        item {
+            SettingsSectionHeader("AI MEDIATOR & INTELLIGENCE")
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                color = Color(0xFF141416),
+                border = BorderStroke(1.dp, Color(0xFF27272A))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .background(Color(0xFF2E1065).copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                                .border(1.dp, Color(0xFF7C3AED).copy(alpha = 0.5f), RoundedCornerShape(8.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = Color(0xFFA78BFA), modifier = Modifier.size(17.dp))
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text("Gemini AI Mediator", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Automated disputes & bracket suggestions", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
+                        }
+                    }
+                    Button(
+                        onClick = {
+                            soundManager.playBeatTap()
+                            onOpenApiKeyDialog?.invoke()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF27272A)),
+                        border = BorderStroke(1.dp, Color(0xFF3F3F46)),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Icon(Icons.Default.Key, contentDescription = null, tint = Color(0xFFA78BFA), modifier = Modifier.size(13.dp))
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text("API Key", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
+        // Section 6: Administrative Modules
+        item {
+            SettingsSectionHeader("ADMINISTRATIVE TOOLS")
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                color = Color(0xFF141416),
+                border = BorderStroke(1.dp, Color(0xFF27272A))
+            ) {
+                Column(modifier = Modifier.padding(4.dp)) {
                     SettingsModuleRow(
                         title = "Staff & RBAC Permissions",
-                        subtitle = "Manage admin access and invitations",
+                        subtitle = "Manage admin team access and roles",
                         icon = Icons.Default.Shield,
-                        onClick = { onNavigateTab?.invoke("admins") }
+                        onClick = {
+                            soundManager.playBeatTap()
+                            onNavigateTab?.invoke("admins")
+                        }
                     )
                     HorizontalDivider(color = Color(0xFF27272A), thickness = 0.5.dp)
                     SettingsModuleRow(
                         title = "Rules & Match Specs",
                         subtitle = "Gun bans, custom character & device limits",
                         icon = Icons.Default.MilitaryTech,
-                        onClick = { onNavigateTab?.invoke("tournament_rules") }
+                        onClick = {
+                            soundManager.playBeatTap()
+                            onNavigateTab?.invoke("tournament_rules")
+                        }
                     )
                     HorizontalDivider(color = Color(0xFF27272A), thickness = 0.5.dp)
                     SettingsModuleRow(
                         title = "Check-In PINs & Banners",
                         subtitle = "Generate match PINs & announcement slides",
                         icon = Icons.Default.DashboardCustomize,
-                        onClick = { onNavigateTab?.invoke("lowcode") }
+                        onClick = {
+                            soundManager.playBeatTap()
+                            onNavigateTab?.invoke("lowcode")
+                        }
                     )
                     HorizontalDivider(color = Color(0xFF27272A), thickness = 0.5.dp)
                     SettingsModuleRow(
                         title = "Player Leaderboards",
                         subtitle = "Rankings, points tally & Hall of Fame",
                         icon = Icons.Default.EmojiEvents,
-                        onClick = { onNavigateTab?.invoke("leaderboard") }
+                        onClick = {
+                            soundManager.playBeatTap()
+                            onNavigateTab?.invoke("leaderboard")
+                        }
                     )
                     HorizontalDivider(color = Color(0xFF27272A), thickness = 0.5.dp)
                     SettingsModuleRow(
                         title = "Rate Limiter & Quotas",
                         subtitle = "Inspect flood prevention & token buckets",
                         icon = Icons.Default.Speed,
-                        onClick = { onOpenRateLimiter?.invoke() }
+                        onClick = {
+                            soundManager.playBeatTap()
+                            onOpenRateLimiter?.invoke()
+                        }
                     )
                 }
             }
         }
 
-        // 7. Security & Database RLS
+        // Section 7: Firebase & Database Security
         item {
-            Text(
-                "FIREBASE RLS & SECURITY RULES",
-                color = Color(0xFF94A3B8),
-                fontWeight = FontWeight.Bold,
-                fontSize = 11.sp,
-                letterSpacing = 1.sp
-            )
-        }
-        item {
+            SettingsSectionHeader("FIREBASE RLS & SECURITY")
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
                 color = Color(0xFF141416),
                 border = BorderStroke(1.dp, Color(0xFF27272A))
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
+                Column(modifier = Modifier.padding(14.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -1322,12 +1369,12 @@ fun GlobalSettingsScreenContent(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(
                                 modifier = Modifier
-                                    .size(36.dp)
-                                    .background(Color(0xFF0284C7).copy(alpha = 0.2f), CircleShape)
+                                    .size(34.dp)
+                                    .background(Color(0xFF0284C7).copy(alpha = 0.15f), CircleShape)
                                     .border(1.dp, Color(0xFF0284C7), CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(Icons.Default.VpnKey, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(18.dp))
+                                Icon(Icons.Default.VpnKey, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(17.dp))
                             }
                             Spacer(modifier = Modifier.width(10.dp))
                             Column {
@@ -1336,27 +1383,19 @@ fun GlobalSettingsScreenContent(
                             }
                         }
                         Surface(
-                            shape = RoundedCornerShape(6.dp),
+                            shape = RoundedCornerShape(4.dp),
                             color = Color(0xFF0E2E3B),
                             border = BorderStroke(0.5.dp, Color(0xFF0284C7))
                         ) {
                             Text(
                                 "ACTIVE RLS",
                                 color = Color(0xFF7DD3FC),
-                                fontSize = 9.sp,
+                                fontSize = 8.5.sp,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                             )
                         }
                     }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Text(
-                        "Ensures strict Row-Level Security: Only authorized administrators have access to dashboard endpoints and wallet controls, while players only access their personal records.",
-                        color = Color(0xFF94A3B8),
-                        fontSize = 11.5.sp,
-                        lineHeight = 16.sp
-                    )
 
                     val feedback = rlsFeedbackMessage
                     if (feedback != null) {
@@ -1369,31 +1408,37 @@ fun GlobalSettingsScreenContent(
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Button(
-                            onClick = { showRtdbRulesDialog = true },
+                            onClick = {
+                                soundManager.playSnapPop()
+                                showRtdbRulesDialog = true
+                            },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B)),
                             border = BorderStroke(1.dp, Color(0xFF334155)),
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.weight(1f)
                         ) {
-                            Icon(Icons.Default.Security, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(14.dp))
+                            Icon(Icons.Default.Security, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(13.dp))
                             Spacer(modifier = Modifier.width(4.dp))
                             Text("RTDB Rules", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
 
                         Button(
-                            onClick = { showFirestoreRulesDialog = true },
+                            onClick = {
+                                soundManager.playSnapPop()
+                                showFirestoreRulesDialog = true
+                            },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B)),
                             border = BorderStroke(1.dp, Color(0xFF334155)),
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.weight(1f)
                         ) {
-                            Icon(Icons.Default.LocalPolice, contentDescription = null, tint = Color(0xFF34D399), modifier = Modifier.size(14.dp))
+                            Icon(Icons.Default.LocalPolice, contentDescription = null, tint = Color(0xFF34D399), modifier = Modifier.size(13.dp))
                             Spacer(modifier = Modifier.width(4.dp))
                             Text("Firestore Rules", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
@@ -1403,12 +1448,13 @@ fun GlobalSettingsScreenContent(
                     Button(
                         onClick = {
                             coroutineScope.launch {
+                                soundManager.playBrassHit()
                                 isSyncingRls = true
                                 rlsFeedbackMessage = "Syncing Admin RLS claims across Firebase..."
                                 val target = currentUserEmail ?: "anantisback47@gmail.com"
                                 val ok = repository.syncAdminPermissionsNow(target)
                                 isSyncingRls = false
-                                rlsFeedbackMessage = if (ok) "Super Admin RLS permissions synced for $target" else "Sync completed. Check console if permissions require token refresh."
+                                rlsFeedbackMessage = if (ok) "Super Admin RLS permissions synced for $target" else "Sync completed. Check console if token refresh is needed."
                             }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
@@ -1417,53 +1463,48 @@ fun GlobalSettingsScreenContent(
                         modifier = Modifier.fillMaxWidth().height(38.dp)
                     ) {
                         if (isSyncingRls) {
-                            CircularProgressIndicator(color = Color.White, modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            CircularProgressIndicator(color = Color.White, modifier = Modifier.size(15.dp), strokeWidth = 2.dp)
                         } else {
-                            Icon(Icons.Default.Sync, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.Sync, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("1-Tap Sync Admin RLS Claims", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text("1-Tap Sync Admin Permissions", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.5.sp)
                         }
                     }
                 }
             }
         }
 
-        // 8. Maintenance & Danger Zone
+        // Section 8: Session & Maintenance (Danger Zone)
         item {
-            Text(
-                "DATA & SESSION MAINTENANCE",
-                color = Color(0xFFEF4444),
-                fontWeight = FontWeight.Bold,
-                fontSize = 11.sp,
-                letterSpacing = 1.sp
-            )
-        }
-        item {
+            SettingsSectionHeader("SESSION & MAINTENANCE", isDanger = true)
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
                 color = Color(0xFF141416),
                 border = BorderStroke(1.dp, Color(0xFF27272A))
             ) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("Reset / Clean Demo Data", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
-                            Text("Wipe mock records from Realtime DB & Firestore", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
+                            Text("Reset Mock / Demo Data", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Clean dummy test records from Firebase", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
                         }
                         OutlinedButton(
-                            onClick = { showPurgeConfirmationDialog = true },
-                            border = BorderStroke(1.dp, Color(0xFFEF4444).copy(alpha = 0.6f)),
+                            onClick = {
+                                soundManager.playSnapPop()
+                                showPurgeConfirmationDialog = true
+                            },
+                            border = BorderStroke(1.dp, Color(0xFFEF4444).copy(alpha = 0.5f)),
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFEF4444)),
                             shape = RoundedCornerShape(8.dp)
                         ) {
-                            Icon(Icons.Default.DeleteSweep, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(14.dp))
+                            Icon(Icons.Default.DeleteSweep, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(13.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Wipe Demo Data", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text("Clean Data", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                     }
 
@@ -1475,16 +1516,19 @@ fun GlobalSettingsScreenContent(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("Sign Out Session", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
-                            Text("End admin session and return to login", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
+                            Text("Sign Out Session", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Close admin session and return to login", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
                         }
                         Button(
-                            onClick = { showLogoutConfirmationDialog = true },
+                            onClick = {
+                                soundManager.playSnapPop()
+                                showLogoutConfirmationDialog = true
+                            },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF27272A)),
                             border = BorderStroke(1.dp, Color(0xFF3F3F46)),
                             shape = RoundedCornerShape(8.dp)
                         ) {
-                            Icon(Icons.Default.ExitToApp, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(14.dp))
+                            Icon(Icons.Default.ExitToApp, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(13.dp))
                             Spacer(modifier = Modifier.width(4.dp))
                             Text("Sign Out", color = Color(0xFFEF4444), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
@@ -1492,8 +1536,65 @@ fun GlobalSettingsScreenContent(
                 }
             }
         }
+    }
+}
 
-        item { Spacer(modifier = Modifier.height(40.dp)) }
+@Composable
+fun SettingsSectionHeader(title: String, isDanger: Boolean = false) {
+    Text(
+        text = title,
+        color = if (isDanger) Color(0xFFEF4444) else Color(0xFF71717A),
+        fontWeight = FontWeight.Bold,
+        fontSize = 11.sp,
+        letterSpacing = 0.8.sp,
+        modifier = Modifier.padding(start = 4.dp, top = 4.dp, bottom = 2.dp)
+    )
+}
+
+@Composable
+fun SettingsGroupedToggle(
+    label: String,
+    subtitle: String? = null,
+    initial: Boolean = false,
+    onSound: (() -> Unit)? = null
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val sharedPrefs = remember { context.getSharedPreferences("VelorixAdminSettings", android.content.Context.MODE_PRIVATE) }
+    var checked by remember { mutableStateOf(sharedPrefs.getBoolean(label, initial)) }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable {
+                val next = !checked
+                checked = next
+                sharedPrefs.edit().putBoolean(label, next).apply()
+                onSound?.invoke()
+            }
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
+            Text(label, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            if (subtitle != null) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(subtitle, color = Color(0xFF94A3B8), fontSize = 11.sp)
+            }
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = { next ->
+                checked = next
+                sharedPrefs.edit().putBoolean(label, next).apply()
+                onSound?.invoke()
+            },
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = Color(0xFF2563EB),
+                uncheckedTrackColor = Color(0xFF27272A)
+            )
+        )
     }
 }
 
@@ -1513,64 +1614,25 @@ fun SettingsModuleRow(
     ) {
         Box(
             modifier = Modifier
-                .size(34.dp)
+                .size(32.dp)
                 .background(Color(0xFF202024), RoundedCornerShape(8.dp))
                 .border(0.5.dp, Color(0xFF2E2E34), RoundedCornerShape(8.dp)),
             contentAlignment = Alignment.Center
         ) {
-            Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(17.dp))
+            Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
         }
         Spacer(modifier = Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(title, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             Text(subtitle, color = Color(0xFF94A3B8), fontSize = 11.sp)
         }
-        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = Color(0xFF71717A), modifier = Modifier.size(16.dp))
+        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = Color(0xFF71717A), modifier = Modifier.size(15.dp))
     }
 }
 
 @Composable
 fun SettingsToggle(label: String, initial: Boolean, subtitle: String? = null) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val sharedPrefs = remember { context.getSharedPreferences("VelorixAdminSettings", android.content.Context.MODE_PRIVATE) }
-    
-    var checked by remember { 
-        mutableStateOf(sharedPrefs.getBoolean(label, initial)) 
-    }
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        color = Color(0xFF141416),
-        border = BorderStroke(1.dp, Color(0xFF27272A))
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-                Text(label, color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
-                if (subtitle != null) {
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(subtitle, color = Color(0xFF94A3B8), fontSize = 11.5.sp)
-                }
-            }
-            Switch(
-                checked = checked, 
-                onCheckedChange = { 
-                    checked = it 
-                    sharedPrefs.edit().putBoolean(label, it).apply()
-                }, 
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = Color.White,
-                    checkedTrackColor = Color(0xFF2563EB),
-                    uncheckedTrackColor = Color(0xFF27272A)
-                )
-            )
-        }
-    }
+    SettingsGroupedToggle(label = label, subtitle = subtitle, initial = initial)
 }
 
 @Composable
@@ -1797,16 +1859,30 @@ fun UsersManagementScreenContent(
                 Spacer(modifier = Modifier.width(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     if (onRefreshUserData != null) {
+                        val context = LocalContext.current
+                        val isUserSyncing = (uiState as? DashboardState.Success)?.isSyncing ?: false
                         OutlinedButton(
-                            onClick = { onRefreshUserData() },
+                            onClick = {
+                                Toast.makeText(context, "Extracting live players from Firebase...", Toast.LENGTH_SHORT).show()
+                                onRefreshUserData()
+                            },
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = VelorixAccent),
                             border = androidx.compose.foundation.BorderStroke(1.dp, VelorixAccent),
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                            shape = RoundedCornerShape(8.dp)
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.bounceClick(scaleDown = 0.95f)
                         ) {
-                            Icon(Icons.Default.Refresh, contentDescription = "Sync RTDB", tint = VelorixAccent, modifier = Modifier.size(14.dp))
+                            if (isUserSyncing) {
+                                CircularProgressIndicator(
+                                    color = VelorixAccent,
+                                    strokeWidth = 2.dp,
+                                    modifier = Modifier.size(12.dp)
+                                )
+                            } else {
+                                Icon(Icons.Default.Refresh, contentDescription = "Sync RTDB", tint = VelorixAccent, modifier = Modifier.size(14.dp))
+                            }
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Sync RTDB", color = VelorixAccent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text(if (isUserSyncing) "Extracting..." else "Sync RTDB", color = VelorixAccent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                     Button(
@@ -1925,29 +2001,33 @@ fun UsersManagementScreenContent(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(18.dp),
                     borderBrush = userBorderBrush,
-                    onClick = { inspectedUser = user }
+                    onClick = null
                 ) {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { inspectedUser = user },
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                            Box(
-                                modifier = Modifier
-                                    .size(42.dp)
-                                    .background(if (user.isBanned) Color.Red.copy(alpha = 0.2f) else VelorixAccent.copy(alpha = 0.2f), CircleShape)
-                                    .border(1.5.dp, if (user.isBanned) Color.Red else VelorixAccent, CircleShape),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = (user.username.firstOrNull() ?: user.email.firstOrNull() ?: 'U').uppercase(),
-                                    color = if (user.isBanned) Color.Red else VelorixAccent,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 18.sp
-                                )
-                            }
+                            val isRecentlyActive = (System.currentTimeMillis() - user.lastActive) < 20 * 60 * 1000
+                            UserAvatarView(
+                                avatarUrl = user.avatarUrl,
+                                name = user.bestDisplayName,
+                                size = 48.dp,
+                                isBanned = user.isBanned,
+                                isSuspended = user.isSuspended,
+                                role = user.role,
+                                isActiveRecently = isRecentlyActive,
+                                showGlow = true
+                            )
                             Spacer(modifier = Modifier.width(12.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
-                                        text = user.username.ifEmpty { "Player" },
+                                        text = user.bestDisplayName,
                                         fontWeight = FontWeight.Bold,
                                         color = Color.White,
                                         fontSize = 15.sp,
@@ -1957,18 +2037,19 @@ fun UsersManagementScreenContent(
                                     )
                                     if (user.role.contains("admin", ignoreCase = true)) {
                                         Spacer(modifier = Modifier.width(6.dp))
+                                        val roleBadgeColor = if (user.role.contains("super", ignoreCase = true)) Color(0xFFFFB300) else Color(0xFF00E5FF)
                                         Box(
                                             modifier = Modifier
-                                                .background(Color(0xFF27272A), RoundedCornerShape(4.dp))
-                                                .border(0.5.dp, Color(0xFF3F3F46), RoundedCornerShape(4.dp))
+                                                .background(roleBadgeColor.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
+                                                .border(0.5.dp, roleBadgeColor.copy(alpha = 0.6f), RoundedCornerShape(4.dp))
                                                 .padding(horizontal = 6.dp, vertical = 1.dp)
                                         ) {
-                                            Text(user.role.uppercase(), color = Color(0xFFE4E4E7), fontSize = 8.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                                            Text(user.role.uppercase(), color = roleBadgeColor, fontSize = 8.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                                         }
                                     }
                                 }
                                 Text(
-                                    text = user.email.ifBlank { "No email associated" },
+                                    text = user.bestEmailOrPhone,
                                     color = VelorixTextSecondary,
                                     fontSize = 11.sp,
                                     maxLines = 1,
@@ -1987,8 +2068,12 @@ fun UsersManagementScreenContent(
 
                         Column(horizontalAlignment = Alignment.End) {
                             if (user.isBanned) {
-                                Box(modifier = Modifier.background(Color.Red, RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 3.dp)) {
+                                Box(modifier = Modifier.background(Color(0xFFFF1744), RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 3.dp)) {
                                     Text("BANNED", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                }
+                            } else if (user.isSuspended) {
+                                Box(modifier = Modifier.background(Color(0xFFFF9800), RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 3.dp)) {
+                                    Text("SUSPENDED", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                                 }
                             } else {
                                 Box(modifier = Modifier.background(Color(0xFF2E7D32), RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 3.dp)) {
@@ -2003,7 +2088,7 @@ fun UsersManagementScreenContent(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
                     Row(
                         modifier = Modifier
@@ -2031,6 +2116,46 @@ fun UsersManagementScreenContent(
                         }
                     }
 
+                    // User Panel Extra Highlights: UID, Tokens, Streak
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (user.gameId.isNotBlank()) {
+                            Box(
+                                modifier = Modifier
+                                    .background(Color(0xFF1E2330), RoundedCornerShape(6.dp))
+                                    .border(0.5.dp, Color(0xFF2D3748), RoundedCornerShape(6.dp))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text("FF ID: ${user.gameId}", color = Color(0xFF90CAF9), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        if (user.tokens > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .background(Color(0xFF2E2415), RoundedCornerShape(6.dp))
+                                    .border(0.5.dp, Color(0xFFFFB300).copy(alpha = 0.4f), RoundedCornerShape(6.dp))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text("🪙 ${user.tokens} Tokens", color = Color(0xFFFFD54F), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        if (user.loginStreak > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .background(Color(0xFF2D1616), RoundedCornerShape(6.dp))
+                                    .border(0.5.dp, Color(0xFFFF5722).copy(alpha = 0.4f), RoundedCornerShape(6.dp))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text("🔥 ${user.loginStreak}d Streak", color = Color(0xFFFF8A65), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
                     Spacer(modifier = Modifier.height(10.dp))
 
                     Row(
@@ -2040,40 +2165,41 @@ fun UsersManagementScreenContent(
                     ) {
                         Button(
                             onClick = { inspectedUser = user },
-                            modifier = Modifier.weight(1f).height(38.dp),
+                            modifier = Modifier.weight(1f).height(42.dp).bounceClick(scaleDown = 0.96f),
                             shape = RoundedCornerShape(10.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F1F23)),
                             border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF3F3F46)),
                             contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
                         ) {
-                            Icon(Icons.Default.Tune, contentDescription = null, tint = Color.White, modifier = Modifier.size(13.dp))
+                            Icon(Icons.Default.Tune, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Manage", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1)
+                            Text("Manage", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1)
                         }
 
                         Button(
                             onClick = { selectedUserForFunds = user },
-                            modifier = Modifier.weight(1f).height(38.dp),
+                            modifier = Modifier.weight(1f).height(42.dp).bounceClick(scaleDown = 0.96f),
                             shape = RoundedCornerShape(10.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0x2200E676)),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF00E676).copy(alpha = 0.4f)),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF00E676).copy(alpha = 0.5f)),
                             contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
                         ) {
-                            Icon(Icons.Default.AddCard, contentDescription = null, tint = Color(0xFF00E676), modifier = Modifier.size(13.dp))
+                            Icon(Icons.Default.AddCard, contentDescription = null, tint = Color(0xFF00E676), modifier = Modifier.size(14.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Funds", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1)
+                            Text("Funds", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF00E676), maxLines = 1)
                         }
 
                         Button(
                             onClick = { onToggleBan(user) },
-                            modifier = Modifier.weight(0.9f).height(38.dp),
+                            modifier = Modifier.weight(1f).height(42.dp).bounceClick(scaleDown = 0.96f),
                             shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = if (user.isBanned) Color(0xFF2E7D32) else Color(0xFFD32F2F)),
+                            colors = ButtonDefaults.buttonColors(containerColor = if (user.isBanned) Color(0xFF1B5E20) else Color(0xFFB71C1C)),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, if (user.isBanned) Color(0xFF4CAF50) else Color(0xFFEF5350)),
                             contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
                         ) {
-                            Icon(if (user.isBanned) Icons.Default.CheckCircle else Icons.Default.Block, contentDescription = null, tint = Color.White, modifier = Modifier.size(13.dp))
+                            Icon(if (user.isBanned) Icons.Default.CheckCircle else Icons.Default.Block, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text(if (user.isBanned) "Unban" else "Ban", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1)
+                            Text(if (user.isBanned) "Unban" else "Ban", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1)
                         }
                     }
                 }
@@ -2097,6 +2223,7 @@ fun UserDetailsInspectorDialog(
 
     // Editable state
     var editUsername by remember(user) { mutableStateOf(user.username) }
+    var editEmail by remember(user) { mutableStateOf(user.email) }
     var editGameId by remember(user) { mutableStateOf(user.gameId) }
     var editPhone by remember(user) { mutableStateOf(user.phone) }
     var editRole by remember(user) { mutableStateOf(user.role) }
@@ -2130,7 +2257,9 @@ fun UserDetailsInspectorDialog(
 
         return user.copy(
             username = editUsername.trim().ifBlank { user.username },
+            email = editEmail.trim().ifBlank { user.email },
             gameId = editGameId.trim(),
+            ign = editUsername.trim().ifBlank { user.ign },
             phone = editPhone.trim(),
             role = editRole,
             wins = editWins.toIntOrNull() ?: user.wins,
@@ -2224,25 +2353,22 @@ fun UserDetailsInspectorDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                        Box(
-                            modifier = Modifier
-                                .size(42.dp)
-                                .background(if (isBannedState) Color.Red.copy(alpha = 0.2f) else VelorixAccent.copy(alpha = 0.2f), CircleShape)
-                                .border(2.dp, if (isBannedState) Color.Red else VelorixAccent, CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = (user.username.firstOrNull() ?: 'U').uppercase(),
-                                color = if (isBannedState) Color.Red else VelorixAccent,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 18.sp
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(10.dp))
+                        val isRecentlyActive = (System.currentTimeMillis() - user.lastActive) < 20 * 60 * 1000
+                        UserAvatarView(
+                            avatarUrl = user.avatarUrl,
+                            name = user.bestDisplayName,
+                            size = 54.dp,
+                            isBanned = isBannedState,
+                            isSuspended = isSuspendedState,
+                            role = editRole,
+                            isActiveRecently = isRecentlyActive,
+                            showGlow = true
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
                         Column {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
-                                    text = user.username,
+                                    text = user.bestDisplayName,
                                     color = Color.White,
                                     fontSize = 16.sp,
                                     fontWeight = FontWeight.Bold
@@ -2252,7 +2378,7 @@ fun UserDetailsInspectorDialog(
                                     modifier = Modifier
                                         .background(
                                             when {
-                                                isBannedState -> Color.Red
+                                                isBannedState -> Color(0xFFFF1744)
                                                 isSuspendedState -> Color(0xFFFF9800)
                                                 else -> Color(0xFF2E7D32)
                                             },
@@ -2273,7 +2399,7 @@ fun UserDetailsInspectorDialog(
                                 }
                             }
                             Text(
-                                text = user.email.ifBlank { user.id },
+                                text = user.bestEmailOrPhone,
                                 color = VelorixTextSecondary,
                                 fontSize = 11.sp
                             )
@@ -2348,7 +2474,22 @@ fun UserDetailsInspectorDialog(
 
                 // Tab Contents
                 Box(modifier = Modifier.weight(1f).fillMaxWidth().padding(14.dp)) {
-                    when (selectedTab) {
+                    AnimatedContent(
+                        targetState = selectedTab,
+                        transitionSpec = {
+                            if (targetState > initialState) {
+                                (slideInHorizontally { width -> width / 3 } + fadeIn()).togetherWith(
+                                    slideOutHorizontally { width -> -width / 3 } + fadeOut()
+                                )
+                            } else {
+                                (slideInHorizontally { width -> -width / 3 } + fadeIn()).togetherWith(
+                                    slideOutHorizontally { width -> width / 3 } + fadeOut()
+                                )
+                            }
+                        },
+                        label = "dialog_tab_content"
+                    ) { currentTab ->
+                        when (currentTab) {
                         0 -> {
                             // Minor Details & Account Metadata
                             Column(
@@ -2357,6 +2498,106 @@ fun UserDetailsInspectorDialog(
                                     .verticalScroll(rememberScrollState()),
                                 verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
+                                // Free Fire Esports & Gaming Profile
+                                DetailSectionCard(title = "FREE FIRE ESPORTS & GAMING PROFILE", icon = Icons.Default.SportsEsports) {
+                                    DetailItemRow(label = "Free Fire IGN", value = user.effectiveIgn, isHighlight = user.effectiveIgn != "Player")
+                                    DetailItemRow(label = "Free Fire Game UID", value = user.gameId.ifBlank { "Not Linked" }, isHighlight = user.gameId.isNotBlank())
+                                    DetailItemRow(label = "Matches Won", value = "${user.wins} Wins", isHighlight = user.wins > 0)
+                                    DetailItemRow(label = "Total Kills Recorded", value = "${user.kills} Kills", isHighlight = user.kills > 0)
+                                    DetailItemRow(label = "Activity Reward Points", value = "${user.activityPoints} pts")
+                                    val winRatio = if (user.wins + user.kills > 0) "${((user.wins.toDouble() / (user.wins + 5).coerceAtLeast(1)) * 100).toInt()}% est." else "No matches yet"
+                                    DetailItemRow(label = "Estimated Win Ratio", value = winRatio)
+                                    DetailItemRow(label = "Player Status", value = if (user.wins + user.kills > 0) "Active Competitor" else "Casual / New Player")
+                                }
+
+                                // Wallet, Balances & VT Tokens
+                                DetailSectionCard(title = "WALLET, BALANCES & VT TOKENS", icon = Icons.Default.AccountBalanceWallet) {
+                                    DetailItemRow(label = "Total Wallet Balance", value = "₹${user.totalWalletBalance}", isHighlight = true)
+                                    DetailItemRow(label = "Deposit Balance", value = "₹${user.depositFunds}")
+                                    DetailItemRow(label = "Winning Balance", value = "₹${user.winningFunds}", isHighlight = user.winningFunds > 0)
+                                    DetailItemRow(label = "Bonus Balance", value = "₹${user.bonusFunds}")
+                                    DetailItemRow(label = "VT Loyalty Tokens", value = "${user.tokens} Tokens", isHighlight = user.tokens > 0)
+                                    DetailItemRow(label = "Total Lifetime Prize Won", value = "₹${user.totalEarnings}", isHighlight = user.totalEarnings > 0)
+                                }
+
+                                // Daily Streak, Missions & Referrals (User Panel Feature)
+                                DetailSectionCard(title = "DAILY STREAK, MISSIONS & REFERRALS", icon = Icons.Default.LocalFireDepartment) {
+                                    DetailItemRow(
+                                        label = "Daily Login Streak",
+                                        value = if (user.loginStreak > 0) "🔥 ${user.loginStreak} Days Streak" else "No active streak",
+                                        isHighlight = user.loginStreak > 0
+                                    )
+                                    DetailItemRow(
+                                        label = "Daily Missions Claimed",
+                                        value = "${user.dailyMissionsTokensClaimed} Tokens Claimed"
+                                    )
+                                    DetailItemRow(
+                                        label = "Last Mission Claim Date",
+                                        value = user.lastMissionClaimDate.ifBlank { "Never" }
+                                    )
+                                    DetailItemRow(
+                                        label = "Referral Code",
+                                        value = user.referralCode.ifBlank { "Not generated" },
+                                        isHighlight = user.referralCode.isNotBlank()
+                                    )
+                                    DetailItemRow(
+                                        label = "Referred By (Inviter)",
+                                        value = user.referredBy.ifBlank { "Direct Organic Signup" }
+                                    )
+                                    DetailItemRow(
+                                        label = "Total Players Referred",
+                                        value = "${user.referralCount} Users",
+                                        isHighlight = user.referralCount > 0
+                                    )
+                                    DetailItemRow(
+                                        label = "Referral Bonus Earned",
+                                        value = "₹${user.referralBonusEarned}",
+                                        isHighlight = user.referralBonusEarned > 0
+                                    )
+                                }
+
+                                // Age, KYC & Cash Tournament Compliance (User Panel Feature)
+                                DetailSectionCard(title = "AGE, KYC & CASH MATCH ELIGIBILITY", icon = Icons.Default.VerifiedUser) {
+                                    DetailItemRow(
+                                        label = "Date of Birth",
+                                        value = user.dateOfBirth.ifBlank { "Not submitted" }
+                                    )
+                                    DetailItemRow(
+                                        label = "Calculated Age",
+                                        value = if (user.age > 0) "${user.age} Years Old" else "Unverified Age"
+                                    )
+                                    DetailItemRow(
+                                        label = "Under-18 / Minor Status",
+                                        value = if (user.isMinor) "Under-18 (Minor Protected)" else "18+ Adult",
+                                        isHighlight = user.isMinor
+                                    )
+                                    DetailItemRow(
+                                        label = "Cash Tournaments Eligibility",
+                                        value = if (user.canJoinCashTournaments) "ELIGIBLE FOR CASH MATCHES" else "RESTRICTED (Practice / Free Only)",
+                                        isHighlight = user.canJoinCashTournaments
+                                    )
+                                    DetailItemRow(
+                                        label = "Age Self-Confirmed",
+                                        value = if (user.ageConfirmed) "Yes (Confirmed by Player)" else "Pending Confirmation"
+                                    )
+                                }
+
+                                // Identity & Contact Details
+                                DetailSectionCard(title = "IDENTITY & DEVICE METADATA", icon = Icons.Default.Person) {
+                                    DetailItemRow(label = "Display Name", value = user.bestDisplayName, isHighlight = true)
+                                    DetailItemRow(label = "Free Fire IGN", value = user.effectiveIgn, isHighlight = user.effectiveIgn != "Player")
+                                    DetailItemRow(label = "Email Address", value = user.email.ifBlank { if (user.bestEmailOrPhone.contains("@")) user.bestEmailOrPhone else "Not linked" })
+                                    DetailItemRow(label = "Phone Number", value = user.phone.ifBlank { if (!user.phoneOrEmail.contains("@") && user.phoneOrEmail.isNotBlank()) user.phoneOrEmail else "Not linked" }, isHighlight = user.phone.isNotBlank() || user.phoneOrEmail.isNotBlank())
+                                    DetailItemRow(label = "Free Fire / Game UID", value = user.gameId.ifBlank { "Not Linked" }, isHighlight = user.gameId.isNotBlank())
+                                    DetailItemRow(label = "User Identifier (UID)", value = user.id)
+                                    val photoStatus = if (!user.avatarUrl.isNullOrBlank()) "Linked Profile Picture" else "Generated Dynamic Avatar"
+                                    DetailItemRow(label = "Profile Picture", value = photoStatus, isHighlight = !user.avatarUrl.isNullOrBlank())
+                                    val device = user.deviceModel.ifBlank { user.rawAttributes["deviceModel"] ?: user.rawAttributes["model"] ?: "Android Client" }
+                                    DetailItemRow(label = "Last Known Device", value = device)
+                                    val ip = user.ipAddress.ifBlank { user.rawAttributes["ipAddress"] ?: user.rawAttributes["ip"] ?: "Dynamic Cellular" }
+                                    DetailItemRow(label = "Last Known IP", value = ip)
+                                }
+
                                 // Active Security & Restriction Badges Card
                                 DetailSectionCard(title = "SECURITY & RESTRICTION STATUS", icon = Icons.Default.Shield) {
                                     DetailItemRow(
@@ -2386,42 +2627,11 @@ fun UserDetailsInspectorDialog(
                                     )
                                 }
 
-                                // Identity & Contact Details
-                                DetailSectionCard(title = "IDENTITY & CONTACT METADATA", icon = Icons.Default.Person) {
-                                    DetailItemRow(label = "Username / IGN", value = user.username)
-                                    DetailItemRow(label = "Email Address", value = user.email.ifBlank { "Not provided" })
-                                    DetailItemRow(label = "Phone Number", value = user.phone.ifBlank { "Not linked" }, isHighlight = user.phone.isNotBlank())
-                                    DetailItemRow(label = "Free Fire / Game UID", value = user.gameId.ifBlank { "Not Linked" }, isHighlight = user.gameId.isNotBlank())
-                                    DetailItemRow(label = "User Identifier", value = user.id)
-                                    val device = user.deviceModel.ifBlank { user.rawAttributes["deviceModel"] ?: user.rawAttributes["model"] ?: "Android Client" }
-                                    DetailItemRow(label = "Last Known Device", value = device)
-                                    val ip = user.ipAddress.ifBlank { user.rawAttributes["ipAddress"] ?: user.rawAttributes["ip"] ?: "Dynamic Cellular" }
-                                    DetailItemRow(label = "Last Known IP", value = ip)
-                                }
-
                                 // Account Timestamps Card
                                 DetailSectionCard(title = "ACCOUNT TIMESTAMPS & LOGINS", icon = Icons.Default.Schedule) {
                                     DetailItemRow(label = "Account Created", value = createdStr, isHighlight = user.createdAt > 0)
                                     DetailItemRow(label = "Last Active / Logged In", value = lastActiveStr, isHighlight = true)
                                     DetailItemRow(label = "Account Role", value = user.role.uppercase())
-                                }
-
-                                // Wallet & Financials
-                                DetailSectionCard(title = "WALLET & FINANCIAL METRICS", icon = Icons.Default.AccountBalanceWallet) {
-                                    DetailItemRow(label = "Current Total Balance", value = "₹${user.funds}", isHighlight = true)
-                                    DetailItemRow(label = "Deposit Balance", value = "₹${user.depositFunds}")
-                                    DetailItemRow(label = "Winning Balance", value = "₹${user.winningFunds}", isHighlight = user.winningFunds > 0)
-                                    DetailItemRow(label = "Bonus Coins", value = "₹${user.bonusFunds}")
-                                    DetailItemRow(label = "Total Prize Won", value = "₹${user.totalEarnings}", isHighlight = user.totalEarnings > 0)
-                                    DetailItemRow(label = "Activity Reward Points", value = "${user.activityPoints} pts")
-                                }
-
-                                // Tournament Performance
-                                DetailSectionCard(title = "TOURNAMENT PERFORMANCE", icon = Icons.Default.EmojiEvents) {
-                                    DetailItemRow(label = "Total Match Wins", value = "${user.wins}")
-                                    DetailItemRow(label = "Total Kills Recorded", value = "${user.kills}")
-                                    val winRatio = if (user.wins + user.kills > 0) "Active Competitor" else "No matches played"
-                                    DetailItemRow(label = "Player Status", value = winRatio)
                                 }
                             }
                         }
@@ -2608,6 +2818,21 @@ fun UserDetailsInspectorDialog(
                                     )
                                     Spacer(modifier = Modifier.height(8.dp))
                                     OutlinedTextField(
+                                        value = editEmail,
+                                        onValueChange = { editEmail = it },
+                                        label = { Text("Email Address", color = Color.Gray, fontSize = 11.sp) },
+                                        placeholder = { Text("e.g. player@gmail.com", color = Color.DarkGray, fontSize = 11.sp) },
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedTextColor = Color.White,
+                                            unfocusedTextColor = Color.White,
+                                            focusedBorderColor = VelorixAccent,
+                                            unfocusedBorderColor = CardVerifyBorder
+                                        )
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    OutlinedTextField(
                                         value = editGameId,
                                         onValueChange = { editGameId = it },
                                         label = { Text("Free Fire / Game UID", color = Color.Gray, fontSize = 11.sp) },
@@ -2642,8 +2867,11 @@ fun UserDetailsInspectorDialog(
                                             Toast.makeText(context, "Profile info updated successfully", Toast.LENGTH_SHORT).show()
                                         },
                                         colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent),
-                                        modifier = Modifier.fillMaxWidth().height(38.dp)
+                                        modifier = Modifier.fillMaxWidth().height(42.dp),
+                                        shape = RoundedCornerShape(10.dp)
                                     ) {
+                                        Icon(Icons.Default.Save, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
                                         Text("Save Contact & Profile Info", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                     }
                                 }
@@ -2942,6 +3170,7 @@ fun UserDetailsInspectorDialog(
         }
     }
 }
+}
 
 @Composable
 fun DetailSectionCard(
@@ -2949,16 +3178,43 @@ fun DetailSectionCard(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     content: @Composable ColumnScope.() -> Unit
 ) {
+    val sectionAccentColor = when {
+        title.contains("ESPORTS", ignoreCase = true) || title.contains("GAMING", ignoreCase = true) -> Color(0xFF00E5FF)
+        title.contains("WALLET", ignoreCase = true) || title.contains("FINANCIAL", ignoreCase = true) -> Color(0xFF00E676)
+        title.contains("STREAK", ignoreCase = true) || title.contains("FIRE", ignoreCase = true) -> Color(0xFFFF6D00)
+        title.contains("KYC", ignoreCase = true) || title.contains("ELIGIBILITY", ignoreCase = true) -> Color(0xFFB388FF)
+        title.contains("SECURITY", ignoreCase = true) || title.contains("RESTRICTION", ignoreCase = true) -> Color(0xFFFF1744)
+        title.contains("TIMESTAMPS", ignoreCase = true) -> Color(0xFFFFD54F)
+        else -> VelorixAccent
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color(0xFF1C222E), RoundedCornerShape(14.dp))
-            .border(1.dp, CardVerifyBorder, RoundedCornerShape(14.dp))
-            .padding(12.dp)
+            .background(Color(0xFF161B24), RoundedCornerShape(14.dp))
+            .border(
+                1.dp,
+                Brush.linearGradient(
+                    listOf(
+                        sectionAccentColor.copy(alpha = 0.45f),
+                        Color(0xFF272F3D).copy(alpha = 0.2f)
+                    )
+                ),
+                RoundedCornerShape(14.dp)
+            )
+            .padding(14.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, contentDescription = null, tint = VelorixAccent, modifier = Modifier.size(16.dp))
-            Spacer(modifier = Modifier.width(8.dp))
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .background(sectionAccentColor.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
+                    .border(0.8.dp, sectionAccentColor.copy(alpha = 0.5f), RoundedCornerShape(8.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(icon, contentDescription = null, tint = sectionAccentColor, modifier = Modifier.size(16.dp))
+            }
+            Spacer(modifier = Modifier.width(10.dp))
             Text(
                 text = title,
                 color = Color.White,
@@ -2967,7 +3223,7 @@ fun DetailSectionCard(
                 letterSpacing = 0.5.sp
             )
         }
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(12.dp))
         content()
     }
 }
@@ -2977,17 +3233,33 @@ fun DetailItemRow(label: String, value: String, isHighlight: Boolean = false) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp),
+            .padding(vertical = 5.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(text = label, color = Color.Gray, fontSize = 12.sp)
-        Text(
-            text = value,
-            color = if (isHighlight) VelorixAccent else Color.White,
-            fontSize = 12.sp,
-            fontWeight = if (isHighlight) FontWeight.Bold else FontWeight.Medium
-        )
+        Text(text = label, color = Color(0xFFA1A1AA), fontSize = 12.sp)
+        if (isHighlight) {
+            Box(
+                modifier = Modifier
+                    .background(VelorixAccent.copy(alpha = 0.12f), RoundedCornerShape(6.dp))
+                    .border(0.5.dp, VelorixAccent.copy(alpha = 0.4f), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 8.dp, vertical = 2.dp)
+            ) {
+                Text(
+                    text = value,
+                    color = VelorixAccent,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        } else {
+            Text(
+                text = value,
+                color = Color(0xFFEEEEEE),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium
+            )
+        }
     }
 }
 

@@ -411,12 +411,7 @@ fun UntitledCard(
     content: @Composable BoxScope.() -> Unit
 ) {
     val clickModifier = if (onClick != null) {
-        Modifier
-            .bounceClick(scaleDown = 0.98f) { onClick() }
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) { onClick() }
+        Modifier.bounceClick(scaleDown = 0.98f) { onClick() }
     } else Modifier
 
     Box(

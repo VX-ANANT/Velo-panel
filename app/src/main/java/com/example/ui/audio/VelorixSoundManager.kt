@@ -2,9 +2,14 @@ package com.example.ui.audio
 
 import android.content.Context
 import android.media.AudioAttributes
-import android.media.AudioFormat
-import android.media.AudioTrack
+import android.media.AudioManager
 import android.media.MediaPlayer
+import android.media.SoundPool
+import android.media.ToneGenerator
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
@@ -12,98 +17,111 @@ import com.example.R
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import java.io.InputStream
 import java.util.concurrent.ConcurrentHashMap
 
 /**
  * VelorixSoundManager
- * High-performance, dual-engine audio sound effects engine for Velorix Super Admin & Tournaments.
+ * High-performance, multi-stage sound effects engine for Velorix Super Admin & Tournaments.
  *
- * Uses direct Android MediaPlayer on USAGE_MEDIA / STREAM_MUSIC as primary engine
- * (ensuring loud, crisp playback on real hardware even if touch sounds are disabled in OS settings),
- * with instant-fallback to low-latency raw PCM AudioTrack.
+ * Primary Stage: Hardware-accelerated, low-latency OpenSL / AAudio SoundPool.
+ * Secondary Stage: MediaPlayer.create fallback for uncompressed/direct stream playback.
+ * Tertiary Stage: System ToneGenerator & Haptic feedback to guarantee perceptible feedback.
  */
 class VelorixSoundManager private constructor(context: Context) {
 
     private val appContext = context.applicationContext
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    // Cached raw PCM byte arrays in memory (total < 250 KB)
-    private val pcmCache = ConcurrentHashMap<Int, ByteArray>()
-
-    // Track active players for smooth teardown
-    private val activeMediaPlayers = ConcurrentHashMap<Int, MediaPlayer>()
-    private val activeAudioTracks = ConcurrentHashMap<Int, AudioTrack>()
-
-    // Volume level: audible and pleasant (0.0 to 1.0)
-    var masterVolume: Float = 0.75f
+    // Master volume (0.0f to 1.0f) & Mute state
+    var masterVolume: Float = 0.85f
     var isMuted: Boolean = false
 
-    init {
-        // Pre-load PCM byte buffers in IO coroutine
-        scope.launch {
-            loadPcmBuffer(SOUND_BEAT_TAP, R.raw.sfx_mj_beat_tap)
-            loadPcmBuffer(SOUND_SNAP_POP, R.raw.sfx_mj_snap_pop)
-            loadPcmBuffer(SOUND_BRASS_HIT, R.raw.sfx_mj_brass_hit)
-            loadPcmBuffer(SOUND_ORCHESTRA_HIT, R.raw.sfx_mj_orchestra_hit)
-            loadPcmBuffer(SOUND_SUBTLE_CHIME, R.raw.sfx_chime_subtle)
-        }
-    }
+    private val soundPool: SoundPool
+    private val soundIds = ConcurrentHashMap<Int, Int>()
+    private val loadedSounds = ConcurrentHashMap<Int, Boolean>()
 
-    private fun loadPcmBuffer(soundId: Int, resId: Int) {
+    private val vibrator: Vibrator? by lazy {
         try {
-            val inputStream: InputStream = appContext.resources.openRawResource(resId)
-            val bytes = inputStream.use { it.readBytes() }
-            val pcmData = extractPcmData(bytes)
-            pcmCache[soundId] = pcmData
-        } catch (e: Throwable) {
-            android.util.Log.d("VelorixSoundManager", "Audio buffer preload skipped: ${e.message}")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val vm = appContext.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
+                vm?.defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                appContext.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+            }
+        } catch (_: Throwable) {
+            null
         }
     }
 
-    /**
-     * Extracts raw PCM 16-bit audio data by finding the 'data' chunk in standard WAV files.
-     */
-    private fun extractPcmData(bytes: ByteArray): ByteArray {
-        for (i in 0 until minOf(bytes.size - 8, 100)) {
-            if (bytes[i] == 'd'.code.toByte() &&
-                bytes[i + 1] == 'a'.code.toByte() &&
-                bytes[i + 2] == 't'.code.toByte() &&
-                bytes[i + 3] == 'a'.code.toByte()
-            ) {
-                val offset = i + 8
-                if (offset < bytes.size) {
-                    return bytes.copyOfRange(offset, bytes.size)
+    private var toneGen: ToneGenerator? = null
+
+    init {
+        val audioAttributes = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build()
+
+        soundPool = SoundPool.Builder()
+            .setMaxStreams(8)
+            .setAudioAttributes(audioAttributes)
+            .build()
+
+        soundPool.setOnLoadCompleteListener { _, sampleId, status ->
+            if (status == 0) {
+                soundIds.entries.find { it.value == sampleId }?.let { entry ->
+                    loadedSounds[entry.key] = true
                 }
             }
         }
-        return if (bytes.size > 44) bytes.copyOfRange(44, bytes.size) else bytes
+
+        try {
+            toneGen = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 75)
+        } catch (_: Throwable) {}
+
+        // Preload sounds
+        preloadSound(SOUND_BEAT_TAP, R.raw.sfx_mj_beat_tap)
+        preloadSound(SOUND_SNAP_POP, R.raw.sfx_mj_snap_pop)
+        preloadSound(SOUND_BRASS_HIT, R.raw.sfx_mj_brass_hit)
+        preloadSound(SOUND_ORCHESTRA_HIT, R.raw.sfx_mj_orchestra_hit)
+        preloadSound(SOUND_SUBTLE_CHIME, R.raw.sfx_chime_subtle)
+    }
+
+    private fun preloadSound(key: Int, resId: Int) {
+        try {
+            val sId = soundPool.load(appContext, resId, 1)
+            soundIds[key] = sId
+        } catch (e: Throwable) {
+            android.util.Log.e("VelorixSound", "Failed to load sound $key: ${e.message}")
+        }
     }
 
     /**
-     * Billie Jean-inspired acoustic punchy kick + crisp rimshot tap.
+     * Punchy kick + crisp rimshot tap.
      * Perfect for: Action chips, sending a prompt, category clicks.
      */
     fun playBeatTap(volumeScale: Float = 1.0f) {
-        playSound(SOUND_BEAT_TAP, R.raw.sfx_mj_beat_tap, volumeScale)
+        playSound(SOUND_BEAT_TAP, R.raw.sfx_mj_beat_tap, volumeScale, ToneGenerator.TONE_PROP_BEEP)
+        triggerHaptic(15)
     }
 
     /**
-     * Smooth Criminal / Bad inspired finger snap & slap-bass funk pop.
+     * Finger snap & slap-bass funk pop.
      * Perfect for: Tab switching, toggles, copying text, selecting options.
      */
     fun playSnapPop(volumeScale: Float = 1.0f) {
-        playSound(SOUND_SNAP_POP, R.raw.sfx_mj_snap_pop, volumeScale)
+        playSound(SOUND_SNAP_POP, R.raw.sfx_mj_snap_pop, volumeScale, ToneGenerator.TONE_PROP_ACK)
+        triggerHaptic(12)
     }
 
     /**
-     * Quincy Jones / 80s Thriller synth brass chord stab (Em9).
+     * Synth brass chord stab.
      * Perfect for: Confirming & deploying tournaments to Firebase, major commits.
      */
     fun playBrassHit(volumeScale: Float = 1.0f) {
-        playSound(SOUND_BRASS_HIT, R.raw.sfx_mj_brass_hit, volumeScale)
+        playSound(SOUND_BRASS_HIT, R.raw.sfx_mj_brass_hit, volumeScale, ToneGenerator.TONE_CDMA_ALERT_NETWORK_LITE)
+        triggerHaptic(25)
     }
 
     /**
@@ -111,7 +129,8 @@ class VelorixSoundManager private constructor(context: Context) {
      * Perfect for: Anti-cheat enforcement, banning a cheater, critical alerts.
      */
     fun playOrchestraHit(volumeScale: Float = 1.0f) {
-        playSound(SOUND_ORCHESTRA_HIT, R.raw.sfx_mj_orchestra_hit, volumeScale)
+        playSound(SOUND_ORCHESTRA_HIT, R.raw.sfx_mj_orchestra_hit, volumeScale, ToneGenerator.TONE_PROP_PROMPT)
+        triggerHaptic(30)
     }
 
     /**
@@ -119,158 +138,74 @@ class VelorixSoundManager private constructor(context: Context) {
      * Perfect for: Action completion, ticket resolved, successful load.
      */
     fun playSubtleChime(volumeScale: Float = 1.0f) {
-        playSound(SOUND_SUBTLE_CHIME, R.raw.sfx_chime_subtle, volumeScale)
+        playSound(SOUND_SUBTLE_CHIME, R.raw.sfx_chime_subtle, volumeScale, ToneGenerator.TONE_PROP_BEEP2)
+        triggerHaptic(14)
     }
 
-    private fun playSound(soundId: Int, resId: Int, volumeScale: Float) {
+    private fun triggerHaptic(durationMs: Long) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator?.vibrate(VibrationEffect.createOneShot(durationMs, VibrationEffect.DEFAULT_AMPLITUDE))
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator?.vibrate(durationMs)
+            }
+        } catch (_: Throwable) {}
+    }
+
+    private fun playSound(key: Int, resId: Int, volumeScale: Float, toneFallback: Int) {
         if (isMuted) return
-        val finalVol = (masterVolume * volumeScale).coerceIn(0f, 1f)
-        if (finalVol <= 0.001f) return
+        val finalVol = (masterVolume * volumeScale).coerceIn(0.01f, 1f)
 
         scope.launch {
-            // Attempt 1: Direct MediaPlayer via raw resource FD (Plays on USAGE_MEDIA / STREAM_MUSIC)
-            val played = playViaMediaPlayer(soundId, resId, finalVol)
-            if (!played) {
-                // Attempt 2: High-speed PCM AudioTrack fallback
-                playViaAudioTrack(soundId, resId, finalVol)
-            }
-        }
-    }
-
-    private fun playViaMediaPlayer(soundId: Int, resId: Int, volume: Float): Boolean {
-        return try {
-            val afd = appContext.resources.openRawResourceFd(resId) ?: return false
-            val mp = MediaPlayer()
-
-            // Stop any active player for this specific slot
-            activeMediaPlayers[soundId]?.let { oldMp ->
+            // Stage 1: Try SoundPool
+            val sId = soundIds[key]
+            var streamId = 0
+            if (sId != null && sId > 0) {
                 try {
-                    oldMp.stop()
-                    oldMp.reset()
-                    oldMp.release()
-                } catch (_: Throwable) {}
-            }
-
-            mp.setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .build()
-            )
-            mp.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
-            afd.close()
-            mp.setVolume(volume, volume)
-
-            mp.setOnCompletionListener { player ->
-                try {
-                    activeMediaPlayers.remove(soundId)
-                    player.reset()
-                    player.release()
-                } catch (_: Throwable) {}
-            }
-            mp.setOnErrorListener { player, _, _ ->
-                try {
-                    activeMediaPlayers.remove(soundId)
-                    player.reset()
-                    player.release()
-                } catch (_: Throwable) {}
-                true
-            }
-
-            mp.prepare()
-            mp.start()
-            activeMediaPlayers[soundId] = mp
-            true
-        } catch (e: Throwable) {
-            android.util.Log.d("VelorixSoundManager", "MediaPlayer playback fallback: ${e.message}")
-            false
-        }
-    }
-
-    private fun playViaAudioTrack(soundId: Int, resId: Int, volume: Float) {
-        try {
-            var pcm = pcmCache[soundId]
-            if (pcm == null) {
-                loadPcmBuffer(soundId, resId)
-                pcm = pcmCache[soundId]
-            }
-            if (pcm == null || pcm.isEmpty()) return
-
-            // Stop existing track if active
-            activeAudioTracks[soundId]?.let { oldTrack ->
-                try {
-                    if (oldTrack.playState == AudioTrack.PLAYSTATE_PLAYING) {
-                        oldTrack.stop()
-                    }
-                    oldTrack.release()
-                } catch (_: Throwable) {}
-            }
-
-            val audioAttributes = AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_MEDIA)
-                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                .build()
-
-            val audioFormat = AudioFormat.Builder()
-                .setSampleRate(44100)
-                .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                .build()
-
-            val minBufferSize = AudioTrack.getMinBufferSize(44100, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
-            val bufferSize = maxOf(minBufferSize, pcm.size)
-
-            val track = AudioTrack.Builder()
-                .setAudioAttributes(audioAttributes)
-                .setAudioFormat(audioFormat)
-                .setBufferSizeInBytes(bufferSize)
-                .setTransferMode(AudioTrack.MODE_STATIC)
-                .build()
-
-            if (track.state == AudioTrack.STATE_INITIALIZED) {
-                track.write(pcm, 0, pcm.size, AudioTrack.WRITE_BLOCKING)
-                track.setVolume(volume)
-                track.play()
-                activeAudioTracks[soundId] = track
-
-                // Clean up track after duration (audio clips are < 1000ms)
-                scope.launch {
-                    delay(1200)
-                    try {
-                        if (track.playState == AudioTrack.PLAYSTATE_PLAYING) {
-                            track.stop()
-                        }
-                        track.release()
-                        activeAudioTracks.remove(soundId)
-                    } catch (_: Throwable) {}
+                    streamId = soundPool.play(sId, finalVol, finalVol, 1, 0, 1.0f)
+                } catch (_: Throwable) {
+                    streamId = 0
                 }
-            } else {
-                track.release()
             }
-        } catch (t: Throwable) {
-            android.util.Log.d("VelorixSoundManager", "AudioTrack playback fallback: ${t.message}")
+
+            // Stage 2: Fallback to MediaPlayer.create if SoundPool didn't play
+            if (streamId == 0) {
+                try {
+                    val mp = MediaPlayer.create(appContext, resId)
+                    if (mp != null) {
+                        mp.setAudioAttributes(
+                            AudioAttributes.Builder()
+                                .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+                                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                                .build()
+                        )
+                        mp.setVolume(finalVol, finalVol)
+                        mp.setOnCompletionListener { player ->
+                            try {
+                                player.reset()
+                                player.release()
+                            } catch (_: Throwable) {}
+                        }
+                        mp.start()
+                        return@launch
+                    }
+                } catch (e: Throwable) {
+                    android.util.Log.d("VelorixSound", "MediaPlayer fallback: ${e.message}")
+                }
+
+                // Stage 3: ToneGenerator synthesized fallback
+                try {
+                    toneGen?.startTone(toneFallback, 110)
+                } catch (_: Throwable) {}
+            }
         }
     }
 
     fun release() {
         try {
-            activeMediaPlayers.values.forEach { mp ->
-                try {
-                    mp.stop()
-                    mp.reset()
-                    mp.release()
-                } catch (_: Throwable) {}
-            }
-            activeMediaPlayers.clear()
-
-            activeAudioTracks.values.forEach { track ->
-                try {
-                    track.stop()
-                    track.release()
-                } catch (_: Throwable) {}
-            }
-            activeAudioTracks.clear()
-            pcmCache.clear()
+            soundPool.release()
+            toneGen?.release()
         } catch (_: Throwable) {}
     }
 
