@@ -496,17 +496,16 @@ fun FloatingGlassNavBar(
                     )
                 }
 
-                // Glass Substrate: 100% Clear Translucent Glass with 2% (2.dp) Gaussian Blur
+                // Translucent Clear Glass Substrate with Gaussian blur (NO OPAQUE BLACK OR DARK TINTS!)
                 Box(
                     modifier = Modifier
                         .matchParentSize()
-                        .blur(radius = 2.dp)
+                        .blur(radius = 5.dp)
                         .background(
                             Brush.verticalGradient(
                                 colors = listOf(
-                                    Color.White.copy(alpha = 0.12f),
-                                    Color.White.copy(alpha = 0.06f),
-                                    Color.White.copy(alpha = 0.09f)
+                                    Color.White.copy(alpha = 0.14f),
+                                    Color.White.copy(alpha = 0.06f)
                                 )
                             )
                         )
@@ -554,11 +553,14 @@ fun FloatingGlassNavBar(
                                     },
                                 contentAlignment = Alignment.Center
                             ) {
-                                // Elongated horizontal illuminated glass pill capsule for active tab
+                                // Luminous background light glow & convex illuminated glass pill capsule for active tab
                                 if (isSelected) {
                                     Box(
                                         modifier = Modifier
                                             .fillMaxSize()
+                                            .drawBehind {
+                                                drawSelectionBackgroundGlow(intensity = optics.vibrancy)
+                                            }
                                             .clip(RoundedCornerShape(26.dp))
                                             .background(
                                                 Brush.horizontalGradient(

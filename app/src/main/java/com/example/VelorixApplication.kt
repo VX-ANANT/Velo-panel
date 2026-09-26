@@ -4,6 +4,9 @@ import android.app.Application
 import android.util.Log
 import com.example.ui.common.GlobalErrorManager
 import com.google.firebase.FirebaseApp
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class VelorixApplication : Application() {
     lateinit var appContainer: AppContainer
@@ -24,15 +27,23 @@ class VelorixApplication : Application() {
 
         try {
             FirebaseApp.initializeApp(this)
-            com.example.data.ai.FirebaseAiManager.initializeAppCheck(this)
-            com.example.analytics.VelorixAnalytics.initialize(this)
-            com.example.notification.VelorixNotificationManager.initChannels(this)
-            com.example.config.VelorixRemoteConfigManager.initialize()
-            com.example.notification.VelorixFcmManager.initialize(this)
-            com.example.data.validation.UserRateLimiter.initialize(this)
-            com.example.data.repository.ApiKeyManager.initialize(this)
         } catch (e: Exception) {
-            Log.e("VelorixApp", "Firebase initialization error: ${e.message}", e)
+            Log.e("VelorixApp", "Firebase core initialization error: ${e.message}", e)
+        }
+
+        // Asynchronously initialize secondary background services to prevent blocking the main UI thread during cold start
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            try {
+                com.example.data.ai.FirebaseAiManager.initializeAppCheck(this@VelorixApplication)
+                com.example.analytics.VelorixAnalytics.initialize(this@VelorixApplication)
+                com.example.notification.VelorixNotificationManager.initChannels(this@VelorixApplication)
+                com.example.config.VelorixRemoteConfigManager.initialize()
+                com.example.notification.VelorixFcmManager.initialize(this@VelorixApplication)
+                com.example.data.validation.UserRateLimiter.initialize(this@VelorixApplication)
+                com.example.data.repository.ApiKeyManager.initialize(this@VelorixApplication)
+            } catch (e: Exception) {
+                Log.e("VelorixApp", "Async background services init error: ${e.message}", e)
+            }
         }
 
         appContainer = AppContainer(this)
