@@ -3438,25 +3438,122 @@ service cloud.firestore {
             database.child("matches").child(match.tournamentId).child(match.id).setValue(match).await()
             try {
                 firestore.collection("matches").document(match.id).set(match).await()
+                firestore.collection("tournaments").document(match.tournamentId)
+                    .collection("matches").document(match.id).set(match).await()
             } catch (ignored: Exception) {}
         } catch (e: Exception) {
             e.printStackTrace()
         }
     }
 
+    suspend fun advancePlayerInBracket(
+        tournamentId: String,
+        sourceMatchId: String?,
+        targetMatchId: String,
+        playerId: String,
+        targetSlot: Int
+    ) {
+        try {
+            if (!sourceMatchId.isNullOrBlank()) {
+                val sourceSnap = database.child("matches").child(tournamentId).child(sourceMatchId).get().await()
+                val sourceMatch = sourceSnap.getValue(Match::class.java)
+                if (sourceMatch != null) {
+                    val updatedSource = sourceMatch.copy(
+                        winnerId = playerId,
+                        status = "COMPLETED"
+                    )
+                    updateMatch(updatedSource)
+                }
+            }
+
+            val targetSnap = database.child("matches").child(tournamentId).child(targetMatchId).get().await()
+            val targetMatch = targetSnap.getValue(Match::class.java) ?: Match(
+                id = targetMatchId,
+                tournamentId = tournamentId,
+                status = "SCHEDULED"
+            )
+            val updatedTarget = if (targetSlot == 1) {
+                targetMatch.copy(
+                    player1Id = playerId,
+                    status = if (targetMatch.player2Id != null) "READY" else "SCHEDULED"
+                )
+            } else {
+                targetMatch.copy(
+                    player2Id = playerId,
+                    status = if (targetMatch.player1Id != null) "READY" else "SCHEDULED"
+                )
+            }
+            updateMatch(updatedTarget)
+            GlobalErrorManager.emitSuccess("Advancement saved: $playerId placed in Match $targetMatchId (Slot $targetSlot)")
+        } catch (e: Exception) {
+            GlobalErrorManager.emitError("Failed to advance player: ${e.message}", e)
+        }
+    }
+
     suspend fun getLiveMatchesStream(tournamentId: String): Flow<List<Match>> = callbackFlow {
-        val listener = object : ValueEventListener {
+        val matchesMap = mutableMapOf<String, Match>()
+
+        fun emitCombined() {
+            val list = matchesMap.values.toList().sortedWith(compareBy({ it.round }, { it.matchNumber }))
+            trySend(list)
+        }
+
+        // 1. Observe Realtime Database
+        val rtdbListener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                val matches = snapshot.children.mapNotNull { it.getValue(Match::class.java) }
-                trySend(matches)
+                snapshot.children.forEach { child ->
+                    val m = child.getValue(Match::class.java)
+                    if (m != null && m.id.isNotBlank()) {
+                        matchesMap[m.id] = m
+                    }
+                }
+                emitCombined()
             }
             override fun onCancelled(error: DatabaseError) {
-                trySend(emptyList())
+                Log.w(TAG, "RTDB matches stream error: ${error.message}")
             }
         }
         val ref = database.child("matches").child(tournamentId)
-        ref.addValueEventListener(listener)
-        awaitClose { ref.removeEventListener(listener) }
+        ref.addValueEventListener(rtdbListener)
+
+        // 2. Observe Cloud Firestore: tournaments/{tournamentId}/matches subcollection
+        val fsSubListener = try {
+            firestore.collection("tournaments").document(tournamentId).collection("matches")
+                .addSnapshotListener { snapshot, error ->
+                    if (error == null && snapshot != null) {
+                        snapshot.documents.forEach { doc ->
+                            val m = doc.toObject(Match::class.java)?.copy(id = doc.id)
+                            if (m != null && m.id.isNotBlank()) {
+                                matchesMap[m.id] = m
+                            }
+                        }
+                        emitCombined()
+                    }
+                }
+        } catch (_: Exception) { null }
+
+        // 3. Observe Cloud Firestore: root matches collection where tournamentId == tournamentId
+        val fsRootListener = try {
+            firestore.collection("matches")
+                .whereEqualTo("tournamentId", tournamentId)
+                .addSnapshotListener { snapshot, error ->
+                    if (error == null && snapshot != null) {
+                        snapshot.documents.forEach { doc ->
+                            val m = doc.toObject(Match::class.java)?.copy(id = doc.id)
+                            if (m != null && m.id.isNotBlank()) {
+                                matchesMap[m.id] = m
+                            }
+                        }
+                        emitCombined()
+                    }
+                }
+        } catch (_: Exception) { null }
+
+        awaitClose {
+            ref.removeEventListener(rtdbListener)
+            fsSubListener?.remove()
+            fsRootListener?.remove()
+        }
     }
 
     suspend fun getLiveLeaderboardStream(tournamentId: String): Flow<List<LeaderboardEntry>> = callbackFlow {
@@ -5586,11 +5683,46 @@ service cloud.firestore {
                 matchCounter++
             }
 
-            // Save to RTDB and Firestore
+            // Generate subsequent advancement rounds (Quarter-Finals, Semi-Finals, Finals)
+            var currentRoundMatches = matches.filter { it.round == 1 }
+            var currentRound = 1
+            while (currentRoundMatches.size > 1) {
+                val nextRound = currentRound + 1
+                val nextRoundMatches = mutableListOf<Match>()
+                for (j in currentRoundMatches.indices step 2) {
+                    val m1 = currentRoundMatches[j]
+                    val m2 = if (j + 1 < currentRoundMatches.size) currentRoundMatches[j + 1] else null
+                    
+                    val p1Adv = if (m1.winnerId != null && m1.status == "COMPLETED") m1.winnerId else null
+                    val p2Adv = if (m2?.winnerId != null && m2.status == "COMPLETED") m2.winnerId else null
+
+                    val nextM = Match(
+                        id = "M-${matchCounter}",
+                        tournamentId = tournamentId,
+                        round = nextRound,
+                        matchNumber = matchCounter,
+                        player1Id = p1Adv,
+                        player2Id = p2Adv,
+                        winnerId = null,
+                        status = if (p1Adv != null && p2Adv != null) "READY" else "SCHEDULED",
+                        score1 = 0,
+                        score2 = 0
+                    )
+                    nextRoundMatches.add(nextM)
+                    matches.add(nextM)
+                    matchCounter++
+                }
+                currentRoundMatches = nextRoundMatches
+                currentRound = nextRound
+            }
+
+            // Save to RTDB and Cloud Firestore (both root and subcollection)
             matches.forEach { match ->
                 database.child("matches").child(tournamentId).child(match.id).setValue(match).await()
                 try {
                     firestore.collection("matches").document(match.id).set(match).await()
+                    firestore.collection("tournaments").document(tournamentId)
+                        .collection("matches").document(match.id).set(match).await()
                 } catch (ignored: Exception) {}
             }
 

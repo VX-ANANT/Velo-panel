@@ -35,6 +35,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.domain.model.Match
+import com.example.ui.bracket.BracketVisualizationComponent
 import com.example.ui.common.GlassBackgroundBox
 import com.example.ui.common.GlassCard
 import com.example.ui.common.GlassTokens
@@ -319,100 +320,28 @@ fun BracketManagementScreen(
                             val grouped = matches.groupBy { it.round }.toSortedMap()
 
                             if (viewMode == "tree") {
-                                // Horizontal Stage Pan View
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .padding(vertical = 8.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .padding(horizontal = 20.dp, vertical = 6.dp)
-                                            .fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = "STAGE VIEW (Pan horizontally across rounds)",
-                                            color = VelorixAccent,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.ExtraBold,
-                                            letterSpacing = 0.6.sp
+                                BracketVisualizationComponent(
+                                    tournamentId = tournamentId,
+                                    matches = matches,
+                                    onAdvancePlayer = { sourceMatchId, targetMatchId, playerId, targetSlot ->
+                                        viewModel.advancePlayer(
+                                            tournamentId = tournamentId,
+                                            sourceMatchId = sourceMatchId,
+                                            targetMatchId = targetMatchId,
+                                            playerId = playerId,
+                                            targetSlot = targetSlot
                                         )
-                                        Text(
-                                            text = "${matches.size} Total Matches",
-                                            color = Color(0xFFA1A1AA),
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Medium
-                                        )
+                                    },
+                                    onUpdateMatchStatus = { match, newStatus, winnerId ->
+                                        viewModel.updateMatchStatus(match, newStatus, winnerId)
+                                    },
+                                    onRecordScore = { matchId, winnerId, s1, s2 ->
+                                        viewModel.recordMatchScore(tournamentId, matchId, winnerId, s1, s2)
+                                    },
+                                    onGenerateBracket = {
+                                        viewModel.generateBracket(tournamentId)
                                     }
-
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .horizontalScroll(rememberScrollState())
-                                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(16.dp)
-                                    ) {
-                                        grouped.forEach { (round, roundMatches) ->
-                                            Column(
-                                                modifier = Modifier
-                                                    .width(if (isCompact) 270.dp else 300.dp)
-                                                    .fillMaxHeight()
-                                                    .verticalScroll(rememberScrollState()),
-                                                verticalArrangement = Arrangement.spacedBy(12.dp)
-                                            ) {
-                                                // Glass Round Header
-                                                Surface(
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                    shape = RoundedCornerShape(14.dp),
-                                                    color = Color(0xFF141419).copy(alpha = 0.85f),
-                                                    border = BorderStroke(1.dp, GlassTokens.GlassBorderGradient)
-                                                ) {
-                                                    Row(
-                                                        modifier = Modifier
-                                                            .fillMaxWidth()
-                                                            .padding(horizontal = 14.dp, vertical = 10.dp),
-                                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                                        verticalAlignment = Alignment.CenterVertically
-                                                    ) {
-                                                        Text(
-                                                            text = "Round $round",
-                                                            fontSize = 14.sp,
-                                                            fontWeight = FontWeight.Bold,
-                                                            color = Color.White
-                                                        )
-                                                        val doneCount = roundMatches.count { it.status == "completed" }
-                                                        Surface(
-                                                            shape = RoundedCornerShape(6.dp),
-                                                            color = if (doneCount == roundMatches.size) Color(0xFF15803D).copy(alpha = 0.25f) else Color.White.copy(alpha = 0.08f),
-                                                            border = BorderStroke(1.dp, if (doneCount == roundMatches.size) Color(0xFF22C55E).copy(alpha = 0.5f) else Color.White.copy(alpha = 0.15f))
-                                                        ) {
-                                                            Text(
-                                                                text = "$doneCount/${roundMatches.size} Done",
-                                                                fontSize = 10.sp,
-                                                                fontWeight = FontWeight.Bold,
-                                                                color = if (doneCount == roundMatches.size) Color(0xFF4ADE80) else Color(0xFFCBD5E1),
-                                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                                                            )
-                                                        }
-                                                    }
-                                                }
-
-                                                roundMatches.forEach { match ->
-                                                    GlassMatchCard(
-                                                        match = match,
-                                                        onUpdateClick = { status, winner ->
-                                                            viewModel.updateMatchStatus(match, status, winner)
-                                                        }
-                                                    )
-                                                }
-
-                                                Spacer(modifier = Modifier.height(36.dp))
-                                            }
-                                        }
-                                    }
-                                }
+                                )
                             } else {
                                 // Standard Grouped List View
                                 LazyColumn(

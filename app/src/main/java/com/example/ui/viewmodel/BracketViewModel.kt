@@ -85,6 +85,28 @@ class BracketViewModel(
         }
     }
 
+    fun advancePlayer(
+        tournamentId: String,
+        sourceMatchId: String?,
+        targetMatchId: String,
+        playerId: String,
+        targetSlot: Int
+    ) {
+        viewModelScope.launch {
+            try {
+                repository.advancePlayerInBracket(
+                    tournamentId = tournamentId,
+                    sourceMatchId = sourceMatchId,
+                    targetMatchId = targetMatchId,
+                    playerId = playerId,
+                    targetSlot = targetSlot
+                )
+            } catch (e: Exception) {
+                GlobalErrorManager.emitFirestoreError("Advance Player in Bracket", e)
+            }
+        }
+    }
+
     fun recordMatchScore(tournamentId: String, matchId: String, winnerId: String, score1: Int, score2: Int) {
         viewModelScope.launch {
             try {

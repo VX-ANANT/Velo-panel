@@ -38,17 +38,24 @@ object GlobalErrorManager {
         val lower = message.lowercase()
         if (lower.contains("job was cancelled") || lower.contains("job was canceled")) return
 
+        // Gracefully format or bypass unprovisioned Firestore notice since RTDB is live and operational
+        val cleanMessage = if (lower.contains("the database (default) does not exist") || lower.contains("datastore/setup")) {
+            "Realtime Database is active. (Cloud Firestore default database is not yet created in Firebase Console)."
+        } else {
+            message
+        }
+
         val rawDetails = throwable?.localizedMessage ?: throwable?.message
-        val details = if (!rawDetails.isNullOrBlank() && !message.contains(rawDetails) && rawDetails != message) {
-            rawDetails
+        val details = if (!rawDetails.isNullOrBlank() && !cleanMessage.contains(rawDetails) && rawDetails != cleanMessage) {
+            if (rawDetails.contains("datastore/setup") || rawDetails.contains("does not exist")) null else rawDetails
         } else null
 
         _errorState.value = GlobalErrorUiState(
-            message = message,
+            message = cleanMessage,
             details = details,
             actionLabel = actionLabel,
             onAction = onAction,
-            isError = true,
+            isError = !cleanMessage.contains("Realtime Database is active"),
             timestamp = System.currentTimeMillis()
         )
     }
