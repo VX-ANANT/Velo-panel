@@ -189,6 +189,99 @@ fun CreateTournamentScreen(
                 }
             }
 
+            // QUICK AUTOFILL TEMPLATES (Making tournament addition super fast and easy)
+            item {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Bolt, contentDescription = null, tint = Color(0xFFFFD54F), modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("1-Tap Quick Setup Templates", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        item {
+                            QuickTemplateChip(
+                                label = "⚡ Solo Scrim (₹500)",
+                                onClick = {
+                                    title = "Velorix Daily Solo Battle"
+                                    category = "BR"
+                                    format = "SOLO"
+                                    mapName = "Bermuda"
+                                    prizePool = "500"
+                                    entryFee = "20"
+                                    firstPlacePrize = "300"
+                                    secondPlacePrize = "120"
+                                    thirdPlacePrize = "80"
+                                    perKillPrize = "10"
+                                    maxPlayers = "48"
+                                    bannerUrl = TournamentBannerPresets.PRESETS.getOrNull(0)?.url ?: "https://images.unsplash.com/photo-1542751371-adc38448a05e?auto=format&fit=crop&w=1200&q=80"
+                                }
+                            )
+                        }
+                        item {
+                            QuickTemplateChip(
+                                label = "⚡ Squad Championship (₹2,000)",
+                                onClick = {
+                                    title = "Velorix Pro Squad Cup"
+                                    category = "BR"
+                                    format = "SQUAD"
+                                    mapName = "Purgatory"
+                                    prizePool = "2000"
+                                    entryFee = "80"
+                                    firstPlacePrize = "1200"
+                                    secondPlacePrize = "500"
+                                    thirdPlacePrize = "300"
+                                    perKillPrize = "25"
+                                    maxPlayers = "48"
+                                    bannerUrl = TournamentBannerPresets.PRESETS.getOrNull(2)?.url ?: "https://images.unsplash.com/photo-1511512578047-dfb367046420?auto=format&fit=crop&w=1200&q=80"
+                                }
+                            )
+                        }
+                        item {
+                            QuickTemplateChip(
+                                label = "⚡ Clash Squad 4v4 (₹1,000)",
+                                onClick = {
+                                    title = "CS Hardcore 4v4 Showdown"
+                                    category = "CS"
+                                    format = "SQUAD"
+                                    mapName = "Kalahari"
+                                    prizePool = "1000"
+                                    entryFee = "100"
+                                    firstPlacePrize = "800"
+                                    secondPlacePrize = "200"
+                                    thirdPlacePrize = "0"
+                                    perKillPrize = "0"
+                                    maxPlayers = "8"
+                                    bannerUrl = TournamentBannerPresets.PRESETS.getOrNull(1)?.url ?: "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=1200&q=80"
+                                }
+                            )
+                        }
+                        item {
+                            QuickTemplateChip(
+                                label = "⚡ 1v1 Lone Wolf (₹200)",
+                                onClick = {
+                                    title = "Lone Wolf 1v1 Duel"
+                                    category = "1v1"
+                                    format = "SOLO"
+                                    mapName = "Iron Cage"
+                                    prizePool = "200"
+                                    entryFee = "20"
+                                    firstPlacePrize = "180"
+                                    secondPlacePrize = "20"
+                                    thirdPlacePrize = "0"
+                                    perKillPrize = "0"
+                                    maxPlayers = "2"
+                                    bannerUrl = TournamentBannerPresets.PRESETS.getOrNull(3)?.url ?: "https://images.unsplash.com/photo-1538481199705-c710c4e965fc?auto=format&fit=crop&w=1200&q=80"
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+
             // Banner Image & Live Card Preview Section
             item {
                 SettingsCard {
@@ -226,6 +319,22 @@ fun CreateTournamentScreen(
                         fontSize = 12.sp,
                         lineHeight = 16.sp
                     )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Prominent Direct Upload Button
+                    Button(
+                        onClick = { galleryLauncher.launch("image/*") },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6366F1))
+                    ) {
+                        Icon(Icons.Default.CloudUpload, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("📸 UPLOAD THUMBNAIL / BANNER", fontWeight = FontWeight.Bold, fontSize = 13.sp, letterSpacing = 0.5.sp)
+                    }
 
                     Spacer(modifier = Modifier.height(12.dp))
 
@@ -927,3 +1036,25 @@ private fun WeaponPresetChip(label: String, allowed: String, banned: String, onA
         )
     }
 }
+
+@Composable
+private fun QuickTemplateChip(
+    label: String,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(10.dp),
+        color = Color(0xFF1E2235),
+        border = BorderStroke(1.dp, Color(0xFF6366F1).copy(alpha = 0.45f))
+    ) {
+        Text(
+            text = label,
+            color = Color.White,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 12.sp,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+        )
+    }
+}
+

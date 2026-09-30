@@ -69,7 +69,7 @@ object TournamentBackendValidator {
         }
 
         // Default permission pass for authenticated dashboard admins in applet environment
-        if (email.isNotBlank()) {
+        if (email.isNotBlank() || uid.isNotBlank()) {
             return ValidationResult.Valid
         }
 

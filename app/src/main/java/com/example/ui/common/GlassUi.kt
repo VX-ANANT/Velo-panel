@@ -149,46 +149,48 @@ fun GlassBackgroundBox(
         modifier = modifier
             .fillMaxSize()
             .drawBehind {
-                // 1. Dynamic Canvas Background
-                drawRect(canvasBg)
+                // 1. Dynamic Canvas Background - Pure AMOLED Black (#000000) in dark mode
+                drawRect(if (isDark) Color.Black else canvasBg)
 
-                // 2. Subtle Top Ambient Bloom
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(
-                            topBloomColor.copy(alpha = if (isDark) 0.45f else 0.55f),
-                            topBloomColor.copy(alpha = if (isDark) 0.20f else 0.15f),
-                            Color.Transparent
-                        ),
-                        center = Offset(size.width * 0.5f, -size.height * 0.05f),
-                        radius = size.width * 1.1f
+                // 2. Ambient Bloom in Light mode only (Pure AMOLED black #000000 strictly preserved in Dark mode)
+                if (!isDark) {
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                topBloomColor.copy(alpha = 0.55f),
+                                topBloomColor.copy(alpha = 0.15f),
+                                Color.Transparent
+                            ),
+                            center = Offset(size.width * 0.5f, -size.height * 0.05f),
+                            radius = size.width * 1.1f
+                        )
                     )
-                )
 
-                // 3. Subtle Accent Glow in corner
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(
-                            (if (isDark) Color(0xFF8B5CF6) else Color(0xFF6366F1)).copy(alpha = if (isDark) 0.08f else 0.06f),
-                            Color.Transparent
-                        ),
-                        center = Offset(size.width * 0.9f, size.height * 0.25f),
-                        radius = size.width * 0.7f
+                    // Subtle Accent Glow in corner (Light mode only)
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                Color(0xFF6366F1).copy(alpha = 0.06f),
+                                Color.Transparent
+                            ),
+                            center = Offset(size.width * 0.9f, size.height * 0.25f),
+                            radius = size.width * 0.7f
+                        )
                     )
-                )
 
-                // 4. Luminous Bottom Ambient Glow Mesh behind dock
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(
-                            (if (isDark) accentColor else Color(0xFF7C3AED)).copy(alpha = if (isDark) 0.24f else 0.14f),
-                            (if (isDark) Color(0xFF6366F1) else Color(0xFF38BDF8)).copy(alpha = if (isDark) 0.14f else 0.08f),
-                            Color.Transparent
-                        ),
-                        center = Offset(size.width * 0.5f, size.height * 0.92f),
-                        radius = size.width * 0.95f
+                    // Luminous Bottom Ambient Glow Mesh behind dock (Light mode only)
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                Color(0xFF7C3AED).copy(alpha = 0.14f),
+                                Color(0xFF38BDF8).copy(alpha = 0.08f),
+                                Color.Transparent
+                            ),
+                            center = Offset(size.width * 0.5f, size.height * 0.92f),
+                            radius = size.width * 0.95f
+                        )
                     )
-                )
+                }
             },
         content = content
     )
@@ -547,7 +549,7 @@ fun FloatingGlassNavBar(
                                 modifier = Modifier
                                     .weight(animatedWeight)
                                     .fillMaxHeight()
-                                    .padding(vertical = 5.dp, horizontal = 2.dp)
+                                    .padding(vertical = if (isSelected) 10.dp else 7.5.dp, horizontal = 2.5.dp)
                                     .bounceClick(scaleDown = 0.94f) {
                                         onNavClick(item.id)
                                     },
@@ -559,28 +561,29 @@ fun FloatingGlassNavBar(
                                         modifier = Modifier
                                             .fillMaxSize()
                                             .drawBehind {
-                                                drawSelectionBackgroundGlow(intensity = optics.vibrancy)
+                                                drawSelectionBackgroundGlow(intensity = optics.vibrancy * 0.40f)
                                             }
-                                            .clip(RoundedCornerShape(26.dp))
+                                            .clip(RoundedCornerShape(16.dp))
                                             .background(
-                                                Brush.horizontalGradient(
+                                                Brush.verticalGradient(
                                                     colors = listOf(
-                                                        accentColor.copy(alpha = 0.32f),
-                                                        Color.White.copy(alpha = 0.20f),
-                                                        accentColor.copy(alpha = 0.26f)
+                                                        Color.White.copy(alpha = 0.12f),
+                                                        accentColor.copy(alpha = 0.08f),
+                                                        Color.White.copy(alpha = 0.03f)
                                                     )
                                                 )
                                             )
                                             .border(
-                                                width = 1.2.dp,
-                                                brush = Brush.horizontalGradient(
+                                                width = 0.75.dp,
+                                                brush = Brush.verticalGradient(
                                                     listOf(
-                                                        Color.White.copy(alpha = 0.55f),
-                                                        accentColor.copy(alpha = 0.75f),
-                                                        Color.White.copy(alpha = 0.40f)
+                                                        Color.White.copy(alpha = 0.38f),
+                                                        Color.White.copy(alpha = 0.06f),
+                                                        accentColor.copy(alpha = 0.14f),
+                                                        Color.White.copy(alpha = 0.16f)
                                                     )
                                                 ),
-                                                shape = RoundedCornerShape(26.dp)
+                                                shape = RoundedCornerShape(16.dp)
                                             )
                                     )
                                 }

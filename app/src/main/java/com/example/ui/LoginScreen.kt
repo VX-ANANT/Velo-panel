@@ -25,6 +25,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
@@ -48,6 +49,15 @@ import androidx.credentials.exceptions.GetCredentialException
 import com.example.data.auth.DeviceAccountBindingManager
 import com.example.data.auth.BoundAccount
 import com.example.data.repository.TournamentRepositoryImpl
+import androidx.compose.foundation.Image
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import com.example.R
+import com.example.ui.common.AuthGlassInputBox
+import com.example.ui.common.PrimaryGlassAuthButton
+import com.example.ui.common.GoogleGlassAuthButton
+import com.example.ui.common.LoopingBackgroundVideo
+import com.example.ui.theme.VelorixFontFamily
 import com.example.ui.common.ThemeToggleSwitch
 import com.example.ui.theme.rememberAnimatedThemeColors
 import com.example.ui.theme.LocalIsDarkTheme
@@ -435,12 +445,343 @@ fun LoginScreen(
         )
     }
 
-    // Root Container with sleek dark minimalist background
+    fun performLogin() {
+        val cleanEmail = SecuritySanitizer.sanitizeEmail(email)
+        val cleanPassword = SecuritySanitizer.sanitizeInput(password, maxLength = 64)
+
+        if (!SecuritySanitizer.isSqlInjectionSafe(email) || !SecuritySanitizer.isSqlInjectionSafe(password)) {
+            errorMessage = "Security Notice: Invalid syntax detected in input."
+            return
+        }
+
+        if (cleanEmail.isBlank() || !cleanEmail.contains("@")) {
+            errorMessage = "Please enter a valid email address."
+            return
+        }
+
+        if (cleanPassword.length < 6) {
+            errorMessage = "Password must be at least 6 characters."
+            return
+        }
+
+        val canAttempt = UserRateLimiter.canExecute(UserRateLimiter.ActionType.AUTH_LOGIN_ATTEMPT, cleanEmail)
+        if (!canAttempt.isAllowed) {
+            errorMessage = canAttempt.reasonMessage
+            return
+        }
+
+        coroutineScope.launch {
+            isLoading = true
+            errorMessage = null
+            try {
+                var firebaseUser = withTimeoutOrNull(6000L) {
+                    try {
+                        auth.signInWithEmailAndPassword(cleanEmail, cleanPassword).await().user
+                    } catch (signEx: Exception) {
+                        val msg = signEx.message ?: ""
+                        if (msg.contains("no user record", ignoreCase = true) ||
+                            msg.contains("user-not-found", ignoreCase = true)) {
+                            auth.createUserWithEmailAndPassword(cleanEmail, cleanPassword).await().user
+                        } else {
+                            throw signEx
+                        }
+                    }
+                }
+
+                if (firebaseUser != null) {
+                    val uid = firebaseUser.uid
+                    val displayName = firebaseUser.displayName ?: cleanEmail.substringBefore("@")
+                    val verification = tournamentRepository.verifyAndRegisterAdmin(uid, cleanEmail, displayName)
+                    if (verification.isAuthorized) {
+                        UserRateLimiter.recordSuccess(UserRateLimiter.ActionType.AUTH_LOGIN_ATTEMPT, cleanEmail)
+                        tournamentRepository.loadUserData()
+                        bindingManager.bindAccount(cleanEmail, role = verification.role, autoLogin = isRememberDeviceChecked, uid = uid)
+                        isLoading = false
+                        onLoginSuccess(cleanEmail)
+                        return@launch
+                    } else {
+                        auth.signOut()
+                        errorMessage = verification.errorMessage ?: "Access Denied: The account ($cleanEmail) does not have administrator privileges."
+                    }
+                } else {
+                    errorMessage = "Authentication timed out. Please verify your connection."
+                }
+            } catch (e: Exception) {
+                val msg = e.message ?: "Login failed"
+                val rateResult = UserRateLimiter.recordFailure(UserRateLimiter.ActionType.AUTH_LOGIN_ATTEMPT, cleanEmail)
+                errorMessage = if (!rateResult.isAllowed) {
+                    rateResult.reasonMessage
+                } else if (msg.contains("wrong-password", ignoreCase = true)) {
+                    "Incorrect password for this email. Tap 'Forgot Password?' or use Instant Admin."
+                } else if (msg.contains("invalid-credential", ignoreCase = true)) {
+                    "Invalid credentials. Please verify your password or register."
+                } else {
+                    "Login error: $msg"
+                }
+            } finally {
+                isLoading = false
+            }
+        }
+    }
+
+    fun performRegister() {
+        val cleanEmail = SecuritySanitizer.sanitizeEmail(email)
+        val cleanPassword = SecuritySanitizer.sanitizeInput(password, maxLength = 64)
+        val cleanConfirmPassword = SecuritySanitizer.sanitizeInput(confirmPassword, maxLength = 64)
+        val cleanUsername = SecuritySanitizer.sanitizeInput(username.trim().ifBlank { cleanEmail.substringBefore("@") }, maxLength = 40)
+
+        if (cleanEmail.isBlank() || !cleanEmail.contains("@")) {
+            errorMessage = "Please enter a valid email address."
+            return
+        }
+        if (cleanPassword.length < 6) {
+            errorMessage = "Password must be at least 6 characters."
+            return
+        }
+        if (cleanPassword != cleanConfirmPassword) {
+            errorMessage = "Passwords do not match."
+            return
+        }
+
+        val rateCheck = UserRateLimiter.checkAndRecord(UserRateLimiter.ActionType.AUTH_REGISTER_ATTEMPT, cleanEmail)
+        if (!rateCheck.isAllowed) {
+            errorMessage = rateCheck.reasonMessage
+            return
+        }
+
+        coroutineScope.launch {
+            isLoading = true
+            errorMessage = null
+            try {
+                var firebaseUser = withTimeoutOrNull(6000L) {
+                    try {
+                        auth.createUserWithEmailAndPassword(cleanEmail, cleanPassword).await().user
+                    } catch (createEx: Exception) {
+                        if (createEx.message?.contains("email-already-in-use", ignoreCase = true) == true ||
+                            createEx.message?.contains("already in use", ignoreCase = true) == true) {
+                            auth.signInWithEmailAndPassword(cleanEmail, cleanPassword).await().user
+                        } else {
+                            throw createEx
+                        }
+                    }
+                }
+
+                if (firebaseUser != null) {
+                    val uid = firebaseUser.uid
+                    try {
+                        firebaseUser.updateProfile(userProfileChangeRequest { displayName = cleanUsername }).await()
+                    } catch (_: Exception) {}
+
+                    val cleanDob = dateOfBirth.trim()
+                    val calculatedUserAge = if (cleanDob.isNotBlank()) com.example.data.validation.TournamentBackendValidator.calculateAgeFromDob(cleanDob) else 20
+                    val isUserMinor = (calculatedUserAge in 1..17)
+
+                    val verification = tournamentRepository.verifyAndRegisterAdmin(
+                        uid = uid,
+                        email = cleanEmail,
+                        displayName = cleanUsername,
+                        dateOfBirth = cleanDob,
+                        age = calculatedUserAge,
+                        isUnder18 = isUserMinor
+                    )
+
+                    if (cleanDob.isNotBlank()) {
+                        sharedPrefs.edit()
+                            .putString("user_dob_${cleanEmail}", cleanDob)
+                            .putInt("user_age_${cleanEmail}", calculatedUserAge)
+                            .apply()
+                    }
+
+                    if (verification.isAuthorized) {
+                        bindingManager.bindAccount(cleanEmail, role = verification.role, autoLogin = isRememberDeviceChecked, uid = uid)
+                        isLoading = false
+                        onLoginSuccess(cleanEmail)
+                        return@launch
+                    } else {
+                        auth.signOut()
+                        errorMessage = verification.errorMessage ?: "Access Denied: ($cleanEmail) does not have administrator privileges."
+                    }
+                } else {
+                    errorMessage = "Registration timed out. Please verify your connection."
+                }
+            } catch (e: Exception) {
+                errorMessage = e.message ?: "Registration failed."
+            } finally {
+                isLoading = false
+            }
+        }
+    }
+
+    fun performPhoneAction() {
+        val cleanPhone = phoneNumber.trim()
+        if (cleanPhone.isBlank() || cleanPhone.length < 8) {
+            errorMessage = "Please enter a valid phone number with country code (e.g. +919876543210)."
+            return
+        }
+
+        val activity = context.findActivity()
+        if (activity == null) {
+            errorMessage = "Unable to start phone verification: Activity context unavailable."
+            return
+        }
+
+        if (!isOtpSent) {
+            val rateResult = UserRateLimiter.checkAndRecord(UserRateLimiter.ActionType.PHONE_OTP_REQUEST, cleanPhone)
+            if (!rateResult.isAllowed) {
+                errorMessage = rateResult.reasonMessage
+                return
+            }
+            isLoading = true
+            errorMessage = null
+            infoMessage = "Requesting SMS verification code..."
+
+            val callbacks = object : PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
+                override fun onVerificationCompleted(credential: PhoneAuthCredential) {
+                    coroutineScope.launch {
+                        try {
+                            val authResult = auth.signInWithCredential(credential).await()
+                            val firebaseUser = authResult.user
+                            if (firebaseUser != null) {
+                                val uid = firebaseUser.uid
+                                val phone = firebaseUser.phoneNumber ?: cleanPhone
+                                val displayName = firebaseUser.displayName ?: phone
+                                val verification = tournamentRepository.verifyAndRegisterAdmin(uid, phone, displayName)
+                                bindingManager.bindAccount(phone, role = verification.role, autoLogin = isRememberDeviceChecked, uid = uid)
+                                infoMessage = "Phone verified instantly!"
+                                onLoginSuccess(phone)
+                            }
+                        } catch (e: Exception) {
+                            errorMessage = e.message ?: "Instant verification failed"
+                        } finally {
+                            isLoading = false
+                        }
+                    }
+                }
+
+                override fun onVerificationFailed(e: FirebaseException) {
+                    isLoading = false
+                    errorMessage = e.message ?: "Phone verification failed"
+                }
+
+                override fun onCodeSent(vId: String, token: PhoneAuthProvider.ForceResendingToken) {
+                    isLoading = false
+                    verificationId = vId
+                    resendToken = token
+                    isOtpSent = true
+                    infoMessage = "6-digit SMS code sent to $cleanPhone. Enter it below."
+                }
+            }
+
+            val builder = PhoneAuthOptions.newBuilder(auth)
+                .setPhoneNumber(cleanPhone)
+                .setTimeout(60L, TimeUnit.SECONDS)
+                .setActivity(activity)
+                .setCallbacks(callbacks)
+            resendToken?.let { builder.setForceResendingToken(it) }
+            PhoneAuthProvider.verifyPhoneNumber(builder.build())
+        } else {
+            val cleanOtp = otpCode.trim()
+            if (cleanOtp.length != 6) {
+                errorMessage = "Please enter the 6-digit SMS verification code."
+                return
+            }
+            val vId = verificationId
+            if (vId == null) {
+                errorMessage = "Verification session expired. Please tap 'Change Number' to retry."
+                isOtpSent = false
+                return
+            }
+
+            coroutineScope.launch {
+                isLoading = true
+                errorMessage = null
+                try {
+                    val credential = PhoneAuthProvider.getCredential(vId, cleanOtp)
+                    val authResult = auth.signInWithCredential(credential).await()
+                    val firebaseUser = authResult.user
+                    if (firebaseUser != null) {
+                        val uid = firebaseUser.uid
+                        val phone = firebaseUser.phoneNumber ?: cleanPhone
+                        val displayName = firebaseUser.displayName ?: phone
+                        val verification = tournamentRepository.verifyAndRegisterAdmin(uid, phone, displayName)
+                        bindingManager.bindAccount(phone, role = verification.role, autoLogin = isRememberDeviceChecked, uid = uid)
+                        infoMessage = "Signed in successfully!"
+                        onLoginSuccess(phone)
+                    }
+                } catch (e: Exception) {
+                    errorMessage = e.message ?: "Invalid verification code"
+                } finally {
+                    isLoading = false
+                }
+            }
+        }
+    }
+
+    fun performMagicLinkAction() {
+        val cleanEmail = SecuritySanitizer.sanitizeEmail(email)
+        if (cleanEmail.isBlank() || !cleanEmail.contains("@")) {
+            errorMessage = "Please enter a valid email address."
+            return
+        }
+        val rateResult = UserRateLimiter.checkAndRecord(UserRateLimiter.ActionType.MAGIC_LINK_REQUEST, cleanEmail)
+        if (!rateResult.isAllowed) {
+            errorMessage = rateResult.reasonMessage
+            return
+        }
+        coroutineScope.launch {
+            isLoading = true
+            errorMessage = null
+            try {
+                sharedPrefs.edit().putString("emailForSignIn", cleanEmail).apply()
+                val actionCodeSettings = actionCodeSettings {
+                    url = "https://velorix-tournaments.firebaseapp.com/__/auth/action"
+                    handleCodeInApp = true
+                    setAndroidPackageName(context.packageName, true, "1")
+                }
+                auth.sendSignInLinkToEmail(cleanEmail, actionCodeSettings).await()
+                infoMessage = "Magic login link sent to $cleanEmail."
+            } catch (e: Exception) {
+                errorMessage = e.message ?: "Failed to send email link"
+            } finally {
+                isLoading = false
+            }
+        }
+    }
+
+    // Root Container with Pure AMOLED Black and Looping Video Background
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF090B10))
+            .background(Color.Black)
     ) {
+        // 1. Looping Background Video positioned at top (not over-stretched across whole screen)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(320.dp)
+                .align(Alignment.TopCenter)
+        ) {
+            LoopingBackgroundVideo(
+                videoResId = R.raw.auth_bg_video,
+                modifier = Modifier.fillMaxSize()
+            )
+
+            // 2. Smooth Gradient Uncovering from Video into Pure AMOLED Black (#000000)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                Color(0x33000000),
+                                Color(0x88000000),
+                                Color.Black
+                            )
+                        )
+                    )
+            )
+        }
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -451,709 +792,286 @@ fun LoginScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            // Sleek Minimalist Velorix Emblem
-            Surface(
-                modifier = Modifier.size(52.dp),
-                shape = RoundedCornerShape(14.dp),
-                color = Color(0xFF121624),
-                border = BorderStroke(1.dp, Color(0xFF232C3D))
-            ) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Shield,
-                        contentDescription = "Velorix Emblem",
-                        tint = Color(0xFF818CF8),
-                        modifier = Modifier.size(26.dp)
-                    )
-                }
-            }
+            Spacer(modifier = Modifier.height(16.dp))
 
-            Spacer(modifier = Modifier.height(12.dp))
+            // TOP LOGO: Spiked Chrome Velorix Tournaments Emblem from Reference Design
+            Image(
+                painter = painterResource(id = R.drawable.velorix_auth_logo),
+                contentDescription = "Velorix Tournaments Logo",
+                modifier = Modifier
+                    .width(220.dp)
+                    .height(130.dp),
+                contentScale = ContentScale.Fit
+            )
 
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Subtitle matching user screenshot
             Text(
-                text = "VELORIX",
-                color = Color.White,
-                fontSize = 24.sp,
+                text = if (authMode == AuthMode.REGISTER) "Register with to continue" else "Sign in with to continue",
+                color = Color.White.copy(alpha = 0.95f),
+                fontSize = 19.sp,
+                fontFamily = VelorixFontFamily,
                 fontWeight = FontWeight.Bold,
-                letterSpacing = 3.sp
+                textAlign = TextAlign.Center
             )
 
-            Text(
-                text = when (authMode) {
-                    AuthMode.REGISTER -> "Administrator Registration"
-                    AuthMode.MAGIC_LINK -> "Passwordless Sign-In"
-                    AuthMode.PHONE -> "Phone & SMS Authentication"
-                    AuthMode.LOGIN -> "Tournament Oversight Console"
-                },
-                color = Color(0xFF64748B),
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Normal,
-                modifier = Modifier.padding(top = 2.dp, bottom = 20.dp)
-            )
+            Spacer(modifier = Modifier.height(26.dp))
 
-            // Main Auth Form Card - Clean, restrained, and elegant
-            Surface(
+            // Futuristic Liquid Glass Auth Form - 100% Transparent / See-Through over Looping Video
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .widthIn(max = 440.dp),
-                shape = RoundedCornerShape(18.dp),
-                color = Color(0xFF111420),
-                border = BorderStroke(1.dp, Color(0xFF1E2638))
+                    .widthIn(max = 430.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Column(
+                // Sleek Frosted Glass Tab Switcher with Optical Highlights
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(20.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                        .height(46.dp)
+                        .clip(RoundedCornerShape(23.dp))
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    Color.White.copy(alpha = 0.08f),
+                                    Color.White.copy(alpha = 0.02f)
+                                )
+                            )
+                        )
+                        .border(
+                            BorderStroke(
+                                1.dp,
+                                Brush.verticalGradient(
+                                    listOf(
+                                        Color.White.copy(alpha = 0.25f),
+                                        Color.White.copy(alpha = 0.06f)
+                                    )
+                                )
+                            ),
+                            shape = RoundedCornerShape(23.dp)
+                        )
+                        .drawBehind {
+                            drawLiquidGlassOpticReflections(
+                                cornerRadius = 23.dp.toPx(),
+                                intensity = 0.6f
+                            )
+                        }
+                        .padding(3.dp)
                 ) {
-                    // Minimalist Tab Switcher
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(42.dp),
-                        shape = RoundedCornerShape(10.dp),
-                        color = Color(0xFF090B12),
-                        border = BorderStroke(1.dp, Color(0xFF1C2333))
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(3.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            AuthTabItem(
-                                title = "SIGN IN",
-                                isSelected = authMode == AuthMode.LOGIN,
-                                modifier = Modifier.weight(1f),
-                                onClick = {
-                                    authMode = AuthMode.LOGIN
-                                    errorMessage = null
-                                    infoMessage = null
-                                }
-                            )
-
-                            AuthTabItem(
-                                title = "REGISTER",
-                                isSelected = authMode == AuthMode.REGISTER,
-                                modifier = Modifier.weight(1f),
-                                onClick = {
-                                    authMode = AuthMode.REGISTER
-                                    errorMessage = null
-                                    infoMessage = null
-                                }
-                            )
-
-                            AuthTabItem(
-                                title = "PHONE",
-                                isSelected = authMode == AuthMode.PHONE,
-                                modifier = Modifier.weight(1f),
-                                onClick = {
-                                    authMode = AuthMode.PHONE
-                                    errorMessage = null
-                                    infoMessage = null
-                                }
-                            )
-
-                            AuthTabItem(
-                                title = "LINK",
-                                isSelected = authMode == AuthMode.MAGIC_LINK,
-                                modifier = Modifier.weight(1f),
-                                onClick = {
-                                    authMode = AuthMode.MAGIC_LINK
-                                    errorMessage = null
-                                    infoMessage = null
-                                }
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    // BOUND DEVICE RESUME (Compact and elegant)
-                    val currentBound = boundAccount
-                    if (currentBound != null) {
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = Color(0xFF0F172A),
-                            border = BorderStroke(1.dp, Color(0xFF1E293B)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Icon(
-                                        Icons.Outlined.AccountCircle,
-                                        contentDescription = null,
-                                        tint = Color(0xFF38BDF8),
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Column {
-                                        Text(
-                                            text = currentBound.email,
-                                            color = Color.White,
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Medium,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                        Text(
-                                            text = "Remembered on this device",
-                                            color = Color(0xFF64748B),
-                                            fontSize = 10.sp
-                                        )
-                                    }
-                                }
-
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Button(
-                                        onClick = {
-                                            coroutineScope.launch {
-                                                isLoading = true
-                                                try {
-                                                    bindingManager.bindAccount(currentBound.email, role = currentBound.role, autoLogin = isRememberDeviceChecked, uid = currentBound.uid)
-                                                    onLoginSuccess(currentBound.email)
-                                                } finally {
-                                                    isLoading = false
-                                                }
-                                            }
-                                        },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF38BDF8)),
-                                        shape = RoundedCornerShape(6.dp),
-                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                        modifier = Modifier.height(30.dp)
-                                    ) {
-                                        Text("Resume", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                    }
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    IconButton(
-                                        onClick = {
-                                            bindingManager.unbindAccount()
-                                            boundAccount = null
-                                        },
-                                        modifier = Modifier.size(26.dp)
-                                    ) {
-                                        Icon(Icons.Default.Clear, contentDescription = "Forget", tint = Color(0xFF64748B), modifier = Modifier.size(14.dp))
-                                    }
-                                }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(12.dp))
-                    }
-
-                    // OFFICIAL GOOGLE SIGN-IN BUTTON
-                    GoogleSignInButton(
-                        onClick = { startGoogleSignIn() },
-                        enabled = !isLoading,
-                        text = "Continue with Google",
-                        subtitle = null
-                    )
-
-                    // Helper Row: Minimalist guide trigger
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 4.dp, bottom = 6.dp),
-                        horizontalArrangement = Arrangement.End,
+                        modifier = Modifier.fillMaxSize(),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.clickable { showGoogleSetupDialog = true }
-                        ) {
-                            Icon(Icons.Outlined.Info, contentDescription = null, tint = Color(0xFF64748B), modifier = Modifier.size(13.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "Setup Guide",
-                                color = Color(0xFF64748B),
-                                fontSize = 11.sp
-                            )
-                        }
-                    }
-
-                    // INSTANT MASTER ADMIN ACCESS CHIP / BUTTON
-                    Surface(
-                        onClick = {
-                            coroutineScope.launch {
-                                isLoading = true
+                        AuthGlassTabPill(
+                            title = "SIGN IN",
+                            isSelected = authMode == AuthMode.LOGIN,
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                authMode = AuthMode.LOGIN
                                 errorMessage = null
-                                email = "anantisback47@gmail.com"
-                                val authOk = tournamentRepository.ensureAuthenticatedSession("anantisback47@gmail.com")
-                                val currentUid = auth.currentUser?.uid ?: ""
-                                bindingManager.bindAccount("anantisback47@gmail.com", role = "super_admin", autoLogin = true, uid = currentUid)
-                                infoMessage = "Master Admin access verified."
-                                isLoading = false
-                                onLoginSuccess("anantisback47@gmail.com")
+                                infoMessage = null
                             }
-                        },
-                        shape = RoundedCornerShape(10.dp),
-                        color = Color(0xFF161B28),
-                        border = BorderStroke(1.dp, Color(0xFF263248)),
-                        modifier = Modifier.fillMaxWidth().height(40.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center,
-                            modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp)
-                        ) {
-                            Icon(Icons.Default.Bolt, contentDescription = null, tint = Color(0xFF818CF8), modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Instant Admin (anantisback47@gmail.com)",
-                                color = Color(0xFFCBD5E1),
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    // Minimalist Divider
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        HorizontalDivider(
-                            modifier = Modifier.weight(1f),
-                            color = Color(0xFF1C2433),
-                            thickness = 1.dp
                         )
-                        Text(
-                            text = "  or  ",
-                            color = Color(0xFF475569),
-                            fontSize = 11.sp
-                        )
-                        HorizontalDivider(
+
+                        AuthGlassTabPill(
+                            title = "REGISTER",
+                            isSelected = authMode == AuthMode.REGISTER,
                             modifier = Modifier.weight(1f),
-                            color = Color(0xFF1C2433),
-                            thickness = 1.dp
+                            onClick = {
+                                authMode = AuthMode.REGISTER
+                                errorMessage = null
+                                infoMessage = null
+                            }
+                        )
+
+                        AuthGlassTabPill(
+                            title = "PHONE",
+                            isSelected = authMode == AuthMode.PHONE,
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                authMode = AuthMode.PHONE
+                                errorMessage = null
+                                infoMessage = null
+                            }
+                        )
+
+                        AuthGlassTabPill(
+                            title = "LINK",
+                            isSelected = authMode == AuthMode.MAGIC_LINK,
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                authMode = AuthMode.MAGIC_LINK
+                                errorMessage = null
+                                infoMessage = null
+                            }
                         )
                     }
+                }
 
-                    Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(18.dp))
 
-                    // Form Fields
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                // Bound device resume chip (liquid glass)
+                val currentBound = boundAccount
+                if (currentBound != null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color.White.copy(alpha = 0.06f))
+                            .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.18f)), RoundedCornerShape(16.dp))
+                            .drawBehind {
+                                drawLiquidGlassOpticReflections(cornerRadius = 16.dp.toPx(), intensity = 0.5f)
+                            }
+                            .padding(horizontal = 14.dp, vertical = 10.dp)
                     ) {
-                        if (authMode == AuthMode.REGISTER) {
-                            OutlinedTextField(
-                                value = username,
-                                onValueChange = { username = it },
-                                label = { Text("Display Name", color = Color(0xFF64748B), fontSize = 12.sp) },
-                                leadingIcon = { Icon(Icons.Outlined.Person, contentDescription = null, tint = Color(0xFF64748B), modifier = Modifier.size(18.dp)) },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(10.dp),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = Color(0xFF6366F1),
-                                    unfocusedBorderColor = Color(0xFF222B3D),
-                                    focusedTextColor = Color.White,
-                                    unfocusedTextColor = Color.White,
-                                    focusedContainerColor = Color(0xFF090B12),
-                                    unfocusedContainerColor = Color(0xFF090B12)
-                                )
-                            )
-
-                            OutlinedTextField(
-                                value = gameId,
-                                onValueChange = { gameId = it },
-                                label = { Text("Admin ID (Optional)", color = Color(0xFF64748B), fontSize = 12.sp) },
-                                leadingIcon = { Icon(Icons.Outlined.Badge, contentDescription = null, tint = Color(0xFF64748B), modifier = Modifier.size(18.dp)) },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(10.dp),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = Color(0xFF6366F1),
-                                    unfocusedBorderColor = Color(0xFF222B3D),
-                                    focusedTextColor = Color.White,
-                                    unfocusedTextColor = Color.White,
-                                    focusedContainerColor = Color(0xFF090B12),
-                                    unfocusedContainerColor = Color(0xFF090B12)
-                                )
-                            )
-
-                            // Date of Birth input for COPPA & Legal Tournament Compliance
-                            OutlinedTextField(
-                                value = dateOfBirth,
-                                onValueChange = { input ->
-                                    if (input.length <= 10) {
-                                        dateOfBirth = input
-                                    }
-                                },
-                                label = { Text("Date of Birth (DD/MM/YYYY)", color = Color(0xFF64748B), fontSize = 12.sp) },
-                                placeholder = { Text("DD/MM/YYYY (e.g. 15/08/2005)", color = Color(0xFF475569), fontSize = 12.sp) },
-                                leadingIcon = { Icon(Icons.Outlined.Cake, contentDescription = null, tint = Color(0xFF64748B), modifier = Modifier.size(18.dp)) },
-                                trailingIcon = {
-                                    if (calculatedAge > 0) {
-                                        Surface(
-                                            shape = RoundedCornerShape(6.dp),
-                                            color = if (calculatedAge >= 18) Color(0xFF10B981).copy(alpha = 0.2f) else Color(0xFFF59E0B).copy(alpha = 0.2f),
-                                            border = BorderStroke(1.dp, if (calculatedAge >= 18) Color(0xFF10B981) else Color(0xFFF59E0B)),
-                                            modifier = Modifier.padding(end = 8.dp)
-                                        ) {
-                                            Text(
-                                                text = "${calculatedAge}y • ${if (calculatedAge >= 18) "18+" else "Minor"}",
-                                                color = if (calculatedAge >= 18) Color(0xFF34D399) else Color(0xFFFBBF24),
-                                                fontSize = 10.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                            )
-                                        }
-                                    }
-                                },
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next),
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(10.dp),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = Color(0xFF6366F1),
-                                    unfocusedBorderColor = Color(0xFF222B3D),
-                                    focusedTextColor = Color.White,
-                                    unfocusedTextColor = Color.White,
-                                    focusedContainerColor = Color(0xFF090B12),
-                                    unfocusedContainerColor = Color(0xFF090B12)
-                                )
-                            )
-
-                            // Explanatory age policy compliance notice
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = if (calculatedAge in 1..17) Color(0xFF2A1B0E) else Color(0xFF0D121E),
-                                border = BorderStroke(1.dp, if (calculatedAge in 1..17) Color(0xFFB45309) else Color(0xFF1E293B)),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        imageVector = if (calculatedAge in 1..17) Icons.Default.Info else Icons.Outlined.Shield,
-                                        contentDescription = null,
-                                        tint = if (calculatedAge in 1..17) Color(0xFFF59E0B) else Color(0xFF94A3B8),
-                                        modifier = Modifier.size(15.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = if (calculatedAge in 1..17)
-                                            "Age ${calculatedAge}: Under-18 players can join Free Training & Scrim matches. Cash tournaments require 18+."
-                                        else if (calculatedAge >= 18)
-                                            "Age ${calculatedAge} (Verified): Full access granted to both Training and Real-Money Tournaments."
-                                        else
-                                            "Age Policy: Players under 18 can enter training matches; money tournaments require 18+.",
-                                        color = if (calculatedAge in 1..17) Color(0xFFFBBF24) else Color(0xFF94A3B8),
-                                        fontSize = 10.5.sp,
-                                        lineHeight = 14.sp
-                                    )
-                                }
-                            }
-                        }
-
-                        if (authMode == AuthMode.PHONE) {
-                            OutlinedTextField(
-                                value = phoneNumber,
-                                onValueChange = { phoneNumber = it },
-                                label = { Text("Phone Number (+Country Code)", color = Color(0xFF64748B), fontSize = 12.sp) },
-                                placeholder = { Text("+91 9876543210", color = Color(0xFF475569), fontSize = 12.sp) },
-                                leadingIcon = { Icon(Icons.Outlined.Phone, contentDescription = null, tint = Color(0xFF64748B), modifier = Modifier.size(18.dp)) },
-                                trailingIcon = {
-                                    if (phoneNumber.isNotEmpty() && !isOtpSent) {
-                                        IconButton(onClick = { phoneNumber = "" }) {
-                                            Icon(Icons.Default.Clear, contentDescription = "Clear", tint = Color(0xFF64748B), modifier = Modifier.size(16.dp))
-                                        }
-                                    }
-                                },
-                                singleLine = true,
-                                enabled = !isOtpSent,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone, imeAction = if (isOtpSent) ImeAction.Next else ImeAction.Done),
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(10.dp),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = Color(0xFF6366F1),
-                                    unfocusedBorderColor = Color(0xFF222B3D),
-                                    focusedTextColor = Color.White,
-                                    unfocusedTextColor = Color.White,
-                                    focusedContainerColor = Color(0xFF090B12),
-                                    unfocusedContainerColor = Color(0xFF090B12)
-                                )
-                            )
-
-                            if (isOtpSent) {
-                                OutlinedTextField(
-                                    value = otpCode,
-                                    onValueChange = { if (it.length <= 6) otpCode = it.filter { char -> char.isDigit() } },
-                                    label = { Text("6-Digit SMS Verification Code", color = Color(0xFF64748B), fontSize = 12.sp) },
-                                    placeholder = { Text("123456", color = Color(0xFF475569), fontSize = 12.sp) },
-                                    leadingIcon = { Icon(Icons.Outlined.Pin, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(18.dp)) },
-                                    trailingIcon = {
-                                        if (otpCode.isNotEmpty()) {
-                                            IconButton(onClick = { otpCode = "" }) {
-                                                Icon(Icons.Default.Clear, contentDescription = "Clear", tint = Color(0xFF64748B), modifier = Modifier.size(16.dp))
-                                            }
-                                        }
-                                    },
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword, imeAction = ImeAction.Done),
-                                    keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
-                                    modifier = Modifier.fillMaxWidth(),
-                                    shape = RoundedCornerShape(10.dp),
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedBorderColor = Color(0xFF38BDF8),
-                                        unfocusedBorderColor = Color(0xFF222B3D),
-                                        focusedTextColor = Color.White,
-                                        unfocusedTextColor = Color.White,
-                                        focusedContainerColor = Color(0xFF090B12),
-                                        unfocusedContainerColor = Color(0xFF090B12)
-                                    )
-                                )
-
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = "Change Number",
-                                        color = Color(0xFF94A3B8),
-                                        fontSize = 11.sp,
-                                        modifier = Modifier.clickable {
-                                            isOtpSent = false
-                                            otpCode = ""
-                                        }
-                                    )
-                                    if (otpCooldown > 0L) {
-                                        Text(
-                                            text = "Resend Code in ${otpCooldown}s",
-                                            color = Color(0xFF64748B),
-                                            fontWeight = FontWeight.Medium,
-                                            fontSize = 11.sp
-                                        )
-                                    } else {
-                                        Text(
-                                            text = "Resend Code",
-                                            color = Color(0xFF818CF8),
-                                            fontWeight = FontWeight.Medium,
-                                            fontSize = 11.sp,
-                                            modifier = Modifier.clickable {
-                                                val rateCheck = UserRateLimiter.checkAndRecord(UserRateLimiter.ActionType.PHONE_OTP_REQUEST, cleanPhoneKey)
-                                                if (!rateCheck.isAllowed) {
-                                                    errorMessage = rateCheck.reasonMessage
-                                                } else {
-                                                    isOtpSent = false
-                                                }
-                                            }
-                                        )
-                                    }
-                                }
-                            } else {
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = Color(0xFF0D121E),
-                                    border = BorderStroke(1.dp, Color(0xFF1E293B)),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(10.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(Icons.Outlined.Sms, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text(
-                                            text = "Firebase will send a 6-digit SMS verification code to your phone.",
-                                            color = Color(0xFF94A3B8),
-                                            fontSize = 11.sp,
-                                            lineHeight = 15.sp
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        if (authMode != AuthMode.PHONE) {
-                            // Email Field
-                            OutlinedTextField(
-                                value = email,
-                                onValueChange = { email = it },
-                                label = { Text("Email Address", color = Color(0xFF64748B), fontSize = 12.sp) },
-                                leadingIcon = { Icon(Icons.Outlined.Email, contentDescription = null, tint = Color(0xFF64748B), modifier = Modifier.size(18.dp)) },
-                                trailingIcon = {
-                                    if (email.isNotEmpty()) {
-                                        IconButton(onClick = { email = "" }) {
-                                            Icon(Icons.Default.Clear, contentDescription = "Clear", tint = Color(0xFF64748B), modifier = Modifier.size(16.dp))
-                                        }
-                                    }
-                                },
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Next),
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(10.dp),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = Color(0xFF6366F1),
-                                    unfocusedBorderColor = Color(0xFF222B3D),
-                                    focusedTextColor = Color.White,
-                                    unfocusedTextColor = Color.White,
-                                    focusedContainerColor = Color(0xFF090B12),
-                                    unfocusedContainerColor = Color(0xFF090B12)
-                                )
-                            )
-
-                            // Password Field
-                            if (authMode != AuthMode.MAGIC_LINK) {
-                                OutlinedTextField(
-                                    value = password,
-                                    onValueChange = { password = it },
-                                    label = { Text("Password", color = Color(0xFF64748B), fontSize = 12.sp) },
-                                    leadingIcon = { Icon(Icons.Outlined.Lock, contentDescription = null, tint = Color(0xFF64748B), modifier = Modifier.size(18.dp)) },
-                                    trailingIcon = {
-                                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                                            Icon(
-                                                imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                                contentDescription = "Toggle password",
-                                                tint = Color(0xFF64748B),
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                        }
-                                    },
-                                    visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(
-                                        keyboardType = KeyboardType.Password,
-                                        imeAction = if (authMode == AuthMode.REGISTER) ImeAction.Next else ImeAction.Done
-                                    ),
-                                    keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
-                                    modifier = Modifier.fillMaxWidth(),
-                                    shape = RoundedCornerShape(10.dp),
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedBorderColor = Color(0xFF6366F1),
-                                        unfocusedBorderColor = Color(0xFF222B3D),
-                                        focusedTextColor = Color.White,
-                                        unfocusedTextColor = Color.White,
-                                        focusedContainerColor = Color(0xFF090B12),
-                                        unfocusedContainerColor = Color(0xFF090B12)
-                                    )
-                                )
-                            }
-
-                            // Confirm Password for REGISTER
-                            if (authMode == AuthMode.REGISTER) {
-                                OutlinedTextField(
-                                    value = confirmPassword,
-                                    onValueChange = { confirmPassword = it },
-                                    label = { Text("Confirm Password", color = Color(0xFF64748B), fontSize = 12.sp) },
-                                    leadingIcon = { Icon(Icons.Outlined.Lock, contentDescription = null, tint = Color(0xFF64748B), modifier = Modifier.size(18.dp)) },
-                                    trailingIcon = {
-                                        IconButton(onClick = { confirmPasswordVisible = !confirmPasswordVisible }) {
-                                            Icon(
-                                                imageVector = if (confirmPasswordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                                contentDescription = "Toggle visibility",
-                                                tint = Color(0xFF64748B),
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                        }
-                                    },
-                                    visualTransformation = if (confirmPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
-                                    keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
-                                    modifier = Modifier.fillMaxWidth(),
-                                    shape = RoundedCornerShape(10.dp),
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedBorderColor = Color(0xFF6366F1),
-                                        unfocusedBorderColor = Color(0xFF222B3D),
-                                        focusedTextColor = Color.White,
-                                        unfocusedTextColor = Color.White,
-                                        focusedContainerColor = Color(0xFF090B12),
-                                        unfocusedContainerColor = Color(0xFF090B12)
-                                    )
-                                )
-                            }
-                        }
-
-                        // Magic Link instructions
-                        if (authMode == AuthMode.MAGIC_LINK) {
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = Color(0xFF0D121E),
-                                border = BorderStroke(1.dp, Color(0xFF1E293B)),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Column(modifier = Modifier.padding(12.dp)) {
-                                    Text(
-                                        "A sign-in link will be sent to your email address. You can also paste an existing sign-in link below.",
-                                        color = Color(0xFF94A3B8),
-                                        fontSize = 11.sp,
-                                        lineHeight = 16.sp
-                                    )
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    OutlinedTextField(
-                                        value = pastedLinkInput,
-                                        onValueChange = { pastedLinkInput = it },
-                                        placeholder = { Text("Paste link https://...", color = Color(0xFF475569), fontSize = 11.sp) },
-                                        singleLine = true,
-                                        modifier = Modifier.fillMaxWidth(),
-                                        shape = RoundedCornerShape(8.dp),
-                                        colors = OutlinedTextFieldDefaults.colors(
-                                            focusedBorderColor = Color(0xFF38BDF8),
-                                            unfocusedBorderColor = Color(0xFF1E293B),
-                                            focusedTextColor = Color.White,
-                                            unfocusedTextColor = Color.White,
-                                            focusedContainerColor = Color(0xFF07090E),
-                                            unfocusedContainerColor = Color(0xFF07090E)
-                                        )
-                                    )
-                                    if (pastedLinkInput.isNotBlank()) {
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                        Button(
-                                            onClick = {
-                                                val cleanEmail = email.trim().ifBlank { sharedPrefs.getString("emailForSignIn", null) ?: "" }
-                                                val cleanLink = pastedLinkInput.trim()
-                                                if (cleanEmail.isBlank() || !cleanEmail.contains("@")) {
-                                                    errorMessage = "Please enter your email above."
-                                                    return@Button
-                                                }
-                                                coroutineScope.launch {
-                                                    isLoading = true
-                                                    errorMessage = null
-                                                    try {
-                                                        val result = auth.signInWithEmailLink(cleanEmail, cleanLink).await()
-                                                        if (result.user != null) {
-                                                            onLoginSuccess(cleanEmail)
-                                                        }
-                                                    } catch (e: Exception) {
-                                                        errorMessage = "Sign-in error: ${e.message}"
-                                                    } finally {
-                                                        isLoading = false
-                                                    }
-                                                }
-                                            },
-                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF38BDF8)),
-                                            shape = RoundedCornerShape(6.dp),
-                                            modifier = Modifier.fillMaxWidth().height(36.dp)
-                                        ) {
-                                            Text("Complete Login With Link", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Minimalist Options Row (Remember device & Forgot password)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(
+                                    Icons.Outlined.AccountCircle,
+                                    contentDescription = null,
+                                    tint = Color(0xFF38BDF8),
+                                    modifier = Modifier.size(22.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = currentBound.email,
+                                        color = Color.White,
+                                        fontSize = 13.sp,
+                                        fontFamily = VelorixFontFamily,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = "Remembered session",
+                                        color = Color.White.copy(alpha = 0.55f),
+                                        fontSize = 11.sp,
+                                        fontFamily = VelorixFontFamily
+                                    )
+                                }
+                            }
+
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Button(
+                                    onClick = {
+                                        coroutineScope.launch {
+                                            isLoading = true
+                                            try {
+                                                bindingManager.bindAccount(currentBound.email, role = currentBound.role, autoLogin = isRememberDeviceChecked, uid = currentBound.uid)
+                                                onLoginSuccess(currentBound.email)
+                                            } finally {
+                                                isLoading = false
+                                            }
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF38BDF8)),
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                    modifier = Modifier.height(32.dp)
+                                ) {
+                                    Text("Resume", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold, fontFamily = VelorixFontFamily)
+                                }
+                                Spacer(modifier = Modifier.width(6.dp))
+                                IconButton(
+                                    onClick = {
+                                        bindingManager.clearAllRecordedAccounts()
+                                        boundAccount = null
+                                        email = ""
+                                        username = ""
+                                    },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(Icons.Default.Clear, contentDescription = "Forget", tint = Color.White.copy(alpha = 0.6f), modifier = Modifier.size(16.dp))
+                                }
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(14.dp))
+                }
+
+                // Error Notice in Liquid Glass Pill
+                val currentErr = errorMessage
+                if (currentErr != null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color(0x33FF5252))
+                            .border(BorderStroke(1.dp, Color(0x66FF5252)), RoundedCornerShape(14.dp))
+                            .padding(12.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.ErrorOutline, contentDescription = null, tint = Color(0xFFFF8A80), modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(text = currentErr, color = Color(0xFFFFCDD2), fontSize = 12.sp, lineHeight = 16.sp, fontFamily = VelorixFontFamily)
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
+
+                // Info Notice in Liquid Glass Pill
+                val currentInfo = infoMessage
+                if (currentInfo != null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color(0x3310B981))
+                            .border(BorderStroke(1.dp, Color(0x6610B981)), RoundedCornerShape(14.dp))
+                            .padding(12.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.CheckCircle, contentDescription = null, tint = Color(0xFF69F0AE), modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(text = currentInfo, color = Color(0xFFB9F6CA), fontSize = 12.sp, fontFamily = VelorixFontFamily)
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
+
+                // FORM CONTENT ACCORDING TO AUTH MODE
+                when (authMode) {
+                    AuthMode.LOGIN -> {
+                        // 1. Email or Phone
+                        AuthGlassInputBox(
+                            value = email,
+                            onValueChange = { email = it; errorMessage = null },
+                            placeholder = "Email or Phone",
+                            leadingIcon = Icons.Outlined.Person,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Next),
+                            isError = errorMessage != null
+                        )
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        // 2. Password with visibility toggle
+                        AuthGlassInputBox(
+                            value = password,
+                            onValueChange = { password = it; errorMessage = null },
+                            placeholder = "Password",
+                            leadingIcon = Icons.Outlined.Lock,
+                            isPassword = true,
+                            passwordVisible = passwordVisible,
+                            onTogglePassword = { passwordVisible = !passwordVisible },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus(); performLogin() }),
+                            isError = errorMessage != null
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Options row (Remember device + Forgot password)
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -1172,475 +1090,358 @@ fun LoginScreen(
                                         bindingManager.setAutoLoginEnabled(it)
                                     },
                                     colors = CheckboxDefaults.colors(
-                                        checkedColor = Color(0xFF6366F1),
-                                        uncheckedColor = Color(0xFF475569),
-                                        checkmarkColor = Color.White
+                                        checkedColor = Color.White,
+                                        uncheckedColor = Color.White.copy(alpha = 0.5f),
+                                        checkmarkColor = Color.Black
                                     ),
-                                    modifier = Modifier.size(20.dp)
+                                    modifier = Modifier.size(18.dp)
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = "Remember device",
-                                    color = Color(0xFF94A3B8),
-                                    fontSize = 11.sp
+                                    text = "Remember me",
+                                    color = Color.White.copy(alpha = 0.75f),
+                                    fontSize = 12.sp,
+                                    fontFamily = VelorixFontFamily
                                 )
                             }
 
-                            if (authMode == AuthMode.LOGIN) {
-                                Text(
-                                    text = "Forgot Password?",
-                                    color = Color(0xFF818CF8),
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    modifier = Modifier.clickable {
-                                        resetEmailInput = email
-                                        showForgotPasswordDialog = true
-                                    }
-                                )
-                            }
-                        }
-                    }
-
-                    // Inline Error Notice
-                    val currentErr = errorMessage
-                    if (currentErr != null) {
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = Color(0xFF2A1215),
-                            border = BorderStroke(1.dp, Color(0xFF7F1D1D)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(10.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(Icons.Outlined.ErrorOutline, contentDescription = null, tint = Color(0xFFFCA5A5), modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = currentErr,
-                                    color = Color(0xFFFCA5A5),
-                                    fontSize = 11.sp,
-                                    lineHeight = 15.sp
-                                )
-                            }
-                        }
-                    }
-
-                    // Inline Info Notice
-                    val currentInfo = infoMessage
-                    if (currentInfo != null) {
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = Color(0xFF0B2518),
-                            border = BorderStroke(1.dp, Color(0xFF065F46)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(10.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(Icons.Outlined.CheckCircle, contentDescription = null, tint = Color(0xFF6EE7B7), modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = currentInfo,
-                                    color = Color(0xFF6EE7B7),
-                                    fontSize = 11.sp
-                                )
-                            }
-                        }
-                    }
-
-                    if (authMode == AuthMode.LOGIN && loginLockout > 0L) {
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = Color(0xFF2E1515),
-                            border = BorderStroke(1.dp, Color(0xFF7F1D1D)),
-                            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(10.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(Icons.Default.LockClock, contentDescription = null, tint = Color(0xFFFCA5A5), modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "Too many failed attempts. Login is locked for ${loginLockout}s to protect your account.",
-                                    color = Color(0xFFFCA5A5),
-                                    fontSize = 11.sp,
-                                    lineHeight = 15.sp
-                                )
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    // PRIMARY ACTION BUTTON
-                    Button(
-                        onClick = {
-                            if (authMode == AuthMode.PHONE) {
-                                val cleanPhone = phoneNumber.trim()
-                                if (cleanPhone.isBlank() || cleanPhone.length < 8) {
-                                    errorMessage = "Please enter a valid phone number with country code (e.g. +919876543210)."
-                                    return@Button
+                            Text(
+                                text = "Forgot Password?",
+                                color = Color.White.copy(alpha = 0.85f),
+                                fontSize = 12.sp,
+                                fontFamily = VelorixFontFamily,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.clickable {
+                                    resetEmailInput = email
+                                    showForgotPasswordDialog = true
                                 }
+                            )
+                        }
 
-                                val activity = context.findActivity()
-                                if (activity == null) {
-                                    errorMessage = "Unable to start phone verification: Activity context unavailable."
-                                    return@Button
+                        Spacer(modifier = Modifier.height(20.dp))
+
+                        // Primary White Sign-In Button (matching screenshot)
+                        PrimaryGlassAuthButton(
+                            text = if (loginLockout > 0L) "LOCKED (${loginLockout}s)" else "SIGN IN",
+                            onClick = { performLogin() },
+                            isLoading = isLoading,
+                            enabled = !isLoading && loginLockout == 0L
+                        )
+
+                        Spacer(modifier = Modifier.height(20.dp))
+
+                        // Divider with line - OR - line
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            HorizontalDivider(
+                                modifier = Modifier.weight(1f),
+                                color = Color.White.copy(alpha = 0.20f),
+                                thickness = 1.dp
+                            )
+                            Text(
+                                text = "  OR  ",
+                                color = Color.White.copy(alpha = 0.50f),
+                                fontSize = 12.sp,
+                                fontFamily = VelorixFontFamily,
+                                fontWeight = FontWeight.Bold
+                            )
+                            HorizontalDivider(
+                                modifier = Modifier.weight(1f),
+                                color = Color.White.copy(alpha = 0.20f),
+                                thickness = 1.dp
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(18.dp))
+
+                        // Google Sign In Glass Button
+                        GoogleGlassAuthButton(
+                            onClick = { startGoogleSignIn() },
+                            isLoading = isLoading
+                        )
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        // Instant Admin Access Pill (Translucent Glass with Glow)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(46.dp)
+                                .clip(RoundedCornerShape(22.dp))
+                                .background(Color.White.copy(alpha = 0.05f))
+                                .border(
+                                    BorderStroke(1.dp, Color(0xFF818CF8).copy(alpha = 0.35f)),
+                                    shape = RoundedCornerShape(22.dp)
+                                )
+                                .drawBehind {
+                                    drawLiquidGlassOpticReflections(cornerRadius = 22.dp.toPx(), intensity = 0.5f)
                                 }
-
-                                if (!isOtpSent) {
-                                    val rateResult = UserRateLimiter.checkAndRecord(UserRateLimiter.ActionType.PHONE_OTP_REQUEST, cleanPhone)
-                                    if (!rateResult.isAllowed) {
-                                        errorMessage = rateResult.reasonMessage
-                                        return@Button
-                                    }
-                                    isLoading = true
-                                    errorMessage = null
-                                    infoMessage = "Requesting SMS verification code..."
-
-                                    val callbacks = object : PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
-                                        override fun onVerificationCompleted(credential: PhoneAuthCredential) {
-                                            coroutineScope.launch {
-                                                try {
-                                                    val authResult = auth.signInWithCredential(credential).await()
-                                                    val firebaseUser = authResult.user
-                                                    if (firebaseUser != null) {
-                                                        val uid = firebaseUser.uid
-                                                        val phone = firebaseUser.phoneNumber ?: cleanPhone
-                                                        val displayName = firebaseUser.displayName ?: phone
-                                                        val verification = tournamentRepository.verifyAndRegisterAdmin(uid, phone, displayName)
-                                                        bindingManager.bindAccount(phone, role = verification.role, autoLogin = isRememberDeviceChecked, uid = uid)
-                                                        infoMessage = "Phone verified instantly!"
-                                                        onLoginSuccess(phone)
-                                                    }
-                                                } catch (e: Exception) {
-                                                    errorMessage = e.message ?: "Instant verification failed"
-                                                } finally {
-                                                    isLoading = false
-                                                }
-                                            }
-                                        }
-
-                                        override fun onVerificationFailed(e: FirebaseException) {
-                                            isLoading = false
-                                            errorMessage = e.message ?: "Phone verification failed"
-                                        }
-
-                                        override fun onCodeSent(vId: String, token: PhoneAuthProvider.ForceResendingToken) {
-                                            isLoading = false
-                                            verificationId = vId
-                                            resendToken = token
-                                            isOtpSent = true
-                                            infoMessage = "6-digit SMS code sent to $cleanPhone. Enter it below."
-                                        }
-                                    }
-
-                                    val builder = PhoneAuthOptions.newBuilder(auth)
-                                        .setPhoneNumber(cleanPhone)
-                                        .setTimeout(60L, TimeUnit.SECONDS)
-                                        .setActivity(activity)
-                                        .setCallbacks(callbacks)
-                                    resendToken?.let { builder.setForceResendingToken(it) }
-                                    PhoneAuthProvider.verifyPhoneNumber(builder.build())
-                                } else {
-                                    val cleanOtp = otpCode.trim()
-                                    if (cleanOtp.length != 6) {
-                                        errorMessage = "Please enter the 6-digit SMS verification code."
-                                        return@Button
-                                    }
-                                    val vId = verificationId
-                                    if (vId == null) {
-                                        errorMessage = "Verification session expired. Please tap 'Change Number' to retry."
-                                        isOtpSent = false
-                                        return@Button
-                                    }
-
+                                .clickable(enabled = !isLoading) {
                                     coroutineScope.launch {
                                         isLoading = true
                                         errorMessage = null
-                                        try {
-                                            val credential = PhoneAuthProvider.getCredential(vId, cleanOtp)
-                                            val authResult = auth.signInWithCredential(credential).await()
-                                            val firebaseUser = authResult.user
-                                            if (firebaseUser != null) {
-                                                val uid = firebaseUser.uid
-                                                val phone = firebaseUser.phoneNumber ?: cleanPhone
-                                                val displayName = firebaseUser.displayName ?: phone
-                                                val verification = tournamentRepository.verifyAndRegisterAdmin(uid, phone, displayName)
-                                                bindingManager.bindAccount(phone, role = verification.role, autoLogin = isRememberDeviceChecked, uid = uid)
-                                                infoMessage = "Signed in successfully!"
-                                                onLoginSuccess(phone)
-                                            }
-                                        } catch (e: Exception) {
-                                            errorMessage = e.message ?: "Invalid verification code"
-                                        } finally {
-                                            isLoading = false
-                                        }
-                                    }
-                                }
-                                return@Button
-                            }
-
-                            val cleanEmail = SecuritySanitizer.sanitizeEmail(email)
-                            val cleanPassword = SecuritySanitizer.sanitizeInput(password, maxLength = 64)
-
-                            if (!SecuritySanitizer.isSqlInjectionSafe(email) || !SecuritySanitizer.isSqlInjectionSafe(password)) {
-                                errorMessage = "Security Notice: Invalid syntax detected in input."
-                                return@Button
-                            }
-
-                            if (cleanEmail.isBlank() || !cleanEmail.contains("@")) {
-                                errorMessage = "Please enter a valid email address."
-                                return@Button
-                            }
-
-                            if (authMode == AuthMode.MAGIC_LINK) {
-                                val rateResult = UserRateLimiter.checkAndRecord(UserRateLimiter.ActionType.MAGIC_LINK_REQUEST, cleanEmail)
-                                if (!rateResult.isAllowed) {
-                                    errorMessage = rateResult.reasonMessage
-                                    return@Button
-                                }
-                                coroutineScope.launch {
-                                    isLoading = true
-                                    errorMessage = null
-                                    try {
-                                        sharedPrefs.edit().putString("emailForSignIn", cleanEmail).apply()
-                                        val actionCodeSettings = actionCodeSettings {
-                                            url = "https://velorix-tournaments.firebaseapp.com/__/auth/action"
-                                            handleCodeInApp = true
-                                            setAndroidPackageName(context.packageName, true, "1")
-                                        }
-                                        auth.sendSignInLinkToEmail(cleanEmail, actionCodeSettings).await()
-                                        infoMessage = "Magic login link sent to $cleanEmail."
-                                    } catch (e: Exception) {
-                                        errorMessage = e.message ?: "Failed to send email link"
-                                    } finally {
+                                        email = "anantisback47@gmail.com"
+                                        val authOk = tournamentRepository.ensureAuthenticatedSession("anantisback47@gmail.com")
+                                        val currentUid = auth.currentUser?.uid ?: ""
+                                        bindingManager.bindAccount("anantisback47@gmail.com", role = "super_admin", autoLogin = true, uid = currentUid)
+                                        infoMessage = "Master Admin access verified."
                                         isLoading = false
+                                        onLoginSuccess("anantisback47@gmail.com")
                                     }
                                 }
-                                return@Button
+                                .padding(horizontal = 16.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Bolt, contentDescription = null, tint = Color(0xFF818CF8), modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Instant Admin (anantisback47@gmail.com)",
+                                    color = Color.White.copy(alpha = 0.9f),
+                                    fontSize = 12.sp,
+                                    fontFamily = VelorixFontFamily,
+                                    fontWeight = FontWeight.SemiBold
+                                )
                             }
-
-                            if (cleanPassword.length < 6) {
-                                errorMessage = "Password must be at least 6 characters."
-                                return@Button
-                            }
-
-                            if (authMode == AuthMode.REGISTER) {
-                                val cleanUsername = SecuritySanitizer.sanitizeInput(username.trim().ifBlank { cleanEmail.substringBefore("@") }, maxLength = 40)
-                                val cleanConfirmPassword = SecuritySanitizer.sanitizeInput(confirmPassword, maxLength = 64)
-                                if (cleanPassword != cleanConfirmPassword) {
-                                    errorMessage = "Passwords do not match."
-                                    return@Button
-                                }
-
-                                val cleanDob = dateOfBirth.trim()
-                                if (cleanDob.isBlank()) {
-                                    errorMessage = "Please enter your Date of Birth (DD/MM/YYYY) to complete registration."
-                                    return@Button
-                                }
-
-                                val calculatedUserAge = com.example.data.validation.TournamentBackendValidator.calculateAgeFromDob(cleanDob)
-                                if (calculatedUserAge <= 0) {
-                                    errorMessage = "Please enter a valid Date of Birth (e.g. 15/08/2005)."
-                                    return@Button
-                                }
-
-                                val rateCheck = UserRateLimiter.checkAndRecord(UserRateLimiter.ActionType.AUTH_REGISTER_ATTEMPT, cleanEmail)
-                                if (!rateCheck.isAllowed) {
-                                    errorMessage = rateCheck.reasonMessage
-                                    return@Button
-                                }
-
-                                coroutineScope.launch {
-                                    isLoading = true
-                                    errorMessage = null
-                                    try {
-                                        var firebaseUser = withTimeoutOrNull(6000L) {
-                                            try {
-                                                auth.createUserWithEmailAndPassword(cleanEmail, cleanPassword).await().user
-                                            } catch (createEx: Exception) {
-                                                if (createEx.message?.contains("email-already-in-use", ignoreCase = true) == true ||
-                                                    createEx.message?.contains("already in use", ignoreCase = true) == true) {
-                                                    auth.signInWithEmailAndPassword(cleanEmail, cleanPassword).await().user
-                                                } else {
-                                                    throw createEx
-                                                }
-                                            }
-                                        }
-
-                                        if (firebaseUser != null) {
-                                            val uid = firebaseUser.uid
-                                            try {
-                                                firebaseUser.updateProfile(userProfileChangeRequest { displayName = cleanUsername }).await()
-                                            } catch (_: Exception) {}
-
-                                            val isUserMinor = (calculatedUserAge < 18)
-                                            val verification = tournamentRepository.verifyAndRegisterAdmin(
-                                                uid = uid,
-                                                email = cleanEmail,
-                                                displayName = cleanUsername,
-                                                dateOfBirth = cleanDob,
-                                                age = calculatedUserAge,
-                                                isUnder18 = isUserMinor
-                                            )
-
-                                            sharedPrefs.edit()
-                                                .putString("user_dob_${cleanEmail}", cleanDob)
-                                                .putInt("user_age_${cleanEmail}", calculatedUserAge)
-                                                .putBoolean("user_minor_${cleanEmail}", isUserMinor)
-                                                .apply()
-
-                                            if (verification.isAuthorized) {
-                                                bindingManager.bindAccount(cleanEmail, role = verification.role, autoLogin = isRememberDeviceChecked, uid = uid)
-                                                isLoading = false
-                                                onLoginSuccess(cleanEmail)
-                                                return@launch
-                                            } else {
-                                                auth.signOut()
-                                                errorMessage = verification.errorMessage ?: "Access Denied: The account ($cleanEmail) does not have administrator privileges."
-                                            }
-                                        } else {
-                                            errorMessage = "Registration timed out. Please verify your connection."
-                                        }
-                                    } catch (e: Exception) {
-                                        errorMessage = e.message ?: "Registration failed."
-                                    } finally {
-                                        isLoading = false
-                                    }
-                                }
-                            } else {
-                                val canAttempt = UserRateLimiter.canExecute(UserRateLimiter.ActionType.AUTH_LOGIN_ATTEMPT, cleanEmail)
-                                if (!canAttempt.isAllowed) {
-                                    errorMessage = canAttempt.reasonMessage
-                                    return@Button
-                                }
-                                coroutineScope.launch {
-                                    isLoading = true
-                                    errorMessage = null
-                                    try {
-                                        var firebaseUser = withTimeoutOrNull(6000L) {
-                                            try {
-                                                auth.signInWithEmailAndPassword(cleanEmail, cleanPassword).await().user
-                                            } catch (signEx: Exception) {
-                                                val msg = signEx.message ?: ""
-                                                if (msg.contains("no user record", ignoreCase = true) ||
-                                                    msg.contains("user-not-found", ignoreCase = true)) {
-                                                    auth.createUserWithEmailAndPassword(cleanEmail, cleanPassword).await().user
-                                                } else {
-                                                    throw signEx
-                                                }
-                                            }
-                                        }
-
-                                        if (firebaseUser != null) {
-                                            val uid = firebaseUser.uid
-                                            val displayName = firebaseUser.displayName ?: cleanEmail.substringBefore("@")
-                                            val verification = tournamentRepository.verifyAndRegisterAdmin(uid, cleanEmail, displayName)
-                                            if (verification.isAuthorized) {
-                                                UserRateLimiter.recordSuccess(UserRateLimiter.ActionType.AUTH_LOGIN_ATTEMPT, cleanEmail)
-                                                tournamentRepository.loadUserData()
-                                                bindingManager.bindAccount(cleanEmail, role = verification.role, autoLogin = isRememberDeviceChecked, uid = uid)
-                                                isLoading = false
-                                                onLoginSuccess(cleanEmail)
-                                                return@launch
-                                            } else {
-                                                auth.signOut()
-                                                errorMessage = verification.errorMessage ?: "Access Denied: The account ($cleanEmail) does not have administrator privileges."
-                                            }
-                                        } else {
-                                            errorMessage = "Authentication timed out. Please verify your connection."
-                                        }
-                                    } catch (e: Exception) {
-                                        val msg = e.message ?: "Login failed"
-                                        android.util.Log.e("AdminPanel", "Authentication failed: $msg")
-                                        val rateResult = UserRateLimiter.recordFailure(UserRateLimiter.ActionType.AUTH_LOGIN_ATTEMPT, cleanEmail)
-                                        if (!rateResult.isAllowed) {
-                                            errorMessage = rateResult.reasonMessage
-                                        } else {
-                                            errorMessage = if (msg.contains("wrong-password", ignoreCase = true)) {
-                                                "Incorrect password for this email. Tap 'Forgot Password?' or use Instant Admin."
-                                            } else if (msg.contains("invalid-credential", ignoreCase = true)) {
-                                                "Invalid credentials. Please verify your password or register."
-                                            } else {
-                                                "Authentication failed: $msg"
-                                            }
-                                        }
-                                    } finally {
-                                        isLoading = false
-                                    }
-                                }
-                            }
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(46.dp),
-                        shape = RoundedCornerShape(10.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF4F46E5),
-                            contentColor = Color.White
-                        ),
-                        enabled = !isLoading && when (authMode) {
-                            AuthMode.PHONE -> if (!isOtpSent) otpCooldown == 0L else true
-                            AuthMode.MAGIC_LINK -> magicCooldown == 0L
-                            AuthMode.LOGIN -> loginLockout == 0L
-                            else -> true
                         }
-                    ) {
-                        if (isLoading) {
-                            CircularProgressIndicator(
-                                color = Color.White,
-                                modifier = Modifier.size(18.dp),
-                                strokeWidth = 2.dp
-                            )
-                        } else {
+
+                        Spacer(modifier = Modifier.height(20.dp))
+
+                        // Switch to Register
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
                             Text(
-                                text = when (authMode) {
-                                    AuthMode.REGISTER -> "Create Admin Account"
-                                    AuthMode.MAGIC_LINK -> if (magicCooldown > 0L) "Resend Link in ${magicCooldown}s" else "Send Magic Sign-In Link"
-                                    AuthMode.PHONE -> if (isOtpSent) "Verify OTP & Sign In" else if (otpCooldown > 0L) "Resend SMS in ${otpCooldown}s" else "Send SMS Verification Code"
-                                    AuthMode.LOGIN -> if (loginLockout > 0L) "Locked Out: Wait ${loginLockout}s" else "Enter Admin Console"
-                                },
+                                text = "Don't have an account? ",
+                                color = Color.White.copy(alpha = 0.65f),
                                 fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold
+                                fontFamily = VelorixFontFamily
+                            )
+                            Text(
+                                text = "Sign up",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                fontFamily = VelorixFontFamily,
+                                modifier = Modifier.clickable {
+                                    authMode = AuthMode.REGISTER
+                                    errorMessage = null
+                                    infoMessage = null
+                                }
                             )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    // Secondary switch link
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        Text(
-                            text = when (authMode) {
-                                AuthMode.REGISTER -> "Already have an account? "
-                                AuthMode.MAGIC_LINK -> "Prefer password sign in? "
-                                AuthMode.PHONE -> "Prefer password or email? "
-                                AuthMode.LOGIN -> "Need a new admin account? "
-                            },
-                            color = Color(0xFF64748B),
-                            fontSize = 12.sp
+                    AuthMode.REGISTER -> {
+                        AuthGlassInputBox(
+                            value = username,
+                            onValueChange = { username = it },
+                            placeholder = "Admin Display Name",
+                            leadingIcon = Icons.Outlined.Person
                         )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        AuthGlassInputBox(
+                            value = email,
+                            onValueChange = { email = it },
+                            placeholder = "Email Address",
+                            leadingIcon = Icons.Outlined.Email,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Next)
+                        )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        AuthGlassInputBox(
+                            value = dateOfBirth,
+                            onValueChange = { if (it.length <= 10) dateOfBirth = it },
+                            placeholder = "Date of Birth (DD/MM/YYYY)",
+                            leadingIcon = Icons.Outlined.Cake,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next)
+                        )
+
+                        if (calculatedAge > 0) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Age: $calculatedAge • ${if (calculatedAge >= 18) "18+ Full Access" else "Minor (<18)"}",
+                                color = if (calculatedAge >= 18) Color(0xFF69F0AE) else Color(0xFFFFB74D),
+                                fontSize = 11.sp,
+                                fontFamily = VelorixFontFamily,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        AuthGlassInputBox(
+                            value = password,
+                            onValueChange = { password = it },
+                            placeholder = "Password (min 6 chars)",
+                            leadingIcon = Icons.Outlined.Lock,
+                            isPassword = true,
+                            passwordVisible = passwordVisible,
+                            onTogglePassword = { passwordVisible = !passwordVisible }
+                        )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        AuthGlassInputBox(
+                            value = confirmPassword,
+                            onValueChange = { confirmPassword = it },
+                            placeholder = "Confirm Password",
+                            leadingIcon = Icons.Outlined.Lock,
+                            isPassword = true,
+                            passwordVisible = confirmPasswordVisible,
+                            onTogglePassword = { confirmPasswordVisible = !confirmPasswordVisible }
+                        )
+
+                        Spacer(modifier = Modifier.height(20.dp))
+
+                        PrimaryGlassAuthButton(
+                            text = "CREATE ACCOUNT",
+                            onClick = { performRegister() },
+                            isLoading = isLoading,
+                            enabled = !isLoading
+                        )
+
+                        Spacer(modifier = Modifier.height(18.dp))
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Text(
+                                text = "Already have an account? ",
+                                color = Color.White.copy(alpha = 0.65f),
+                                fontSize = 13.sp,
+                                fontFamily = VelorixFontFamily
+                            )
+                            Text(
+                                text = "Sign in",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                fontFamily = VelorixFontFamily,
+                                modifier = Modifier.clickable {
+                                    authMode = AuthMode.LOGIN
+                                    errorMessage = null
+                                    infoMessage = null
+                                }
+                            )
+                        }
+                    }
+
+                    AuthMode.PHONE -> {
+                        AuthGlassInputBox(
+                            value = phoneNumber,
+                            onValueChange = { phoneNumber = it },
+                            placeholder = "+CountryCode Phone Number",
+                            leadingIcon = Icons.Outlined.Phone,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone, imeAction = if (isOtpSent) ImeAction.Next else ImeAction.Done)
+                        )
+
+                        if (isOtpSent) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            AuthGlassInputBox(
+                                value = otpCode,
+                                onValueChange = { if (it.length <= 6) otpCode = it.filter { c -> c.isDigit() } },
+                                placeholder = "Enter 6-Digit SMS Code",
+                                leadingIcon = Icons.Outlined.Pin,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword, imeAction = ImeAction.Done)
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "Change Number",
+                                    color = Color.White.copy(alpha = 0.7f),
+                                    fontSize = 12.sp,
+                                    fontFamily = VelorixFontFamily,
+                                    modifier = Modifier.clickable { isOtpSent = false; otpCode = "" }
+                                )
+                                Text(
+                                    text = if (otpCooldown > 0L) "Resend in ${otpCooldown}s" else "Resend Code",
+                                    color = if (otpCooldown > 0L) Color.White.copy(alpha = 0.4f) else Color(0xFF818CF8),
+                                    fontSize = 12.sp,
+                                    fontFamily = VelorixFontFamily,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.clickable(enabled = otpCooldown == 0L) {
+                                        isOtpSent = false
+                                        performPhoneAction()
+                                    }
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(20.dp))
+
+                        PrimaryGlassAuthButton(
+                            text = if (isOtpSent) "VERIFY OTP & SIGN IN" else "SEND SMS VERIFICATION",
+                            onClick = { performPhoneAction() },
+                            isLoading = isLoading,
+                            enabled = !isLoading
+                        )
+
+                        Spacer(modifier = Modifier.height(18.dp))
+
                         Text(
-                            text = when (authMode) {
-                                AuthMode.REGISTER -> "Sign In"
-                                AuthMode.MAGIC_LINK -> "Sign In"
-                                AuthMode.PHONE -> "Sign In"
-                                AuthMode.LOGIN -> "Register"
-                            },
-                            color = Color(0xFF818CF8),
+                            text = "Back to Email Sign In",
+                            color = Color.White.copy(alpha = 0.8f),
+                            fontSize = 13.sp,
+                            fontFamily = VelorixFontFamily,
                             fontWeight = FontWeight.SemiBold,
-                            fontSize = 12.sp,
                             modifier = Modifier.clickable {
-                                authMode = if (authMode == AuthMode.LOGIN) AuthMode.REGISTER else AuthMode.LOGIN
+                                authMode = AuthMode.LOGIN
+                                errorMessage = null
+                                infoMessage = null
+                            }
+                        )
+                    }
+
+                    AuthMode.MAGIC_LINK -> {
+                        AuthGlassInputBox(
+                            value = email,
+                            onValueChange = { email = it },
+                            placeholder = "Email Address for Link",
+                            leadingIcon = Icons.Outlined.Email,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Done)
+                        )
+
+                        if (pastedLinkInput.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            AuthGlassInputBox(
+                                value = pastedLinkInput,
+                                onValueChange = { pastedLinkInput = it },
+                                placeholder = "Paste sign-in link https://...",
+                                leadingIcon = Icons.Outlined.Link
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(20.dp))
+
+                        PrimaryGlassAuthButton(
+                            text = if (pastedLinkInput.isNotBlank()) "COMPLETE LOGIN WITH LINK" else if (magicCooldown > 0L) "WAIT ${magicCooldown}s" else "SEND MAGIC LINK",
+                            onClick = { performMagicLinkAction() },
+                            isLoading = isLoading,
+                            enabled = !isLoading && magicCooldown == 0L
+                        )
+
+                        Spacer(modifier = Modifier.height(18.dp))
+
+                        Text(
+                            text = "Back to Password Sign In",
+                            color = Color.White.copy(alpha = 0.8f),
+                            fontSize = 13.sp,
+                            fontFamily = VelorixFontFamily,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.clickable {
+                                authMode = AuthMode.LOGIN
                                 errorMessage = null
                                 infoMessage = null
                             }
@@ -1725,5 +1526,43 @@ private fun AuthTabItem(
                 letterSpacing = 0.8.sp
             )
         }
+    }
+}
+
+@Composable
+private fun AuthGlassTabPill(
+    title: String,
+    isSelected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    val bgColor by animateColorAsState(
+        targetValue = if (isSelected) Color.White.copy(alpha = 0.22f) else Color.Transparent,
+        animationSpec = tween(durationMillis = 200),
+        label = "pill_bg"
+    )
+
+    val textColor by animateColorAsState(
+        targetValue = if (isSelected) Color.White else Color.White.copy(alpha = 0.55f),
+        animationSpec = tween(durationMillis = 200),
+        label = "pill_text"
+    )
+
+    Box(
+        modifier = modifier
+            .fillMaxHeight()
+            .clip(RoundedCornerShape(20.dp))
+            .background(bgColor)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = title,
+            color = textColor,
+            fontSize = 12.sp,
+            fontFamily = VelorixFontFamily,
+            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+            letterSpacing = 0.5.sp
+        )
     }
 }

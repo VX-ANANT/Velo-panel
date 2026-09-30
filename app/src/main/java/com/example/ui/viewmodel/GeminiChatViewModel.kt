@@ -12,11 +12,13 @@ import com.example.domain.model.Part
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class UiChatMessage(
     val id: String = System.currentTimeMillis().toString() + "_" + (0..999).random(),
@@ -89,7 +91,7 @@ class GeminiChatViewModel(
             logDisputeTicketToFirebase(trimmed)
         }
 
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             val result = geminiRepository.sendChatMessage(
                 history = conversationHistory,
                 model = _uiState.value.selectedModel,
@@ -98,7 +100,9 @@ class GeminiChatViewModel(
 
             result.fold(
                 onSuccess = { replyText ->
-                    conversationHistory.add(Content(parts = listOf(Part(text = replyText)), role = "model"))
+                    withContext(Dispatchers.Default) {
+                        conversationHistory.add(Content(parts = listOf(Part(text = replyText)), role = "model"))
+                    }
                     _uiState.update { current ->
                         val updatedList = current.messages.dropLast(1) + UiChatMessage(text = replyText, isUser = false)
                         current.copy(messages = updatedList, isLoading = false)
@@ -134,37 +138,39 @@ class GeminiChatViewModel(
     }
 
     private fun logDisputeTicketToFirebase(query: String) {
-        try {
-            val currUser = FirebaseAuth.getInstance().currentUser
-            val userEmail = currUser?.email?.ifBlank { null } ?: "support_user@velorix.com"
-            val rateCheck = UserRateLimiter.checkAndRecord(UserRateLimiter.ActionType.SUPPORT_TICKET_SUBMISSION, userEmail)
-            if (!rateCheck.isAllowed) return
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val currUser = FirebaseAuth.getInstance().currentUser
+                val userEmail = currUser?.email?.ifBlank { null } ?: "support_user@velorix.com"
+                val rateCheck = UserRateLimiter.checkAndRecord(UserRateLimiter.ActionType.SUPPORT_TICKET_SUBMISSION, userEmail)
+                if (!rateCheck.isAllowed) return@launch
 
-            val ticketId = "TK-AI-${System.currentTimeMillis().toString().takeLast(6)}"
-            val username = currUser?.displayName?.ifBlank { null } ?: userEmail.substringBefore("@")
-            val ticket = ComplaintTicket(
-                id = ticketId,
-                userEmail = userEmail,
-                username = username,
-                gameId = "IGN_${username.take(6).uppercase()}",
-                tournamentTitle = "Velorix AI Help Desk",
-                issueCategory = "AI Chat Inquiry",
-                description = query,
-                status = "open",
-                updatedAt = System.currentTimeMillis(),
-                createdAt = System.currentTimeMillis(),
-                isHighPriority = false
-            )
-            val db = try {
-                FirebaseDatabase.getInstance("https://velorix-tournaments-default-rtdb.asia-southeast1.firebasedatabase.app").reference
-            } catch (_: Exception) {
-                FirebaseDatabase.getInstance().reference
-            }
-            val fs = FirebaseFirestore.getInstance()
-            db.child("complaints").child(ticketId).setValue(ticket)
-            db.child("chatbot_complaints").child(ticketId).setValue(ticket)
-            fs.collection("complaints").document(ticketId).set(ticket)
-        } catch (_: Exception) {}
+                val ticketId = "TK-AI-${System.currentTimeMillis().toString().takeLast(6)}"
+                val username = currUser?.displayName?.ifBlank { null } ?: userEmail.substringBefore("@")
+                val ticket = ComplaintTicket(
+                    id = ticketId,
+                    userEmail = userEmail,
+                    username = username,
+                    gameId = "IGN_${username.take(6).uppercase()}",
+                    tournamentTitle = "Velorix AI Help Desk",
+                    issueCategory = "AI Chat Inquiry",
+                    description = query,
+                    status = "open",
+                    updatedAt = System.currentTimeMillis(),
+                    createdAt = System.currentTimeMillis(),
+                    isHighPriority = false
+                )
+                val db = try {
+                    FirebaseDatabase.getInstance("https://velorix-tournaments-default-rtdb.asia-southeast1.firebasedatabase.app").reference
+                } catch (_: Exception) {
+                    FirebaseDatabase.getInstance().reference
+                }
+                val fs = FirebaseFirestore.getInstance()
+                db.child("complaints").child(ticketId).setValue(ticket)
+                db.child("chatbot_complaints").child(ticketId).setValue(ticket)
+                fs.collection("complaints").document(ticketId).set(ticket)
+            } catch (_: Exception) {}
+        }
     }
 
     companion object {

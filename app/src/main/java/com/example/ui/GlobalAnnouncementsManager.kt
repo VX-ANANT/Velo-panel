@@ -35,7 +35,12 @@ fun GlobalAnnouncementsBanner(
     onPublishClick: () -> Unit,
     onDeleteClick: (String) -> Unit
 ) {
-    var isExpanded by remember { mutableStateOf(false) }
+    var dismissedIds by remember { mutableStateOf(setOf<String>()) }
+    val visibleAnnouncements = remember(announcements, dismissedIds) {
+        announcements.filter { it.id !in dismissedIds }
+    }
+
+    if (visibleAnnouncements.isEmpty()) return
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
@@ -51,7 +56,7 @@ fun GlobalAnnouncementsBanner(
                 ) {}
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "LIVE ANNOUNCEMENTS (${announcements.size})",
+                    text = "LIVE ANNOUNCEMENTS (${visibleAnnouncements.size})",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     color = VelorixTextSecondary,
@@ -103,7 +108,7 @@ fun GlobalAnnouncementsBanner(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                items(announcements) { announcement ->
+                items(visibleAnnouncements, key = { it.id }) { announcement ->
                     val priorityColor = when (announcement.priority.uppercase()) {
                         "URGENT" -> Color(0xFFFF5252)
                         "MAINTENANCE" -> Color(0xFFFFB74D)
@@ -147,14 +152,20 @@ fun GlobalAnnouncementsBanner(
                                 }
 
                                 if (isAdmin) {
-                                    Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = "Delete announcement",
-                                        tint = VelorixTextSecondary,
-                                        modifier = Modifier
-                                            .size(16.dp)
-                                            .clickable { onDeleteClick(announcement.id) }
-                                    )
+                                    IconButton(
+                                        onClick = {
+                                            dismissedIds = dismissedIds + announcement.id
+                                            onDeleteClick(announcement.id)
+                                        },
+                                        modifier = Modifier.size(28.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Delete announcement",
+                                            tint = Color.White.copy(alpha = 0.7f),
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
                                 }
                             }
 

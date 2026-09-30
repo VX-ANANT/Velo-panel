@@ -7,11 +7,17 @@ import com.example.data.repository.TournamentRepositoryImpl
 import com.example.domain.model.Match
 import com.example.ui.common.GlobalErrorManager
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 sealed class BracketState {
     object Loading : BracketState()
@@ -26,8 +32,11 @@ class BracketViewModel(
     private val _uiState = MutableStateFlow<BracketState>(BracketState.Loading)
     val uiState: StateFlow<BracketState> = _uiState.asStateFlow()
 
+    private var matchStreamJob: Job? = null
+
     fun loadMatches(tournamentId: String) {
-        viewModelScope.launch {
+        matchStreamJob?.cancel()
+        matchStreamJob = viewModelScope.launch(Dispatchers.IO) {
             _uiState.value = BracketState.Loading
             try {
                 val initialMatches = try {
@@ -39,8 +48,10 @@ class BracketViewModel(
                 
                 _uiState.value = BracketState.Success(initialMatches)
                 
-                // Start collecting realtime updates with safe flow catch
+                // Start collecting realtime updates with safe flow catch, distinctUntilChanged and flowOn
                 repository.getLiveMatchesStream(tournamentId)
+                    .distinctUntilChanged()
+                    .flowOn(Dispatchers.Default)
                     .catch { err ->
                         if (err !is CancellationException) {
                             // Non-fatal stream error; keep existing state
@@ -63,11 +74,10 @@ class BracketViewModel(
     }
 
     fun updateMatchStatus(match: Match, newStatus: String, winnerId: String?) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 val updated = match.copy(status = newStatus, winnerId = winnerId)
                 repository.updateMatch(updated)
-                // Flow will handle the state update automatically if connection is successful
             } catch (e: Exception) {
                 GlobalErrorManager.emitFirestoreError("Update Match", e)
             }
@@ -75,7 +85,7 @@ class BracketViewModel(
     }
 
     fun generateBracket(tournamentId: String) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 val participants = repository.getTournamentParticipants(tournamentId)
                 repository.generateSingleEliminationBracket(tournamentId, participants)
@@ -92,7 +102,7 @@ class BracketViewModel(
         playerId: String,
         targetSlot: Int
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 repository.advancePlayerInBracket(
                     tournamentId = tournamentId,
@@ -108,7 +118,7 @@ class BracketViewModel(
     }
 
     fun recordMatchScore(tournamentId: String, matchId: String, winnerId: String, score1: Int, score2: Int) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 repository.recordMatchScore(
                     tournamentId = tournamentId,
@@ -122,6 +132,12 @@ class BracketViewModel(
                 GlobalErrorManager.emitError("Failed to record score: ${e.message}", e)
             }
         }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        matchStreamJob?.cancel()
+        matchStreamJob = null
     }
 
     companion object {

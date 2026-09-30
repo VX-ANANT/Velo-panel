@@ -16,11 +16,18 @@ import com.example.domain.model.CheckInToken
 import com.example.domain.model.AppAnnouncementBanner
 import com.example.data.validation.UserRateLimiter
 import com.example.ui.common.GlobalErrorManager
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 sealed class DashboardState {
     object Loading : DashboardState()
@@ -41,27 +48,20 @@ sealed class DashboardState {
         val payoutPool: Float = 0f,
         val currentUserEmail: String? = null,
         val isSyncing: Boolean = false,
-        val lastSyncTimestamp: Long = System.currentTimeMillis()
+        val lastSyncTimestamp: Long = System.currentTimeMillis(),
+        // Precalculated, cached metrics & leaderboard to eliminate Main thread sorting and frame drops
+        val leaderboardPlayers: List<UserProfile> = emptyList(),
+        val totalRegisteredUsersCount: Int = 0,
+        val totalActiveAdminsCount: Int = 0,
+        val openSupportComplaintsCount: Int = 0,
+        val pendingCashoutsCount: Int = 0,
+        val pendingCashoutsSum: Double = 0.0,
+        val pendingMatchProofsCount: Int = 0,
+        val unreadNotificationCount: Int = 0
     ) : DashboardState() {
         val complaints: List<ComplaintTicket> get() = supportTickets
         val cashouts: List<PayoutRequest> get() = payoutRequests
         val userProfiles: List<UserProfile> get() = users
-        val unreadNotificationCount: Int get() = notifications.count { !it.isRead }
-
-        // Module 1 Metrics
-        val totalRegisteredUsersCount: Int get() = users.size
-        val totalActiveAdminsCount: Int get() = admins.count { it.active }
-        val openSupportComplaintsCount: Int get() = supportTickets.count { it.status.equals("open", ignoreCase = true) || it.status.equals("PENDING", ignoreCase = true) }
-        val pendingCashoutsCount: Int get() = payoutRequests.count { it.status.equals("pending", ignoreCase = true) }
-        val pendingCashoutsSum: Double get() = payoutRequests.filter { it.status.equals("pending", ignoreCase = true) }.sumOf { it.vtAmount }
-        val pendingMatchProofsCount: Int get() = matchProofs.count { it.status.equals("pending", ignoreCase = true) }
-
-        // Top Leaderboard Players (ranked by total earnings, wins, kills)
-        val leaderboardPlayers: List<UserProfile> get() = users.sortedWith(
-            compareByDescending<UserProfile> { it.totalEarnings }
-                .thenByDescending { it.wins }
-                .thenByDescending { it.kills }
-        )
 
         val currentUserAdminRecord: AdminRecord? get() {
             val email = currentUserEmail ?: return null
@@ -69,6 +69,110 @@ sealed class DashboardState {
         }
     }
     data class Error(val message: String) : DashboardState()
+}
+
+/**
+ * Optimizes state transitions by computing CPU-heavy derived metrics on Dispatchers.Default
+ * and reusing existing calculations when unaffected data has not changed.
+ */
+fun DashboardState.Success.withDerivedMetrics(
+    newUsers: List<UserProfile>? = null,
+    users: List<UserProfile>? = null,
+    newAdmins: List<AdminRecord>? = null,
+    admins: List<AdminRecord>? = null,
+    newSupportTickets: List<SupportTicket>? = null,
+    supportTickets: List<SupportTicket>? = null,
+    newPayoutRequests: List<PayoutRequest>? = null,
+    payoutRequests: List<PayoutRequest>? = null,
+    newMatchProofs: List<com.example.domain.model.MatchProofSubmission>? = null,
+    newNotifications: List<com.example.domain.model.AppNotification>? = null,
+    newTournaments: List<Tournament>? = null,
+    tournaments: List<Tournament>? = null,
+    newSyncing: Boolean? = null,
+    newBannedUsers: Map<String, BannedUserRecord>? = null,
+    newTokens: List<CheckInToken>? = null,
+    newBanners: List<AppAnnouncementBanner>? = null,
+    newGlobalAnnouncements: List<com.example.domain.model.GlobalAnnouncement>? = null
+): DashboardState.Success {
+    val effectiveUsers = newUsers ?: users ?: this.users
+    val effectiveAdmins = newAdmins ?: admins ?: this.admins
+    val effectiveTickets = newSupportTickets ?: supportTickets ?: this.supportTickets
+    val effectivePayouts = newPayoutRequests ?: payoutRequests ?: this.payoutRequests
+    val effectiveProofs = newMatchProofs ?: this.matchProofs
+    val effectiveNotifs = newNotifications ?: this.notifications
+    val effectiveTournaments = newTournaments ?: tournaments ?: this.tournaments
+
+    val sortedLeaderboard = if (newUsers != null || leaderboardPlayers.isEmpty()) {
+        effectiveUsers.sortedWith(
+            compareByDescending<UserProfile> { it.totalEarnings }
+                .thenByDescending { it.wins }
+                .thenByDescending { it.kills }
+        )
+    } else {
+        leaderboardPlayers
+    }
+
+    val activeAdmins = if (newAdmins != null) effectiveAdmins.count { it.active } else totalActiveAdminsCount
+    val openComplaints = if (newSupportTickets != null) {
+        effectiveTickets.count { it.status.equals("open", ignoreCase = true) || it.status.equals("PENDING", ignoreCase = true) }
+    } else {
+        openSupportComplaintsCount
+    }
+    val pCashoutsCount = if (newPayoutRequests != null) {
+        effectivePayouts.count { it.status.equals("pending", ignoreCase = true) }
+    } else {
+        pendingCashoutsCount
+    }
+    val pCashoutsSum = if (newPayoutRequests != null) {
+        effectivePayouts.filter { it.status.equals("pending", ignoreCase = true) }.sumOf { it.vtAmount }
+    } else {
+        pendingCashoutsSum
+    }
+    val pProofs = if (newMatchProofs != null) {
+        effectiveProofs.count { it.status.equals("pending", ignoreCase = true) }
+    } else {
+        pendingMatchProofsCount
+    }
+    val unreadCount = if (newNotifications != null) {
+        effectiveNotifs.count { !it.isRead }
+    } else {
+        unreadNotificationCount
+    }
+    val totalReg = if (newTournaments != null) {
+        effectiveTournaments.sumOf { it.registeredPlayers }
+    } else {
+        totalRegistrationsCount
+    }
+    val payout = if (newTournaments != null) {
+        effectiveTournaments.sumOf { it.prizePool.toDouble() }.toFloat()
+    } else {
+        payoutPool
+    }
+
+    return this.copy(
+        tournaments = effectiveTournaments,
+        users = effectiveUsers,
+        admins = effectiveAdmins,
+        supportTickets = effectiveTickets,
+        payoutRequests = effectivePayouts,
+        matchProofs = effectiveProofs,
+        notifications = effectiveNotifs,
+        bannedUsers = newBannedUsers ?: this.bannedUsers,
+        checkInTokens = newTokens ?: this.checkInTokens,
+        banners = newBanners ?: this.banners,
+        globalAnnouncements = newGlobalAnnouncements ?: this.globalAnnouncements,
+        isSyncing = newSyncing ?: this.isSyncing,
+        leaderboardPlayers = sortedLeaderboard,
+        totalRegisteredUsersCount = effectiveUsers.size,
+        totalActiveAdminsCount = activeAdmins,
+        openSupportComplaintsCount = openComplaints,
+        pendingCashoutsCount = pCashoutsCount,
+        pendingCashoutsSum = pCashoutsSum,
+        pendingMatchProofsCount = pProofs,
+        unreadNotificationCount = unreadCount,
+        totalRegistrationsCount = totalReg,
+        payoutPool = payout
+    )
 }
 
 private fun String?.isNull_or_blank(): Boolean = this == null || this.isBlank()
@@ -129,31 +233,30 @@ class TournamentDashboardViewModel(
         repository.locallyDeletedUserIds.clear()
         repository.locallyDeletedTournamentIds.clear()
 
-        // 2. Set syncing state in UI
-        val currState = _uiState.value as? DashboardState.Success
-        if (currState != null) {
-            _uiState.value = currState.copy(isSyncing = true)
+        // 2. Set syncing state in UI atomically
+        _uiState.update { curr ->
+            (curr as? DashboardState.Success)?.copy(isSyncing = true) ?: curr
         }
 
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 GlobalErrorManager.emitSuccess("Extracting real data from Firebase RTDB & Cloud Firestore...")
                 val result = repository.extractRealDataFromBackend(forceServer = true)
 
                 val initialEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
-                val curr = _uiState.value as? DashboardState.Success ?: DashboardState.Success(currentUserEmail = initialEmail)
 
-                val payout = result.tournaments.sumOf { it.prizePool.toDouble() }.toFloat()
-                _uiState.value = curr.copy(
-                    tournaments = result.tournaments,
-                    users = result.users,
-                    totalRegistrationsCount = result.tournaments.sumOf { it.registeredPlayers },
-                    payoutPool = payout,
-                    isSyncing = false,
-                    lastSyncTimestamp = System.currentTimeMillis()
-                )
+                withContext(Dispatchers.Default) {
+                    _uiState.update { curr ->
+                        val base = curr as? DashboardState.Success ?: DashboardState.Success(currentUserEmail = initialEmail)
+                        base.withDerivedMetrics(
+                            newTournaments = result.tournaments,
+                            newUsers = result.users,
+                            newSyncing = false
+                        ).copy(lastSyncTimestamp = System.currentTimeMillis())
+                    }
+                }
 
-                // Restart live stream listeners so real-time updates continue
+                // Restart live stream listeners with debouncing and distinct filtering
                 startStreams(forceRestart = true)
 
                 val msg = if (result.success) {
@@ -162,16 +265,21 @@ class TournamentDashboardViewModel(
                     result.message
                 }
                 GlobalErrorManager.emitSuccess(msg)
-                onComplete?.invoke(result)
-            } catch (e: Exception) {
-                e.printStackTrace()
-                val curr = _uiState.value as? DashboardState.Success
-                if (curr != null) {
-                    _uiState.value = curr.copy(isSyncing = false)
+                withContext(Dispatchers.Main) {
+                    onComplete?.invoke(result)
                 }
-                GlobalErrorManager.emitError("Backend sync error: ${e.message}")
-                startStreams(forceRestart = true)
-                onComplete?.invoke(com.example.domain.model.BackendExtractionResult(success = false, message = e.message ?: "Sync error"))
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) {
+                    e.printStackTrace()
+                    _uiState.update { curr ->
+                        (curr as? DashboardState.Success)?.copy(isSyncing = false) ?: curr
+                    }
+                    GlobalErrorManager.emitError("Backend sync error: ${e.message}")
+                    startStreams(forceRestart = true)
+                    withContext(Dispatchers.Main) {
+                        onComplete?.invoke(com.example.domain.model.BackendExtractionResult(success = false, message = e.message ?: "Sync error"))
+                    }
+                }
             }
         }
     }
@@ -179,27 +287,33 @@ class TournamentDashboardViewModel(
     private fun startStreams(forceRestart: Boolean) {
         if (!forceRestart && activeStreamJobs.isNotEmpty()) return
 
-        viewModelScope.launch {
-            // Cancel any stale collectors
+        synchronized(activeStreamJobs) {
             activeStreamJobs.forEach { it.cancel() }
             activeStreamJobs.clear()
+        }
 
+        val initialEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
+        _uiState.update { curr ->
+            if (curr !is DashboardState.Success) {
+                DashboardState.Success(currentUserEmail = initialEmail)
+            } else {
+                curr.copy(currentUserEmail = initialEmail)
+            }
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
             val targetEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
             repository.ensureAuthenticatedSession(targetEmail)
+        }
 
-            val initialEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
-            val currState = _uiState.value
-            if (currState !is DashboardState.Success) {
-                _uiState.value = DashboardState.Success(currentUserEmail = initialEmail)
-            } else {
-                _uiState.value = currState.copy(currentUserEmail = initialEmail)
-            }
-
-            // Stream users
-            activeStreamJobs.add(viewModelScope.launch {
-                try {
-                    repository.getLiveUsersStream().collect { liveUsers ->
-                        val curr = _uiState.value as? DashboardState.Success ?: DashboardState.Success(currentUserEmail = initialEmail)
+        // 1. Stream users (CPU heavy reconciliation on Dispatchers.Default with debouncing & distinct check)
+        val userJob = viewModelScope.launch(Dispatchers.Default) {
+            try {
+                repository.getLiveUsersStream()
+                    .distinctUntilChanged()
+                    .debounce(100L)
+                    .flowOn(Dispatchers.Default)
+                    .collect { liveUsers ->
                         val now = System.currentTimeMillis()
                         val filteredIncoming = liveUsers.filter { !lockedDeletedUserIds.contains(it.id) }
                         val resolvedUsers = filteredIncoming.map { u ->
@@ -229,42 +343,57 @@ class TournamentDashboardViewModel(
                             }
                         }
 
-                        _uiState.value = curr.copy(users = resolvedUsers)
+                        _uiState.update { curr ->
+                            val s = curr as? DashboardState.Success ?: DashboardState.Success(currentUserEmail = initialEmail)
+                            s.withDerivedMetrics(newUsers = resolvedUsers)
+                        }
                     }
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-            })
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) e.printStackTrace()
+            }
+        }
 
-            // Stream support tickets
-            activeStreamJobs.add(viewModelScope.launch {
-                try {
-                    repository.getLiveSupportTicketsStream().collect { tickets ->
-                        val curr = _uiState.value as? DashboardState.Success ?: DashboardState.Success(currentUserEmail = initialEmail)
-                        _uiState.value = curr.copy(supportTickets = tickets)
+        // 2. Stream support tickets
+        val ticketsJob = viewModelScope.launch(Dispatchers.Default) {
+            try {
+                repository.getLiveSupportTicketsStream()
+                    .distinctUntilChanged()
+                    .flowOn(Dispatchers.Default)
+                    .collect { tickets ->
+                        _uiState.update { curr ->
+                            val s = curr as? DashboardState.Success ?: DashboardState.Success(currentUserEmail = initialEmail)
+                            s.withDerivedMetrics(newSupportTickets = tickets)
+                        }
                     }
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-            })
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) e.printStackTrace()
+            }
+        }
 
-            // Stream payout requests
-            activeStreamJobs.add(viewModelScope.launch {
-                try {
-                    repository.getLivePayoutRequestsStream().collect { payouts ->
-                        val curr = _uiState.value as? DashboardState.Success ?: DashboardState.Success(currentUserEmail = initialEmail)
-                        _uiState.value = curr.copy(payoutRequests = payouts)
+        // 3. Stream payout requests
+        val payoutsJob = viewModelScope.launch(Dispatchers.Default) {
+            try {
+                repository.getLivePayoutRequestsStream()
+                    .distinctUntilChanged()
+                    .flowOn(Dispatchers.Default)
+                    .collect { payouts ->
+                        _uiState.update { curr ->
+                            val s = curr as? DashboardState.Success ?: DashboardState.Success(currentUserEmail = initialEmail)
+                            s.withDerivedMetrics(newPayoutRequests = payouts)
+                        }
                     }
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-            })
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) e.printStackTrace()
+            }
+        }
 
-            // Stream admins
-            activeStreamJobs.add(viewModelScope.launch {
-                try {
-                    repository.getLiveAdminsStream().collect { adminList ->
-                        val curr = _uiState.value as? DashboardState.Success ?: DashboardState.Success(currentUserEmail = initialEmail)
+        // 4. Stream admins
+        val adminsJob = viewModelScope.launch(Dispatchers.Default) {
+            try {
+                repository.getLiveAdminsStream()
+                    .distinctUntilChanged()
+                    .flowOn(Dispatchers.Default)
+                    .collect { adminList ->
                         val now = System.currentTimeMillis()
                         val filteredIncoming = adminList.filter { !lockedDeletedAdminUids.contains(it.uid) }
                         val resolvedAdmins = filteredIncoming.map { admin ->
@@ -294,106 +423,158 @@ class TournamentDashboardViewModel(
                             }
                         }
 
-                        _uiState.value = curr.copy(admins = resolvedAdmins)
+                        _uiState.update { curr ->
+                            val s = curr as? DashboardState.Success ?: DashboardState.Success(currentUserEmail = initialEmail)
+                            s.withDerivedMetrics(newAdmins = resolvedAdmins)
+                        }
                     }
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-            })
-
-            // Stream banned users
-            activeStreamJobs.add(viewModelScope.launch {
-                try {
-                    repository.getLiveBannedUsersStream().collect { bannedMap ->
-                        val curr = _uiState.value as? DashboardState.Success ?: DashboardState.Success(currentUserEmail = initialEmail)
-                        _uiState.value = curr.copy(bannedUsers = bannedMap)
-                    }
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-            })
-
-            // Stream tournaments
-            activeStreamJobs.add(viewModelScope.launch {
-                try {
-                    repository.getLiveTournamentsStream().collect { realtimeTournaments ->
-                        val curr = _uiState.value as? DashboardState.Success ?: DashboardState.Success(currentUserEmail = initialEmail)
-                        val payout = realtimeTournaments.sumOf { it.prizePool.toDouble() }.toFloat()
-                        _uiState.value = curr.copy(
-                            tournaments = realtimeTournaments,
-                            totalRegistrationsCount = realtimeTournaments.sumOf { it.registeredPlayers },
-                            payoutPool = payout
-                        )
-                    }
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-            })
-
-            // Stream tokens & banners
-            activeStreamJobs.add(viewModelScope.launch {
-                try {
-                    repository.getLiveTokensStream().collect { tokens ->
-                        val curr = _uiState.value as? DashboardState.Success ?: DashboardState.Success(currentUserEmail = initialEmail)
-                        _uiState.value = curr.copy(checkInTokens = tokens)
-                    }
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-            })
-
-            activeStreamJobs.add(viewModelScope.launch {
-                try {
-                    repository.getLiveBannersStream().collect { banners ->
-                        val curr = _uiState.value as? DashboardState.Success ?: DashboardState.Success(currentUserEmail = initialEmail)
-                        _uiState.value = curr.copy(banners = banners)
-                    }
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-            })
-
-            // Stream Global Announcements
-            activeStreamJobs.add(viewModelScope.launch {
-                try {
-                    repository.getGlobalAnnouncementsStream().collect { annList ->
-                        val curr = _uiState.value as? DashboardState.Success ?: DashboardState.Success(currentUserEmail = initialEmail)
-                        _uiState.value = curr.copy(globalAnnouncements = annList)
-                    }
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-            })
-
-            // Stream Match Proof Submissions
-            activeStreamJobs.add(viewModelScope.launch {
-                try {
-                    repository.getMatchProofsStream().collect { proofsList ->
-                        val curr = _uiState.value as? DashboardState.Success ?: DashboardState.Success(currentUserEmail = initialEmail)
-                        _uiState.value = curr.copy(matchProofs = proofsList)
-                    }
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-            })
-
-            // Stream Live Notifications & Campaigns
-            activeStreamJobs.add(viewModelScope.launch {
-                try {
-                    repository.getNotificationsStream().collect { notifs ->
-                        val curr = _uiState.value as? DashboardState.Success ?: DashboardState.Success(currentUserEmail = initialEmail)
-                        _uiState.value = curr.copy(notifications = notifs)
-                    }
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-            })
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) e.printStackTrace()
+            }
         }
+
+        // 5. Stream banned users
+        val bannedJob = viewModelScope.launch(Dispatchers.Default) {
+            try {
+                repository.getLiveBannedUsersStream()
+                    .distinctUntilChanged()
+                    .flowOn(Dispatchers.Default)
+                    .collect { bannedMap ->
+                        _uiState.update { curr ->
+                            val s = curr as? DashboardState.Success ?: DashboardState.Success(currentUserEmail = initialEmail)
+                            s.withDerivedMetrics(newBannedUsers = bannedMap)
+                        }
+                    }
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) e.printStackTrace()
+            }
+        }
+
+        // 6. Stream tournaments
+        val tournamentsJob = viewModelScope.launch(Dispatchers.Default) {
+            try {
+                repository.getLiveTournamentsStream()
+                    .distinctUntilChanged()
+                    .debounce(100L)
+                    .flowOn(Dispatchers.Default)
+                    .collect { realtimeTournaments ->
+                        _uiState.update { curr ->
+                            val s = curr as? DashboardState.Success ?: DashboardState.Success(currentUserEmail = initialEmail)
+                            s.withDerivedMetrics(newTournaments = realtimeTournaments)
+                        }
+                    }
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) e.printStackTrace()
+            }
+        }
+
+        // 7. Stream tokens
+        val tokensJob = viewModelScope.launch(Dispatchers.Default) {
+            try {
+                repository.getLiveTokensStream()
+                    .distinctUntilChanged()
+                    .flowOn(Dispatchers.Default)
+                    .collect { tokens ->
+                        _uiState.update { curr ->
+                            val s = curr as? DashboardState.Success ?: DashboardState.Success(currentUserEmail = initialEmail)
+                            s.withDerivedMetrics(newTokens = tokens)
+                        }
+                    }
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) e.printStackTrace()
+            }
+        }
+
+        // 8. Stream banners
+        val bannersJob = viewModelScope.launch(Dispatchers.Default) {
+            try {
+                repository.getLiveBannersStream()
+                    .distinctUntilChanged()
+                    .flowOn(Dispatchers.Default)
+                    .collect { banners ->
+                        _uiState.update { curr ->
+                            val s = curr as? DashboardState.Success ?: DashboardState.Success(currentUserEmail = initialEmail)
+                            s.withDerivedMetrics(newBanners = banners)
+                        }
+                    }
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) e.printStackTrace()
+            }
+        }
+
+        // 9. Stream Global Announcements
+        val annJob = viewModelScope.launch(Dispatchers.Default) {
+            try {
+                repository.getGlobalAnnouncementsStream()
+                    .distinctUntilChanged()
+                    .flowOn(Dispatchers.Default)
+                    .collect { annList ->
+                        _uiState.update { curr ->
+                            val s = curr as? DashboardState.Success ?: DashboardState.Success(currentUserEmail = initialEmail)
+                            s.withDerivedMetrics(newGlobalAnnouncements = annList)
+                        }
+                    }
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) e.printStackTrace()
+            }
+        }
+
+        // 10. Stream Match Proof Submissions
+        val proofsJob = viewModelScope.launch(Dispatchers.Default) {
+            try {
+                repository.getMatchProofsStream()
+                    .distinctUntilChanged()
+                    .flowOn(Dispatchers.Default)
+                    .collect { proofsList ->
+                        _uiState.update { curr ->
+                            val s = curr as? DashboardState.Success ?: DashboardState.Success(currentUserEmail = initialEmail)
+                            s.withDerivedMetrics(newMatchProofs = proofsList)
+                        }
+                    }
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) e.printStackTrace()
+            }
+        }
+
+        // 11. Stream Live Notifications & Campaigns
+        val notifsJob = viewModelScope.launch(Dispatchers.Default) {
+            try {
+                repository.getNotificationsStream()
+                    .distinctUntilChanged()
+                    .flowOn(Dispatchers.Default)
+                    .collect { notifs ->
+                        _uiState.update { curr ->
+                            val s = curr as? DashboardState.Success ?: DashboardState.Success(currentUserEmail = initialEmail)
+                            s.withDerivedMetrics(newNotifications = notifs)
+                        }
+                    }
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) e.printStackTrace()
+            }
+        }
+
+        synchronized(activeStreamJobs) {
+            activeStreamJobs.addAll(
+                listOf(userJob, ticketsJob, payoutsJob, adminsJob, bannedJob, tournamentsJob, tokensJob, bannersJob, annJob, proofsJob, notifsJob)
+            )
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        synchronized(activeStreamJobs) {
+            activeStreamJobs.forEach { it.cancel() }
+            activeStreamJobs.clear()
+        }
+        lockedAdminStates.clear()
+        lockedDeletedAdminUids.clear()
+        lockedUserStates.clear()
+        lockedDeletedUserIds.clear()
     }
 
     // Actions
     fun updateTicketStatus(ticket: SupportTicket, newStatus: String, adminNote: String = "", assignedTo: String = "") {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             val currAdminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
             val updated = ticket.copy(
                 status = newStatus,
@@ -406,20 +587,20 @@ class TournamentDashboardViewModel(
     }
 
     fun banPlayer(uid: String, email: String, reason: String) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             val currAdminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
             repository.banPlayer(uid, email, reason, currAdminEmail)
         }
     }
 
     fun unbanPlayer(uid: String) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             repository.unbanPlayer(uid)
         }
     }
 
     fun adjustUserBalance(uid: String, newBalance: Double, reason: String) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             val currAdminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
             repository.adjustUserBalance(uid, newBalance, reason, currAdminEmail)
         }
@@ -431,15 +612,14 @@ class TournamentDashboardViewModel(
             GlobalErrorManager.emitError(rateLimitCheck.reasonMessage)
             return
         }
-        val curr = _uiState.value as? DashboardState.Success
-        if (curr != null) {
-            _uiState.value = curr.copy(
-                payoutRequests = curr.payoutRequests.map {
-                    if (it.id == request.id) it.copy(status = "approved") else it
-                }
-            )
+        _uiState.update { curr ->
+            val s = curr as? DashboardState.Success ?: return@update curr
+            val updatedPayouts = s.payoutRequests.map {
+                if (it.id == request.id) it.copy(status = "approved") else it
+            }
+            s.withDerivedMetrics(newPayoutRequests = updatedPayouts)
         }
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 val currAdminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
                 repository.approvePayout(request, currAdminEmail)
@@ -457,15 +637,14 @@ class TournamentDashboardViewModel(
             GlobalErrorManager.emitError(rateLimitCheck.reasonMessage)
             return
         }
-        val curr = _uiState.value as? DashboardState.Success
-        if (curr != null) {
-            _uiState.value = curr.copy(
-                payoutRequests = curr.payoutRequests.map {
-                    if (it.id == request.id) it.copy(status = "rejected", rejectionReason = reason) else it
-                }
-            )
+        _uiState.update { curr ->
+            val s = curr as? DashboardState.Success ?: return@update curr
+            val updatedPayouts = s.payoutRequests.map {
+                if (it.id == request.id) it.copy(status = "rejected", rejectionReason = reason) else it
+            }
+            s.withDerivedMetrics(newPayoutRequests = updatedPayouts)
         }
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 val currAdminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
                 repository.rejectPayout(request, reason, currAdminEmail)
@@ -478,15 +657,12 @@ class TournamentDashboardViewModel(
     }
 
     fun createTournament(tournament: Tournament) {
-        val curr = _uiState.value as? DashboardState.Success
-        if (curr != null) {
-            val updatedList = listOf(tournament) + curr.tournaments.filter { it.id != tournament.id }
-            _uiState.value = curr.copy(
-                tournaments = updatedList,
-                payoutPool = updatedList.sumOf { it.prizePool.toDouble() }.toFloat()
-            )
+        _uiState.update { curr ->
+            val s = curr as? DashboardState.Success ?: return@update curr
+            val updatedList = listOf(tournament) + s.tournaments.filter { it.id != tournament.id }
+            s.withDerivedMetrics(newTournaments = updatedList)
         }
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 val currAdminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
                 val currAdminUid = repository.auth.currentUser?.uid
@@ -498,15 +674,12 @@ class TournamentDashboardViewModel(
     }
 
     fun updateTournament(tournament: Tournament) {
-        val curr = _uiState.value as? DashboardState.Success
-        if (curr != null) {
-            val updatedList = curr.tournaments.map { if (it.id == tournament.id) tournament else it }
-            _uiState.value = curr.copy(
-                tournaments = updatedList,
-                payoutPool = updatedList.sumOf { it.prizePool.toDouble() }.toFloat()
-            )
+        _uiState.update { curr ->
+            val s = curr as? DashboardState.Success ?: return@update curr
+            val updatedList = s.tournaments.map { if (it.id == tournament.id) tournament else it }
+            s.withDerivedMetrics(newTournaments = updatedList)
         }
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 val currAdminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
                 val currAdminUid = repository.auth.currentUser?.uid
@@ -518,14 +691,14 @@ class TournamentDashboardViewModel(
     }
 
     fun cancelTournament(tournamentId: String, reason: String) {
-        val curr = _uiState.value as? DashboardState.Success
-        if (curr != null) {
-            val updatedList = curr.tournaments.map {
+        _uiState.update { curr ->
+            val s = curr as? DashboardState.Success ?: return@update curr
+            val updatedList = s.tournaments.map {
                 if (it.id == tournamentId) it.copy(status = "CANCELLED", cancellationReason = reason, cancelledAt = System.currentTimeMillis()) else it
             }
-            _uiState.value = curr.copy(tournaments = updatedList)
+            s.withDerivedMetrics(newTournaments = updatedList)
         }
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 val currAdminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
                 val currAdminUid = repository.auth.currentUser?.uid
@@ -537,15 +710,12 @@ class TournamentDashboardViewModel(
     }
 
     fun deleteTournament(tournamentId: String) {
-        val curr = _uiState.value as? DashboardState.Success
-        if (curr != null) {
-            val updatedList = curr.tournaments.filter { it.id != tournamentId }
-            _uiState.value = curr.copy(
-                tournaments = updatedList,
-                payoutPool = updatedList.sumOf { it.prizePool.toDouble() }.toFloat()
-            )
+        _uiState.update { curr ->
+            val s = curr as? DashboardState.Success ?: return@update curr
+            val updatedList = s.tournaments.filter { it.id != tournamentId }
+            s.withDerivedMetrics(newTournaments = updatedList)
         }
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 val currAdminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
                 val currAdminUid = repository.auth.currentUser?.uid
@@ -557,18 +727,18 @@ class TournamentDashboardViewModel(
     }
 
     fun getTournamentLiveStream(tournamentId: String): Flow<Tournament?> {
-        return repository.getTournamentLiveStream(tournamentId)
+        return repository.getTournamentLiveStream(tournamentId).flowOn(Dispatchers.Default)
     }
 
     fun updateRoomCredentials(tournamentId: String, roomId: String, roomPassword: String) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             repository.updateRoomCredentials(tournamentId, roomId, roomPassword)
         }
     }
 
     fun grantAdminAccess(uid: String, email: String, name: String, role: String) {
         val currAdminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             val result = userRoleManager.grantAdminRole(
                 uid = uid,
                 email = email,
@@ -581,12 +751,12 @@ class TournamentDashboardViewModel(
                 lockedAdminStates[confirmedRecord.uid] = confirmedRecord to System.currentTimeMillis()
                 
                 // Server-side confirmation completed: safely update local UI state
-                val curr = _uiState.value as? DashboardState.Success
-                if (curr != null) {
-                    val updatedAdmins = listOf(confirmedRecord) + curr.admins.filter { 
+                _uiState.update { curr ->
+                    val s = curr as? DashboardState.Success ?: return@update curr
+                    val updatedAdmins = listOf(confirmedRecord) + s.admins.filter { 
                         it.uid != confirmedRecord.uid && !it.email.equals(confirmedRecord.email, ignoreCase = true) 
                     }
-                    _uiState.value = curr.copy(admins = updatedAdmins)
+                    s.withDerivedMetrics(newAdmins = updatedAdmins)
                 }
                 GlobalErrorManager.emitSuccess("Admin access granted to ${confirmedRecord.name}")
             }.onFailure { e ->
@@ -597,15 +767,15 @@ class TournamentDashboardViewModel(
     }
 
     fun revokeAdminAccess(adminUid: String) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             val result = userRoleManager.revokeAdminRole(adminUid)
             result.onSuccess { revokedRecord ->
                 lockedAdminStates[adminUid] = revokedRecord to System.currentTimeMillis()
                 
                 // Server-side confirmation completed: safely update local UI state
-                val curr = _uiState.value as? DashboardState.Success
-                if (curr != null) {
-                    _uiState.value = curr.copy(admins = curr.admins.map { if (it.uid == adminUid) revokedRecord else it })
+                _uiState.update { curr ->
+                    val s = curr as? DashboardState.Success ?: return@update curr
+                    s.withDerivedMetrics(newAdmins = s.admins.map { if (it.uid == adminUid) revokedRecord else it })
                 }
                 GlobalErrorManager.emitSuccess("Admin access revoked")
             }.onFailure { e ->
@@ -616,16 +786,16 @@ class TournamentDashboardViewModel(
     }
 
     fun updateAdminRecord(admin: AdminRecord) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             val result = userRoleManager.updateAdminRecord(admin)
             result.onSuccess { updatedAdmin ->
                 lockedDeletedAdminUids.remove(updatedAdmin.uid)
                 lockedAdminStates[updatedAdmin.uid] = updatedAdmin to System.currentTimeMillis()
                 
                 // Server-side confirmation completed: safely update local UI state
-                val curr = _uiState.value as? DashboardState.Success
-                if (curr != null) {
-                    _uiState.value = curr.copy(admins = curr.admins.map { if (it.uid == updatedAdmin.uid) updatedAdmin else it })
+                _uiState.update { curr ->
+                    val s = curr as? DashboardState.Success ?: return@update curr
+                    s.withDerivedMetrics(newAdmins = s.admins.map { if (it.uid == updatedAdmin.uid) updatedAdmin else it })
                 }
                 GlobalErrorManager.emitSuccess("Admin record updated")
             }.onFailure { e ->
@@ -636,16 +806,16 @@ class TournamentDashboardViewModel(
     }
 
     fun deleteAdminRecord(adminUid: String) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             val result = userRoleManager.deleteAdminRecord(adminUid)
             result.onSuccess {
                 lockedDeletedAdminUids.add(adminUid)
                 lockedAdminStates.remove(adminUid)
                 
                 // Server-side confirmation completed: safely update local UI state
-                val curr = _uiState.value as? DashboardState.Success
-                if (curr != null) {
-                    _uiState.value = curr.copy(admins = curr.admins.filter { it.uid != adminUid })
+                _uiState.update { curr ->
+                    val s = curr as? DashboardState.Success ?: return@update curr
+                    s.withDerivedMetrics(newAdmins = s.admins.filter { it.uid != adminUid })
                 }
                 GlobalErrorManager.emitSuccess("Admin removed")
             }.onFailure { e ->
@@ -660,17 +830,15 @@ class TournamentDashboardViewModel(
         val reason = if (newBanned) user.banReason.ifBlank { "Banned by Admin Panel" } else ""
         val currAdminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
         
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             val result = userRoleManager.toggleUserBan(user, newBanned, reason, currAdminEmail)
             result.onSuccess { updatedUser ->
                 lockedUserStates[user.id] = updatedUser to System.currentTimeMillis()
                 
                 // Server-side confirmation completed: safely update local UI state
-                val curr = _uiState.value as? DashboardState.Success
-                if (curr != null) {
-                    _uiState.value = curr.copy(
-                        users = curr.users.map { if (it.id == user.id) updatedUser else it }
-                    )
+                _uiState.update { curr ->
+                    val s = curr as? DashboardState.Success ?: return@update curr
+                    s.withDerivedMetrics(users = s.users.map { if (it.id == user.id) updatedUser else it })
                 }
                 if (newBanned) {
                     GlobalErrorManager.emitSuccess("Player ${user.username} (${user.id}) banned successfully")
@@ -685,7 +853,7 @@ class TournamentDashboardViewModel(
     }
 
     fun updateUserProfile(user: UserProfile) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             val result = userRoleManager.updateUserProfile(user)
             result.onSuccess { confirmedUser ->
                 lockedUserStates[confirmedUser.id] = confirmedUser to System.currentTimeMillis()
@@ -694,17 +862,17 @@ class TournamentDashboardViewModel(
                 }
                 
                 // Server-side confirmation completed: safely update local UI state
-                val curr = _uiState.value as? DashboardState.Success
-                if (curr != null) {
-                    val existingIndex = curr.users.indexOfFirst { 
+                _uiState.update { curr ->
+                    val s = curr as? DashboardState.Success ?: return@update curr
+                    val existingIndex = s.users.indexOfFirst { 
                         it.id == confirmedUser.id || (confirmedUser.email.isNotBlank() && it.email.equals(confirmedUser.email, ignoreCase = true)) 
                     }
                     val updatedList = if (existingIndex >= 0) {
-                        curr.users.toMutableList().apply { set(existingIndex, confirmedUser) }
+                        s.users.toMutableList().apply { set(existingIndex, confirmedUser) }
                     } else {
-                        curr.users + confirmedUser
+                        s.users + confirmedUser
                     }
-                    _uiState.value = curr.copy(users = updatedList)
+                    s.withDerivedMetrics(users = updatedList)
                 }
                 GlobalErrorManager.emitSuccess("User profile updated for ${confirmedUser.username}")
             }.onFailure { e ->
@@ -715,13 +883,13 @@ class TournamentDashboardViewModel(
     }
 
     fun updateUserRole(userId: String, newRole: String, isAdmin: Boolean = false) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             val result = userRoleManager.updateUserRole(userId, newRole, isAdmin)
             result.onSuccess {
-                val curr = _uiState.value as? DashboardState.Success
-                if (curr != null) {
-                    val updatedUsers = curr.users.map { if (it.id == userId) it.copy(role = newRole) else it }
-                    _uiState.value = curr.copy(users = updatedUsers)
+                _uiState.update { curr ->
+                    val s = curr as? DashboardState.Success ?: return@update curr
+                    val updatedUsers = s.users.map { if (it.id == userId) it.copy(role = newRole) else it }
+                    s.withDerivedMetrics(users = updatedUsers)
                 }
                 GlobalErrorManager.emitSuccess("Role updated to $newRole")
             }.onFailure { e ->
@@ -732,13 +900,17 @@ class TournamentDashboardViewModel(
     }
 
     fun loadUserData(onFinished: (() -> Unit)? = null) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 refreshRealtimeData()
-                onFinished?.invoke()
+                withContext(Dispatchers.Main) {
+                    onFinished?.invoke()
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
-                onFinished?.invoke()
+                withContext(Dispatchers.Main) {
+                    onFinished?.invoke()
+                }
             }
         }
     }
@@ -750,13 +922,11 @@ class TournamentDashboardViewModel(
             return
         }
         val newBalance = user.funds + amount
-        val curr = _uiState.value as? DashboardState.Success
-        if (curr != null) {
-            _uiState.value = curr.copy(
-                users = curr.users.map { if (it.id == user.id) it.copy(funds = newBalance) else it }
-            )
+        _uiState.update { curr ->
+            val s = curr as? DashboardState.Success ?: return@update curr
+            s.withDerivedMetrics(users = s.users.map { if (it.id == user.id) it.copy(funds = newBalance) else it })
         }
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 val currAdminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
                 repository.adjustUserBalance(user.id, newBalance, "Fund adjustment by admin", currAdminEmail)
@@ -769,11 +939,11 @@ class TournamentDashboardViewModel(
     }
 
     fun deleteUser(user: UserProfile) {
-        val curr = _uiState.value as? DashboardState.Success
-        if (curr != null) {
-            _uiState.value = curr.copy(users = curr.users.filter { it.id != user.id })
+        _uiState.update { curr ->
+            val s = curr as? DashboardState.Success ?: return@update curr
+            s.withDerivedMetrics(users = s.users.filter { it.id != user.id })
         }
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 repository.deleteUserProfile(user.id)
                 GlobalErrorManager.emitSuccess("User ${user.username} deleted permanently")
@@ -785,13 +955,12 @@ class TournamentDashboardViewModel(
     }
 
     fun saveComplaint(ticket: SupportTicket) {
-        val curr = _uiState.value as? DashboardState.Success
-        if (curr != null) {
-            _uiState.value = curr.copy(
-                supportTickets = curr.supportTickets.map { if (it.id == ticket.id) ticket else it }
-            )
+        _uiState.update { curr ->
+            val s = curr as? DashboardState.Success ?: return@update curr
+            val updated = s.supportTickets.map { if (it.id == ticket.id) ticket else it }
+            s.withDerivedMetrics(newSupportTickets = updated)
         }
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 repository.updateSupportTicket(ticket)
                 GlobalErrorManager.emitSuccess("Ticket #${ticket.id} updated to ${ticket.status}")
@@ -802,7 +971,7 @@ class TournamentDashboardViewModel(
     }
 
     suspend fun getTicketMessagesStream(ticketId: String): Flow<List<TicketMessage>> {
-        return repository.getLiveTicketMessagesStream(ticketId)
+        return repository.getLiveTicketMessagesStream(ticketId).flowOn(Dispatchers.Default)
     }
 
     fun sendTicketMessage(
@@ -817,7 +986,7 @@ class TournamentDashboardViewModel(
             onComplete(false)
             return
         }
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 val currentAdminUid = repository.auth.currentUser?.uid ?: "ADMIN_MASTER"
                 val success = repository.sendTicketMessage(
@@ -830,11 +999,15 @@ class TournamentDashboardViewModel(
                 if (success) {
                     GlobalErrorManager.emitSuccess("Support response sent")
                 }
-                onComplete(success)
+                withContext(Dispatchers.Main) {
+                    onComplete(success)
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
                 GlobalErrorManager.emitError("Failed to send message: ${e.message}")
-                onComplete(false)
+                withContext(Dispatchers.Main) {
+                    onComplete(false)
+                }
             }
         }
     }
@@ -853,15 +1026,14 @@ class TournamentDashboardViewModel(
         val curr = _uiState.value as? DashboardState.Success
         val targetUser = curr?.users?.find { it.email.equals(ticket.userEmail, ignoreCase = true) || it.id == ticket.userId }
         val adminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 if (targetUser != null) {
                     val newBalance = targetUser.funds + amount
                     repository.adjustUserBalance(targetUser.id, newBalance, reason, adminEmail)
-                    if (curr != null) {
-                        _uiState.value = curr.copy(
-                            users = curr.users.map { if (it.id == targetUser.id) it.copy(funds = newBalance) else it }
-                        )
+                    _uiState.update { current ->
+                        val s = current as? DashboardState.Success ?: return@update current
+                        s.withDerivedMetrics(users = s.users.map { if (it.id == targetUser.id) it.copy(funds = newBalance) else it })
                     }
                 } else if (ticket.userEmail.isNotBlank()) {
                     val fallbackId = "USR_${ticket.userEmail.hashCode()}"
@@ -883,23 +1055,25 @@ class TournamentDashboardViewModel(
                 repository.updateSupportTicket(updatedTicket)
                 saveComplaint(updatedTicket)
                 GlobalErrorManager.emitSuccess("₹$amount credited to user and ticket #${ticket.id} marked as RESOLVED!")
-                onComplete(true)
+                withContext(Dispatchers.Main) {
+                    onComplete(true)
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
                 GlobalErrorManager.emitError("Failed to process compensation: ${e.message}")
-                onComplete(false)
+                withContext(Dispatchers.Main) {
+                    onComplete(false)
+                }
             }
         }
     }
 
     fun deleteComplaint(ticketId: String) {
-        val curr = _uiState.value as? DashboardState.Success
-        if (curr != null) {
-            _uiState.value = curr.copy(
-                supportTickets = curr.supportTickets.filter { it.id != ticketId }
-            )
+        _uiState.update { curr ->
+            val s = curr as? DashboardState.Success ?: return@update curr
+            s.withDerivedMetrics(newSupportTickets = s.supportTickets.filter { it.id != ticketId })
         }
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 repository.deleteSupportTicket(ticketId)
                 GlobalErrorManager.emitSuccess("Ticket #$ticketId dissolved/deleted successfully.")
@@ -910,7 +1084,7 @@ class TournamentDashboardViewModel(
     }
 
     fun saveToken(token: CheckInToken) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             repository.saveToken(token)
         }
     }
@@ -921,7 +1095,7 @@ class TournamentDashboardViewModel(
             GlobalErrorManager.emitError(rateLimitCheck.reasonMessage)
             return
         }
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             repository.saveBanner(banner)
         }
     }
@@ -940,7 +1114,7 @@ class TournamentDashboardViewModel(
             onResult(false)
             return
         }
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             val currAdminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
             val currAdminUid = repository.auth.currentUser?.uid
             val success = repository.publishRoomCredentialsWithTimeCheck(
@@ -952,38 +1126,40 @@ class TournamentDashboardViewModel(
                 adminEmail = currAdminEmail,
                 adminUid = currAdminUid
             )
-            onResult(success)
+            withContext(Dispatchers.Main) {
+                onResult(success)
+            }
         }
     }
 
     fun submitMatchProof(proof: com.example.domain.model.MatchProofSubmission) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             repository.submitMatchProof(proof)
         }
     }
 
     fun approveMatchProof(proofId: String, prizeAmount: Double, killsCount: Int) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             val currAdminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
             repository.approveMatchProof(proofId, currAdminEmail, prizeAmount, killsCount)
         }
     }
 
     fun rejectMatchProof(proofId: String, reason: String) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             val currAdminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
             repository.rejectMatchProof(proofId, reason, currAdminEmail)
         }
     }
 
     fun publishGlobalAnnouncement(announcement: com.example.domain.model.GlobalAnnouncement) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             repository.publishGlobalAnnouncement(announcement)
         }
     }
 
     fun deleteGlobalAnnouncement(id: String) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             repository.deleteGlobalAnnouncement(id)
         }
     }
@@ -997,16 +1173,20 @@ class TournamentDashboardViewModel(
     }
 
     fun exportAllTournamentsJson(onResult: (String) -> Unit) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             val json = repository.exportAllTournamentsJson()
-            onResult(json)
+            withContext(Dispatchers.Main) {
+                onResult(json)
+            }
         }
     }
 
     fun importTournamentsFromJson(jsonStr: String, onResult: (Pair<Int, String>) -> Unit) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             val result = repository.importTournamentsFromJson(jsonStr)
-            onResult(result)
+            withContext(Dispatchers.Main) {
+                onResult(result)
+            }
         }
     }
 
@@ -1029,29 +1209,33 @@ class TournamentDashboardViewModel(
             onComplete(false, rateLimitCheck.reasonMessage)
             return
         }
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 val success = repository.joinTournament(tournamentId, player, entryFee)
-                if (success) {
-                    onComplete(true, "Successfully registered and slot locked!")
-                } else {
-                    onComplete(false, "Registration failed: Insufficient 2D wallet balance or slots full.")
+                withContext(Dispatchers.Main) {
+                    if (success) {
+                        onComplete(true, "Successfully registered and slot locked!")
+                    } else {
+                        onComplete(false, "Registration failed: Insufficient 2D wallet balance or slots full.")
+                    }
                 }
             } catch (e: Exception) {
                 GlobalErrorManager.emitFirestoreError("Join Tournament", e)
-                onComplete(false, e.localizedMessage ?: "Failed to join tournament")
+                withContext(Dispatchers.Main) {
+                    onComplete(false, e.localizedMessage ?: "Failed to join tournament")
+                }
             }
         }
     }
 
     fun markNotificationAsRead(id: String) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             repository.markNotificationAsRead(id)
         }
     }
 
     fun clearAllNotifications() {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             repository.clearAllNotifications()
         }
     }
@@ -1062,13 +1246,13 @@ class TournamentDashboardViewModel(
         priority: String = "HIGH",
         tournamentId: String? = null
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             repository.publishCampaignNotification(title, message, priority, tournamentId)
         }
     }
 
     fun testPushNotification(context: android.content.Context) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             val liveTourney = (_uiState.value as? DashboardState.Success)?.tournaments?.firstOrNull()
             if (liveTourney != null) {
                 repository.dispatchAutoTournamentCampaign(liveTourney)
@@ -1083,16 +1267,18 @@ class TournamentDashboardViewModel(
     }
 
     fun purgeAllDemoData(onResult: (Boolean, String) -> Unit = { _, _ -> }) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             val adminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
             val result = repository.purgeAllDemoAndMockData(adminEmail)
-            if (result.first) {
-                GlobalErrorManager.emitSuccess("Mock & Demo data purged successfully.")
-                refreshRealtimeData()
-            } else {
-                GlobalErrorManager.emitError("Purge failed: ${result.second}")
+            withContext(Dispatchers.Main) {
+                if (result.first) {
+                    GlobalErrorManager.emitSuccess("Mock & Demo data purged successfully.")
+                    refreshRealtimeData()
+                } else {
+                    GlobalErrorManager.emitError("Purge failed: ${result.second}")
+                }
+                onResult(result.first, result.second)
             }
-            onResult(result.first, result.second)
         }
     }
 

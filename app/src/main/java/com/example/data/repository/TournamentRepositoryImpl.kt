@@ -1661,6 +1661,16 @@ service cloud.firestore {
         val bannedEmails = mutableSetOf<String>()
         val bannedGameIds = mutableSetOf<String>()
 
+        fun extractDigitsFast(input: String): String {
+            if (input.isEmpty()) return ""
+            val sb = java.lang.StringBuilder(input.length)
+            for (i in 0 until input.length) {
+                val c = input[i]
+                if (c in '0'..'9') sb.append(c)
+            }
+            return sb.toString()
+        }
+
         fun emitCombinedUsers() {
             val allRawUsers = mutableListOf<UserProfile>()
 
@@ -1699,23 +1709,32 @@ service cloud.firestore {
                 }
             }
 
-            // Group and deduplicate users by unique identity (matching by ID, Email, Phone, or Game ID)
+            // Group and deduplicate users by unique identity using O(1) index maps
             val mergedList = mutableListOf<UserProfile>()
+            val idMap = HashMap<String, Int>(allRawUsers.size)
+            val emailMap = HashMap<String, Int>(allRawUsers.size)
+            val phoneMap = HashMap<String, Int>(allRawUsers.size)
+            val gameIdMap = HashMap<String, Int>(allRawUsers.size)
+
             for (user in allRawUsers) {
                 val cleanId = user.id.trim()
                 val cleanEmail = user.email.trim().lowercase()
-                val cleanPhone = user.phone.trim().replace(Regex("[^0-9]"), "")
-                val cleanGameId = user.gameId.trim().replace(Regex("[^0-9]"), "")
+                val cleanPhone = extractDigitsFast(user.phone)
+                val cleanGameId = extractDigitsFast(user.gameId)
 
-                val existingIndex = mergedList.indexOfFirst { existing ->
-                    (cleanId.isNotBlank() && existing.id.isNotBlank() && existing.id == cleanId) ||
-                    (cleanEmail.isNotBlank() && cleanEmail.contains("@") && existing.email.isNotBlank() && existing.email.trim().lowercase() == cleanEmail) ||
-                    (cleanPhone.length >= 10 && existing.phone.replace(Regex("[^0-9]"), "").takeLast(10) == cleanPhone.takeLast(10)) ||
-                    (cleanGameId.isNotBlank() && cleanGameId.length >= 5 && existing.gameId.replace(Regex("[^0-9]"), "") == cleanGameId)
-                }
+                val existingIndex = (if (cleanId.isNotBlank()) idMap[cleanId] else null)
+                    ?: (if (cleanEmail.contains("@")) emailMap[cleanEmail] else null)
+                    ?: (if (cleanPhone.length >= 10) phoneMap[cleanPhone.takeLast(10)] else null)
+                    ?: (if (cleanGameId.length >= 5) gameIdMap[cleanGameId] else null)
+                    ?: -1
 
                 if (existingIndex == -1) {
+                    val newIndex = mergedList.size
                     mergedList.add(user)
+                    if (cleanId.isNotBlank()) idMap[cleanId] = newIndex
+                    if (cleanEmail.contains("@")) emailMap[cleanEmail] = newIndex
+                    if (cleanPhone.length >= 10) phoneMap[cleanPhone.takeLast(10)] = newIndex
+                    if (cleanGameId.length >= 5) gameIdMap[cleanGameId] = newIndex
                 } else {
                     val existing = mergedList[existingIndex]
                     // Smart field reconciliation - prefer genuine Firebase IDs over any legacy prefixes:
@@ -1808,7 +1827,7 @@ service cloud.firestore {
 
                     val mergedRaw = (existing.rawAttributes + user.rawAttributes).toMutableMap()
 
-                    mergedList[existingIndex] = existing.copy(
+                    val updatedUser = existing.copy(
                         id = preferredId,
                         username = preferredUsername,
                         avatarUrl = preferredAvatarUrl,
@@ -1850,6 +1869,13 @@ service cloud.firestore {
                         lastActive = preferredLastActive,
                         rawAttributes = mergedRaw
                     )
+                    mergedList[existingIndex] = updatedUser
+                    if (preferredId.isNotBlank()) idMap[preferredId] = existingIndex
+                    if (preferredEmail.contains("@")) emailMap[preferredEmail] = existingIndex
+                    val pPhone = extractDigitsFast(preferredPhone)
+                    if (pPhone.length >= 10) phoneMap[pPhone.takeLast(10)] = existingIndex
+                    val pGame = extractDigitsFast(preferredGameId)
+                    if (pGame.length >= 5) gameIdMap[pGame] = existingIndex
                 }
             }
 
@@ -1913,6 +1939,15 @@ service cloud.firestore {
             trySend(cleanList.sortedWith(compareByDescending<UserProfile> { it.isBanned }.thenBy { it.username.lowercase() }))
         }
 
+        var emitJob: Job? = null
+        fun scheduleEmitUsers() {
+            emitJob?.cancel()
+            emitJob = launch(Dispatchers.Default) {
+                delay(60L)
+                emitCombinedUsers()
+            }
+        }
+
         emitCombinedUsers()
 
         // Realtime listener for banned_users node
@@ -1936,7 +1971,7 @@ service cloud.firestore {
                     val gameId = child.child("gameId").value?.toString()?.trim() ?: ""
                     if (gameId.isNotBlank()) bannedGameIds.add(gameId)
                 }
-                emitCombinedUsers()
+                scheduleEmitUsers()
             }
             override fun onCancelled(error: DatabaseError) {}
         }
@@ -1955,7 +1990,7 @@ service cloud.firestore {
                 }
             }
             usersSources[sourceKey] = sourceMap
-            emitCombinedUsers()
+            scheduleEmitUsers()
         }
 
         // Listen only to authentic user account nodes
@@ -2004,7 +2039,7 @@ service cloud.firestore {
                     }
                 }
                 usersSources["admins"] = sourceMap
-                emitCombinedUsers()
+                scheduleEmitUsers()
             }
             override fun onCancelled(error: DatabaseError) {}
         }
@@ -2062,7 +2097,7 @@ service cloud.firestore {
                 }
                 if (sourceMap.isNotEmpty()) {
                     usersSources["registrations"] = sourceMap
-                    emitCombinedUsers()
+                    scheduleEmitUsers()
                 }
             }
             override fun onCancelled(error: DatabaseError) {}
@@ -2086,7 +2121,7 @@ service cloud.firestore {
                             }
                         }
                         usersSources["fs_$collName"] = sourceMap
-                        emitCombinedUsers()
+                        scheduleEmitUsers()
                     }
                 }
             } catch (_: Exception) {}
@@ -2103,7 +2138,7 @@ service cloud.firestore {
                             }
                         }
                         usersSources["fs_$collName"] = sourceMap
-                        emitCombinedUsers()
+                        scheduleEmitUsers()
                     }
                 }
                 fsListeners.add(listener)
@@ -2113,6 +2148,7 @@ service cloud.firestore {
         }
 
         awaitClose {
+            emitJob?.cancel()
             userNodes.forEach { (key, ref) ->
                 listenersMap[key]?.let { ref.removeEventListener(it) }
             }
@@ -6088,10 +6124,12 @@ service cloud.firestore {
     // ==========================================
 
     private val localAnnouncementsMap = mutableMapOf<String, GlobalAnnouncement>()
+    private val locallyDeletedAnnouncementIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     suspend fun publishGlobalAnnouncement(announcement: GlobalAnnouncement) {
         val id = announcement.id.ifBlank { "ANN-${System.currentTimeMillis()}" }
         val item = announcement.copy(id = id, createdAt = System.currentTimeMillis())
+        locallyDeletedAnnouncementIds.remove(id)
         
         // Cache in memory immediately for instantaneous responsiveness
         localAnnouncementsMap[id] = item
@@ -6138,11 +6176,15 @@ service cloud.firestore {
 
     suspend fun getGlobalAnnouncementsStream(): Flow<List<GlobalAnnouncement>> = callbackFlow {
         val announcementsMap = mutableMapOf<String, GlobalAnnouncement>()
-        announcementsMap.putAll(localAnnouncementsMap)
+        localAnnouncementsMap.forEach { (k, v) ->
+            if (!locallyDeletedAnnouncementIds.contains(k)) {
+                announcementsMap[k] = v
+            }
+        }
 
         fun emitAnnouncements() {
             val list = announcementsMap.values
-                .filter { it.isActive }
+                .filter { it.isActive && !locallyDeletedAnnouncementIds.contains(it.id) }
                 .sortedByDescending { it.createdAt }
             trySend(list)
         }
@@ -6151,6 +6193,7 @@ service cloud.firestore {
 
         val rtdbListener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
+                val currentRtdbIds = mutableSetOf<String>()
                 snapshot.children.forEach { child ->
                     val ann = child.getValue(GlobalAnnouncement::class.java)
                     val id = ann?.id?.ifBlank { null } ?: child.key ?: ""
@@ -6160,7 +6203,8 @@ service cloud.firestore {
                     val createdAt = ann?.createdAt ?: safeLong(child.child("createdAt").value, System.currentTimeMillis())
                     val isActive = ann?.isActive ?: (child.child("isActive").value as? Boolean ?: true)
 
-                    if (id.isNotBlank() && title.isNotBlank()) {
+                    if (id.isNotBlank() && title.isNotBlank() && !locallyDeletedAnnouncementIds.contains(id)) {
+                        currentRtdbIds.add(id)
                         announcementsMap[id] = GlobalAnnouncement(
                             id = id,
                             title = title,
@@ -6171,6 +6215,10 @@ service cloud.firestore {
                             isActive = isActive
                         )
                     }
+                }
+                // Purge any remote deletions that were removed from RTDB
+                announcementsMap.keys.removeAll { key ->
+                    !currentRtdbIds.contains(key) && !localAnnouncementsMap.containsKey(key)
                 }
                 emitAnnouncements()
             }
@@ -6184,6 +6232,7 @@ service cloud.firestore {
         val fsListener = try {
             firestore.collection("announcements").addSnapshotListener { snapshot, error ->
                 if (error == null && snapshot != null) {
+                    val currentFsIds = mutableSetOf<String>()
                     snapshot.documents.forEach { doc ->
                         val id = doc.id
                         val title = doc.getString("title") ?: ""
@@ -6191,7 +6240,8 @@ service cloud.firestore {
                         val level = doc.getString("level") ?: doc.getString("priority") ?: "INFO"
                         val createdAt = doc.getLong("createdAt") ?: System.currentTimeMillis()
                         val isActive = doc.getBoolean("isActive") ?: true
-                        if (id.isNotBlank() && title.isNotBlank()) {
+                        if (id.isNotBlank() && title.isNotBlank() && !locallyDeletedAnnouncementIds.contains(id)) {
+                            currentFsIds.add(id)
                             announcementsMap[id] = GlobalAnnouncement(
                                 id = id,
                                 title = title,
@@ -6217,11 +6267,14 @@ service cloud.firestore {
     }
 
     suspend fun deleteGlobalAnnouncement(id: String) {
+        locallyDeletedAnnouncementIds.add(id)
         localAnnouncementsMap.remove(id)
         try { database.child("announcements").child(id).removeValue().await() } catch (_: Exception) {}
         try { database.child("notifications").child("notif_$id").removeValue().await() } catch (_: Exception) {}
+        try { database.child("campaigns").child("notif_$id").removeValue().await() } catch (_: Exception) {}
         try { firestore.collection("announcements").document(id).delete().await() } catch (_: Exception) {}
         try { firestore.collection("notifications").document("notif_$id").delete().await() } catch (_: Exception) {}
+        try { firestore.collection("campaigns").document("notif_$id").delete().await() } catch (_: Exception) {}
         GlobalErrorManager.emitSuccess("Announcement removed.")
     }
 
@@ -6448,9 +6501,26 @@ service cloud.firestore {
             } catch (_: Exception) {}
         }
 
-        // 1. Tournaments
-        safePurgeRtdb("tournaments")
-        safePurgeFirestore("tournaments")
+        // 1. Tournaments across all potential RTDB nodes and category structures
+        val allTournamentNodes = listOf(
+            "tournaments", "Tournaments", "tournament", "Tournament",
+            "matches", "Matches", "match", "Match",
+            "active_tournaments", "all_tournaments", "published_matches",
+            "categories", "tournaments_by_category", "matches_by_category",
+            "FreeFire", "BGMI", "custom_rooms", "game_tournaments"
+        )
+        allTournamentNodes.forEach { node ->
+            safePurgeRtdb(node)
+        }
+        val allTournamentCollections = listOf(
+            "tournaments", "matches", "active_tournaments", "all_tournaments",
+            "categories", "published_matches", "custom_rooms"
+        )
+        allTournamentCollections.forEach { col ->
+            safePurgeFirestore(col)
+        }
+        locallyDeletedTournamentIds.clear()
+        locallyDeletedAnnouncementIds.clear()
 
         // 2. Complaints & Support tickets
         safePurgeRtdb("complaints")

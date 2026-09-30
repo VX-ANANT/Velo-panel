@@ -152,7 +152,7 @@ fun TournamentsListScreenContent(
         }
     }
     
-    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp)) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1834,7 +1834,7 @@ fun UsersManagementScreenContent(
         )
     }
     
-    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp)) {
         // Responsive Header
         Column(
             modifier = Modifier

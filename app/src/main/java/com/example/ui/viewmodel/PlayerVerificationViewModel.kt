@@ -6,10 +6,12 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.repository.TournamentRepositoryImpl
 import com.example.domain.model.PlayerRegistration
 import com.example.ui.common.GlobalErrorManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 sealed class VerificationState {
     object Loading : VerificationState()
@@ -29,7 +31,7 @@ class PlayerVerificationViewModel(
     }
 
     fun fetchPendingRegistrations() {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             _uiState.value = VerificationState.Loading
             try {
                 val pending = repository.getPendingRegistrations()
@@ -44,7 +46,7 @@ class PlayerVerificationViewModel(
     }
 
     fun verifyRegistration(registrationId: String, approve: Boolean) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 val status = if (approve) "approved" else "rejected"
                 repository.updateRegistrationStatus(registrationId, status)

@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -255,7 +256,7 @@ fun TournamentDetailsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(horizontal = 16.dp),
+                .padding(horizontal = 8.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             item { Spacer(modifier = Modifier.height(4.dp)) }
@@ -693,22 +694,69 @@ fun TournamentDetailsScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.Key, contentDescription = null, tint = VelorixAccent, modifier = Modifier.size(18.dp))
+                                Icon(Icons.Default.Key, contentDescription = null, tint = VelorixAccent, modifier = Modifier.size(20.dp))
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("ROOM CREDENTIALS CONTROL", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = VelorixAccent, letterSpacing = 0.5.sp)
-                            }
-                            if (tournament.roomDetails != null && tournament.roomDetails?.roomId?.isNotBlank() == true) {
-                                Surface(color = VelorixAccent.copy(alpha = 0.2f), shape = RoundedCornerShape(6.dp)) {
-                                    Text("BROADCASTED TO PLAYERS", modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), color = VelorixAccent, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                Column {
+                                    Text("ROOM CREDENTIALS", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = VelorixAccent, letterSpacing = 0.5.sp)
+                                    Text(
+                                        if (tournament.roomDetails?.roomId?.isNotBlank() == true) "Broadcasted to players" else "Window opens 5m prior",
+                                        color = if (tournament.roomDetails?.roomId?.isNotBlank() == true) Color(0xFF86EFAC) else Color(0xFFFFD54F),
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
                                 }
-                            } else {
-                                Surface(color = Color(0xFFFFA000).copy(alpha = 0.2f), shape = RoundedCornerShape(6.dp)) {
-                                    Text("5-MIN LOCK ARMED", modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), color = Color(0xFFFFD54F), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            }
+
+                            // Shifted action buttons to top-right as requested
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Surface(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable {
+                                            com.example.notification.VelorixFcmManager.dispatchMatchReminderPush(
+                                                context = context,
+                                                tournament = tournament,
+                                                minutesLeft = 15
+                                            )
+                                            Toast.makeText(context, "15-Min Reminder pushed to players!", Toast.LENGTH_SHORT).show()
+                                        },
+                                    color = Color(0xFF1E293B),
+                                    border = BorderStroke(1.dp, Color(0xFF38BDF8).copy(alpha = 0.5f))
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(Icons.Default.NotificationsActive, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(13.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Remind", color = Color(0xFF38BDF8), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+
+                                Surface(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable { showRoomBroadcastDialog = true },
+                                    color = VelorixAccent
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(Icons.Default.BroadcastOnPersonal, contentDescription = null, tint = Color.Black, modifier = Modifier.size(14.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            if (tournament.roomDetails?.roomId?.isNotBlank() == true) "Edit Pass" else "Set Pass",
+                                            color = Color.Black,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
                                 }
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(14.dp))
 
                         if (tournament.roomDetails != null && tournament.roomDetails?.roomId?.isNotBlank() == true) {
                             Row(
@@ -739,74 +787,37 @@ fun TournamentDetailsScreen(
                         } else {
                             Surface(
                                 color = VelorixBg,
-                                shape = RoundedCornerShape(10.dp),
+                                shape = RoundedCornerShape(12.dp),
                                 border = BorderStroke(1.dp, CardVerifyBorder),
-                                modifier = Modifier.fillMaxWidth()
+                                modifier = Modifier.fillMaxWidth().clickable { showRoomBroadcastDialog = true }
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                                    modifier = Modifier.padding(14.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    Icon(Icons.Default.LockClock, contentDescription = null, tint = Color(0xFFFFD54F), modifier = Modifier.size(20.dp))
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Column {
-                                        Text(
-                                            if (minutesUntilStart > 5L) "Locked: Broadcast window opens 5m before start" else "Broadcast window is OPEN",
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color.White
-                                        )
-                                        Spacer(modifier = Modifier.height(2.dp))
-                                        Text(
-                                            if (minutesUntilStart > 5L)
-                                                "Admins can broadcast Room ID & Pass 5 mins prior ($minutesUntilStart min remaining). Bypass available in admin modal."
-                                            else
-                                                "Ready for immediate Free Fire Custom Room credential broadcast.",
-                                            fontSize = 11.sp,
-                                            color = VelorixTextSecondary,
-                                            lineHeight = 15.sp
-                                        )
+                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                        Icon(Icons.Default.LockClock, contentDescription = null, tint = Color(0xFFFFD54F), modifier = Modifier.size(24.dp))
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Column {
+                                            Text(
+                                                if (minutesUntilStart > 5L) "Room Credentials Locked ($minutesUntilStart min remaining)" else "Broadcast Window Active",
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color.White
+                                            )
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            Text(
+                                                "Tap here or 'Set Pass' above to broadcast Free Fire room ID & password now.",
+                                                fontSize = 11.sp,
+                                                color = VelorixTextSecondary,
+                                                lineHeight = 15.sp
+                                            )
+                                        }
                                     }
+                                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = VelorixAccent, modifier = Modifier.size(16.dp))
                                 }
                             }
-                        }
-
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Button(
-                            onClick = { showRoomBroadcastDialog = true },
-                            modifier = Modifier.fillMaxWidth().height(38.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Icon(Icons.Default.BroadcastOnPersonal, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                if (tournament.roomDetails?.roomId?.isNotBlank() == true) "Update / Re-broadcast Room ID" else "Enter & Broadcast Room ID & Password",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.Black
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Button(
-                            onClick = {
-                                com.example.notification.VelorixFcmManager.dispatchMatchReminderPush(
-                                    context = context,
-                                    tournament = tournament,
-                                    minutesLeft = 15
-                                )
-                                Toast.makeText(context, "15-Minute Match Reminder pushed to all registered players!", Toast.LENGTH_SHORT).show()
-                            },
-                            modifier = Modifier.fillMaxWidth().height(36.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B)),
-                            border = BorderStroke(1.dp, Color(0xFF38BDF8).copy(alpha = 0.6f)),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Icon(Icons.Default.NotificationsActive, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(15.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Send 15-Min Match Reminder (FCM Push)", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8))
                         }
                     }
                 }
@@ -1833,20 +1844,43 @@ private fun CredentialBox(
 ) {
     Surface(
         modifier = modifier.clickable { onCopy() },
-        color = VelorixBg,
-        shape = RoundedCornerShape(10.dp),
-        border = BorderStroke(1.dp, VelorixAccent.copy(alpha = 0.3f))
+        color = Color(0xFF101016),
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.2.dp, VelorixAccent.copy(alpha = 0.5f))
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+        Column(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Column {
-                Text(text = label, fontSize = 9.sp, color = VelorixTextSecondary, fontWeight = FontWeight.Bold)
-                Text(text = value, fontSize = 13.sp, color = VelorixAccent, fontWeight = FontWeight.Bold)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(text = label, fontSize = 10.sp, color = VelorixAccent, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.8.sp)
+                Surface(
+                    color = VelorixAccent.copy(alpha = 0.15f),
+                    shape = RoundedCornerShape(6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = "Copy", tint = VelorixAccent, modifier = Modifier.size(11.dp))
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text("COPY", color = VelorixAccent, fontSize = 8.5.sp, fontWeight = FontWeight.ExtraBold)
+                    }
+                }
             }
-            Icon(Icons.Default.ContentCopy, contentDescription = "Copy", tint = VelorixAccent, modifier = Modifier.size(16.dp))
+            Text(
+                text = value,
+                fontSize = 18.sp,
+                color = Color.White,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 1.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }

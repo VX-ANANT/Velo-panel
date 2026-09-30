@@ -231,7 +231,35 @@ class DeviceAccountBindingManager(private val context: Context) {
             .remove(KEY_BOUND_ROLE)
             .remove(KEY_LAST_LOGIN_TIME)
             .remove(KEY_BOUND_UID)
+            .remove(KEY_RECORDED_ACCOUNTS_SET)
             .apply()
+    }
+
+    fun clearAllRecordedAccounts() {
+        prefs.edit()
+            .remove(KEY_BOUND_EMAIL)
+            .remove(KEY_BOUND_USERNAME)
+            .remove(KEY_BOUND_ROLE)
+            .remove(KEY_LAST_LOGIN_TIME)
+            .remove(KEY_BOUND_UID)
+            .remove(KEY_RECORDED_ACCOUNTS_SET)
+            .apply()
+    }
+
+    fun removeRecordedAccount(email: String) {
+        val clean = email.trim()
+        val existingSet = prefs.getStringSet(KEY_RECORDED_ACCOUNTS_SET, emptySet())?.toMutableSet() ?: mutableSetOf()
+        existingSet.removeAll { it.startsWith("$clean|||", ignoreCase = true) }
+        val editor = prefs.edit().putStringSet(KEY_RECORDED_ACCOUNTS_SET, existingSet)
+        if (prefs.getString(KEY_BOUND_EMAIL, "")?.equals(clean, ignoreCase = true) == true) {
+            editor
+                .remove(KEY_BOUND_EMAIL)
+                .remove(KEY_BOUND_USERNAME)
+                .remove(KEY_BOUND_ROLE)
+                .remove(KEY_LAST_LOGIN_TIME)
+                .remove(KEY_BOUND_UID)
+        }
+        editor.apply()
     }
 
     companion object {

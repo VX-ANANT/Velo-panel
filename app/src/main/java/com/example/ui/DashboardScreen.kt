@@ -1,5 +1,6 @@
 package com.example.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -45,6 +46,7 @@ import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.DashboardCustomize
@@ -167,6 +169,17 @@ fun DashboardScreen(
     val context = LocalContext.current
     val opticsManager = remember { LiquidGlassOpticsManager(context) }
     var selectedTab by remember { mutableStateOf("dashboard") }
+
+    BackHandler(enabled = selectedTab != "dashboard") {
+        if (selectedTab in listOf("users", "complaints", "payouts")) {
+            selectedTab = "operations"
+        } else if (selectedTab in listOf("leaderboard", "admins", "lowcode")) {
+            selectedTab = "system"
+        } else {
+            selectedTab = "dashboard"
+        }
+    }
+
     var currentHyperTheme by remember { mutableStateOf(HyperOSTheme.NEBULA_PURPLE) }
     var showNotificationCenterDialog by remember { mutableStateOf(false) }
     var showBroadcastDialog by remember { mutableStateOf(false) }
@@ -200,16 +213,18 @@ fun DashboardScreen(
                         .layerBackdrop(backdrop)
                         .padding(innerPadding)
                 ) {
-                DashboardHeader(
-                    onProfileClick = { showAdminProfileDialog = true }, 
-                    onNavClick = onNavClick,
-                    onNotificationsClick = { showNotificationCenterDialog = true },
-                    onRefreshClick = { onRefreshClick?.invoke() },
-                    unreadNotificationCount = (uiState as? DashboardState.Success)?.unreadNotificationCount ?: 0,
-                    currentUserEmail = (uiState as? DashboardState.Success)?.currentUserEmail,
-                    accentColor = currentHyperTheme.primaryColor,
-                    isSyncing = (uiState as? DashboardState.Success)?.isSyncing ?: false
-                )
+                if (selectedTab == "dashboard") {
+                    DashboardHeader(
+                        onProfileClick = { showAdminProfileDialog = true }, 
+                        onNavClick = onNavClick,
+                        onNotificationsClick = { showNotificationCenterDialog = true },
+                        onRefreshClick = { onRefreshClick?.invoke() },
+                        unreadNotificationCount = (uiState as? DashboardState.Success)?.unreadNotificationCount ?: 0,
+                        currentUserEmail = (uiState as? DashboardState.Success)?.currentUserEmail,
+                        accentColor = currentHyperTheme.primaryColor,
+                        isSyncing = (uiState as? DashboardState.Success)?.isSyncing ?: false
+                    )
+                }
             
             when (uiState) {
                 is DashboardState.Loading -> {
@@ -301,17 +316,10 @@ fun DashboardScreen(
                                 )
                             }
                             "leaderboard" -> {
-                                Column(modifier = Modifier.fillMaxSize()) {
-                                    SubAppNavigationHeader(
-                                        title = "Leaderboard & Rankings",
-                                        onBack = { selectedTab = "system" },
-                                        accentColor = currentHyperTheme.primaryColor
-                                    )
-                                    LeaderboardScreen(
-                                        players = uiState.leaderboardPlayers,
-                                        onPlayerClick = { selectedTab = "operations" }
-                                    )
-                                }
+                                LeaderboardScreen(
+                                    players = uiState.leaderboardPlayers,
+                                    onPlayerClick = { selectedTab = "operations" }
+                                )
                             }
                             "apps_hub" -> {
                                 SystemHubScreenContent(
@@ -326,73 +334,50 @@ fun DashboardScreen(
                                 )
                             }
                             "users" -> {
-                                Column(modifier = Modifier.fillMaxSize()) {
-                                    SubAppNavigationHeader(
-                                        title = "User Directory",
-                                        onBack = { selectedTab = "operations" },
-                                        accentColor = currentHyperTheme.primaryColor
-                                    )
-                                    UsersManagementScreenContent(
-                                        uiState = uiState,
-                                        onToggleBan = onToggleUserBan,
-                                        onAddFunds = onAddFunds,
-                                        onDeleteUser = onDeleteUser,
-                                        onUpdateUser = { onUpdateUser?.invoke(it) },
-                                        onRefreshUserData = onRefreshUserData
-                                    )
-                                }
+                                UsersManagementScreenContent(
+                                    uiState = uiState,
+                                    onToggleBan = onToggleUserBan,
+                                    onAddFunds = onAddFunds,
+                                    onDeleteUser = onDeleteUser,
+                                    onUpdateUser = { onUpdateUser?.invoke(it) },
+                                    onRefreshUserData = onRefreshUserData
+                                )
                             }
                             "complaints" -> {
-                                Column(modifier = Modifier.fillMaxSize()) {
-                                    SubAppNavigationHeader(
-                                        title = "Support & Tickets",
-                                        onBack = { selectedTab = "operations" },
-                                        accentColor = currentHyperTheme.primaryColor
-                                    )
-                                    ComplaintsSupportScreen(
-                                        users = uiState.users,
-                                        initialTickets = uiState.supportTickets,
-                                        onAddFundsToUser = onAddFunds,
-                                        onSaveTicket = { ticket ->
-                                            onSaveComplaint?.invoke(ticket)
-                                        },
-                                        onDeleteTicket = { ticketId ->
-                                            onDeleteComplaint?.invoke(ticketId)
-                                        },
-                                        onSendTicketMessage = onSendTicketMessage,
-                                        getTicketMessagesStream = getTicketMessagesStream,
-                                        onIssueTicketCompensation = onIssueTicketCompensation
-                                    )
-                                }
+                                ComplaintsSupportScreen(
+                                    users = uiState.users,
+                                    initialTickets = uiState.supportTickets,
+                                    onAddFundsToUser = onAddFunds,
+                                    onSaveTicket = { ticket ->
+                                        onSaveComplaint?.invoke(ticket)
+                                    },
+                                    onDeleteTicket = { ticketId ->
+                                        onDeleteComplaint?.invoke(ticketId)
+                                    },
+                                    onSendTicketMessage = onSendTicketMessage,
+                                    getTicketMessagesStream = getTicketMessagesStream,
+                                    onIssueTicketCompensation = onIssueTicketCompensation
+                                )
                             }
                             "payouts" -> {
-                                Column(modifier = Modifier.fillMaxSize()) {
-                                    PayoutsManagementScreenContent(
-                                        uiState = uiState,
-                                        onApprovePayout = { req ->
-                                            onApprovePayout?.invoke(req)
-                                        },
-                                        onRejectPayout = { req, reason ->
-                                            onRejectPayout?.invoke(req, reason)
-                                        }
-                                    )
-                                }
+                                PayoutsManagementScreenContent(
+                                    uiState = uiState,
+                                    onApprovePayout = { req ->
+                                        onApprovePayout?.invoke(req)
+                                    },
+                                    onRejectPayout = { req, reason ->
+                                        onRejectPayout?.invoke(req, reason)
+                                    }
+                                )
                             }
                             "admins" -> {
-                                Column(modifier = Modifier.fillMaxSize()) {
-                                    SubAppNavigationHeader(
-                                        title = "Staff & Admin Center",
-                                        onBack = { selectedTab = "system" },
-                                        accentColor = currentHyperTheme.primaryColor
-                                    )
-                                    StaffManagementScreenContent(
-                                        uiState = uiState,
-                                        onGrantAdmin = onGrantAdmin,
-                                        onRevokeAdmin = onRevokeAdmin,
-                                        onUpdateAdmin = onUpdateAdmin,
-                                        onDeleteAdmin = onDeleteAdmin
-                                    )
-                                }
+                                StaffManagementScreenContent(
+                                    uiState = uiState,
+                                    onGrantAdmin = onGrantAdmin,
+                                    onRevokeAdmin = onRevokeAdmin,
+                                    onUpdateAdmin = onUpdateAdmin,
+                                    onDeleteAdmin = onDeleteAdmin
+                                )
                             }
                             "tournament_rules" -> {
                                 Column(modifier = Modifier.fillMaxSize()) {
@@ -529,8 +514,12 @@ fun DashboardScreen(
 
     if (showAdminProfileDialog) {
         val currentEmail = (uiState as? DashboardState.Success)?.currentUserEmail ?: "anantisback47@gmail.com"
+        val successState = uiState as? DashboardState.Success
         AdminProfileDialog(
             email = currentEmail,
+            tournaments = successState?.tournaments ?: emptyList(),
+            users = successState?.users ?: emptyList(),
+            admins = successState?.admins ?: emptyList(),
             onDismiss = { showAdminProfileDialog = false },
             onNavigateTab = { tab ->
                 showAdminProfileDialog = false
@@ -2060,6 +2049,9 @@ fun AppHubRowTile(
 @Composable
 fun AdminProfileDialog(
     email: String,
+    tournaments: List<com.example.domain.model.Tournament> = emptyList(),
+    users: List<com.example.domain.model.UserProfile> = emptyList(),
+    admins: List<com.example.domain.model.AdminRecord> = emptyList(),
     onDismiss: () -> Unit,
     onNavigateTab: (String) -> Unit,
     onOpenAttributions: () -> Unit = {},
@@ -2068,10 +2060,21 @@ fun AdminProfileDialog(
     onLogoutClick: () -> Unit,
     accentColor: Color
 ) {
+    val totalMatchesHosted = tournaments.size
+    val completedMatches = tournaments.count { it.status.equals("completed", ignoreCase = true) || it.status.equals("ended", ignoreCase = true) }
+    val liveMatches = tournaments.count { it.status.equals("live", ignoreCase = true) }
+    val upcomingMatches = tournaments.count { it.status.equals("upcoming", ignoreCase = true) }
+    val totalPrizeDistributed = tournaments.filter { it.status.equals("completed", ignoreCase = true) || it.status.equals("ended", ignoreCase = true) }.sumOf { it.prizePool.toDouble() }
+    val totalPrizePool = tournaments.sumOf { it.prizePool.toDouble() }
+    val totalPlayersServed = tournaments.sumOf { it.registeredPlayers }
+    val completionRate = if (totalMatchesHosted > 0) ((completedMatches.toFloat() / totalMatchesHosted) * 100).toInt() else 100
+    val adminRecord = admins.find { it.email.trim().equals(email.trim(), ignoreCase = true) }
+    val adminRole = adminRecord?.role?.uppercase() ?: "SUPER ADMINISTRATOR"
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = Color(0xFF141416),
-        shape = RoundedCornerShape(20.dp),
+        containerColor = Color(0xFF0F0F12),
+        shape = RoundedCornerShape(22.dp),
         title = {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -2090,7 +2093,7 @@ fun AdminProfileDialog(
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {
                         Text(
-                            text = "Admin Session",
+                            text = "Admin Profile",
                             color = Color.White,
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold
@@ -2102,7 +2105,7 @@ fun AdminProfileDialog(
                             modifier = Modifier.padding(top = 2.dp)
                         ) {
                             Text(
-                                text = "SUPER ADMINISTRATOR",
+                                text = adminRole,
                                 color = Color(0xFF86EFAC),
                                 fontSize = 8.5.sp,
                                 fontWeight = FontWeight.ExtraBold,
@@ -2118,30 +2121,191 @@ fun AdminProfileDialog(
         },
         text = {
             Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Email & DB Connection Card
+                // Email & Status Card
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    color = Color(0xFF09090B),
+                    shape = RoundedCornerShape(14.dp),
+                    color = Color(0xFF16161A),
                     border = BorderStroke(1.dp, Color(0xFF27272A))
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
-                        Text("Active Account", color = Color(0xFF71717A), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-                        Text(email, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                        Spacer(modifier = Modifier.height(6.dp))
+                        Text("AUTHENTICATED ADMIN ID", color = Color(0xFF71717A), fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
+                        Text(email, color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+                        Spacer(modifier = Modifier.height(4.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(modifier = Modifier.size(7.dp).background(Color(0xFF4ADE80), CircleShape))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Connected to Firebase Realtime DB & Firestore", color = Color(0xFF4ADE80), fontSize = 10.sp)
+                            Text("Full Realtime Access · Root RBAC Permissions", color = Color(0xFF86EFAC), fontSize = 10.sp)
                         }
                     }
                 }
 
-                // Quick Navigation items
-                Text("QUICK CONTROLS & SECURITY", color = Color(0xFF71717A), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
+                // Section 1: MATCH HOSTING METRICS ("Matches Khilaye")
+                Text("MATCH HOSTING METRICS", color = Color(0xFF71717A), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // Stat 1: Total Matches Khilaye
+                    Surface(
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFF181622),
+                        border = BorderStroke(1.dp, Color(0xFF3B2D54))
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.EmojiEvents, contentDescription = null, tint = Color(0xFFA78BFA), modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("HOSTED", color = Color(0xFFA78BFA), fontSize = 9.5.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text("$totalMatchesHosted", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+                            Text("Total Matches", color = Color(0xFF71717A), fontSize = 9.5.sp)
+                        }
+                    }
+
+                    // Stat 2: Completed Matches
+                    Surface(
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFF0F2018),
+                        border = BorderStroke(1.dp, Color(0xFF1B4D36))
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Check, contentDescription = null, tint = Color(0xFF34D399), modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("COMPLETED", color = Color(0xFF34D399), fontSize = 9.5.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text("$completedMatches", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+                            Text("Finished & Verified", color = Color(0xFF71717A), fontSize = 9.5.sp)
+                        }
+                    }
+                }
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // Stat 3: Prize Distributed
+                    Surface(
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFF1F1C12),
+                        border = BorderStroke(1.dp, Color(0xFF4A3B1B))
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Payments, contentDescription = null, tint = Color(0xFFFBBF24), modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("PRIZE POOL", color = Color(0xFFFBBF24), fontSize = 9.5.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text("₹${totalPrizePool.toInt()}", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
+                            Text("₹${totalPrizeDistributed.toInt()} Distributed", color = Color(0xFF86EFAC), fontSize = 9.5.sp)
+                        }
+                    }
+
+                    // Stat 4: Players Hosted
+                    Surface(
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFF101B2B),
+                        border = BorderStroke(1.dp, Color(0xFF1D3D5E))
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Group, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("PLAYERS", color = Color(0xFF38BDF8), fontSize = 9.5.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text("$totalPlayersServed", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+                            Text("Slots Managed", color = Color(0xFF71717A), fontSize = 9.5.sp)
+                        }
+                    }
+                }
+
+                // Match Status breakdown bar
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    color = Color(0xFF16161A),
+                    border = BorderStroke(1.dp, Color(0xFF27272A))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(modifier = Modifier.size(8.dp).background(Color(0xFFEF4444), CircleShape))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("LIVE: $liveMatches", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(modifier = Modifier.size(8.dp).background(Color(0xFF38BDF8), CircleShape))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("UPCOMING: $upcomingMatches", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(modifier = Modifier.size(8.dp).background(Color(0xFF4ADE80), CircleShape))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("SUCCESS: $completionRate%", color = Color(0xFF86EFAC), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                // Section 2: Quick Navigation & Security
+                Text("ADMIN CONTROLS & MODULES", color = Color(0xFF71717A), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
+
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { onNavigateTab("tournaments_list") },
+                    color = Color(0xFF1A1A1E),
+                    border = BorderStroke(1.dp, Color(0xFF27272A))
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.EmojiEvents, contentDescription = null, tint = Color(0xFFA78BFA), modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text("Tournaments & Matches Center", color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+                        }
+                        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(15.dp))
+                    }
+                }
+
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { onNavigateTab("admins") },
+                    color = Color(0xFF1A1A1E),
+                    border = BorderStroke(1.dp, Color(0xFF27272A))
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Shield, contentDescription = null, tint = accentColor, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text("Staff & RBAC Roles", color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+                        }
+                        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(15.dp))
+                    }
+                }
 
                 Surface(
                     modifier = Modifier
@@ -2157,7 +2321,7 @@ fun AdminProfileDialog(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(UntitledIcons.Sliders, contentDescription = null, tint = Color(0xFFA78BFA), modifier = Modifier.size(18.dp))
+                            Icon(UntitledIcons.Sliders, contentDescription = null, tint = Color(0xFFFBBF24), modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(10.dp))
                             Text("Rate Limiter & Quota Engine", color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
                         }
@@ -2204,50 +2368,6 @@ fun AdminProfileDialog(
                             Icon(Icons.Default.Info, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(10.dp))
                             Text("Attributions & Tech Credits", color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
-                        }
-                        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(15.dp))
-                    }
-                }
-
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable { onNavigateTab("admins") },
-                    color = Color(0xFF1A1A1E),
-                    border = BorderStroke(1.dp, Color(0xFF27272A))
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Shield, contentDescription = null, tint = accentColor, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text("Staff & RBAC Roles", color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
-                        }
-                        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(15.dp))
-                    }
-                }
-
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable { onNavigateTab("settings") },
-                    color = Color(0xFF1A1A1E),
-                    border = BorderStroke(1.dp, Color(0xFF27272A))
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Settings, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text("System Settings & Themes", color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
                         }
                         Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(15.dp))
                     }
