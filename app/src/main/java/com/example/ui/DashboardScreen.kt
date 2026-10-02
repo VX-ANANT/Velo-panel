@@ -14,6 +14,7 @@ import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.Spring
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -69,6 +70,8 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import com.example.R
 import com.example.ui.common.LiquidGlassOpticsManager
 import com.example.ui.common.LiquidGlassOpticsStudio
 import com.example.ui.components.VelorixAudioLabDialog
@@ -253,6 +256,7 @@ fun DashboardScreen(
                                     scrollState = dashboardScrollState,
                                     onTournamentClick = onTournamentClick,
                                     onSettingsClick = onSettingsClick,
+                                    onTournamentsListClick = { selectedTab = "tournaments_list" },
                                     onVerifyClick = { selectedTab = "operations" },
                                     onBracketClick = onBracketClick,
                                     onProfilesClick = { selectedTab = "operations" },
@@ -650,11 +654,11 @@ fun DashboardHeader(
                         .border(1.dp, Color(0xFF27272A), RoundedCornerShape(10.dp)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Shield,
-                        contentDescription = "Admin Shield",
-                        tint = Color.White,
-                        modifier = Modifier.size(18.dp)
+                    Image(
+                        painter = painterResource(id = R.drawable.velorix_logo_transparent),
+                        contentDescription = "Velorix Logo",
+                        modifier = Modifier.size(26.dp),
+                        contentScale = ContentScale.Fit
                     )
                 }
                 Spacer(modifier = Modifier.width(12.dp))
@@ -795,6 +799,7 @@ fun DashboardContent(
     scrollState: ScrollState = rememberScrollState(),
     onTournamentClick: (String) -> Unit = {},
     onSettingsClick: (String) -> Unit,
+    onTournamentsListClick: () -> Unit = {},
     onVerifyClick: () -> Unit,
     onBracketClick: (String) -> Unit,
     onProfilesClick: () -> Unit,
@@ -920,7 +925,7 @@ fun DashboardContent(
                         iconTint = Color(0xFFFFD700),
                         badgeText = if (liveTournamentsCount > 0) "Live" else "Matches",
                         badgeColor = if (liveTournamentsCount > 0) Color(0xFF10B981) else Color(0xFFFFD700),
-                        onClick = { onTournamentClick("") }
+                        onClick = onTournamentsListClick
                     )
                     UntitledMetricTile(
                         modifier = Modifier.weight(1f),
@@ -967,7 +972,7 @@ fun DashboardContent(
                         iconTint = Color(0xFFFFD700),
                         badgeText = if (liveTournamentsCount > 0) "Live" else "Matches",
                         badgeColor = if (liveTournamentsCount > 0) Color(0xFF10B981) else Color(0xFFFFD700),
-                        onClick = { onTournamentClick("") }
+                        onClick = onTournamentsListClick
                     )
                 }
                 Row(
@@ -1177,6 +1182,92 @@ fun DashboardContent(
                             ) {
                                 Icon(Icons.Default.Add, contentDescription = null, tint = Color.Black, modifier = Modifier.size(14.dp))
                                 Text("Create Match", fontSize = 11.sp, fontWeight = FontWeight.Black, color = Color.Black)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // All Active Tournaments Quick Grid
+            if (uiState.tournaments.isNotEmpty()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "ACTIVE TOURNAMENTS (${uiState.tournaments.size})",
+                        color = VelorixTextSecondary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
+                    )
+                    Text(
+                        text = "View All (${uiState.tournaments.size}) →",
+                        color = VelorixAccent,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clickable { onTournamentsListClick() }
+                    )
+                }
+
+                uiState.tournaments.take(5).forEach { tourney ->
+                    UntitledCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        backgroundColor = Color(0xFF111116),
+                        borderColor = Color(0xFF282834),
+                        padding = 12.dp,
+                        onClick = { onTournamentClick(tourney.id) }
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    UntitledBadge(
+                                        text = tourney.status.uppercase(),
+                                        color = if (tourney.status.equals("active", ignoreCase = true) || tourney.status.equals("live", ignoreCase = true)) Color(0xFF10B981) else Color(0xFF60A5FA)
+                                    )
+                                    Text(
+                                        text = "${tourney.game} • ${tourney.format}",
+                                        color = VelorixTextSecondary,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = tourney.title,
+                                    color = Color.White,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "${tourney.registeredPlayers}/${tourney.maxPlayers} slots • Starts: ${tourney.startsAt ?: "Starting Soon"}",
+                                    color = Color.LightGray,
+                                    fontSize = 11.sp
+                                )
+                            }
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text(
+                                    text = "₹${tourney.prizePool.toInt()}",
+                                    color = Color(0xFFFFD700),
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
+                                Text(
+                                    text = if (tourney.entryFee > 0f) "₹${tourney.entryFee.toInt()} Fee" else "FREE",
+                                    color = if (tourney.entryFee > 0f) Color(0xFF38BDF8) else Color(0xFF10B981),
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
                             }
                         }
                     }

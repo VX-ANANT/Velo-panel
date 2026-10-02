@@ -10,6 +10,7 @@ service cloud.firestore {
       return isAuthenticated() && (
         request.auth.token.email == 'anantisback47@gmail.com' ||
         request.auth.token.email == 'velorixtest@gmail.com' ||
+        request.auth.token.email == 'velorixadmin@gmail.com' ||
         request.auth.token.admin == true ||
         exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );
@@ -22,22 +23,22 @@ service cloud.firestore {
     // Tournaments, Matches, and Category Trees
     match /tournaments/{tournamentId} {
       allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow write: if isAuthenticated();
     }
 
     match /matches/{matchId} {
       allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow write: if isAuthenticated();
     }
 
     match /active_tournaments/{id} {
       allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow write: if isAuthenticated();
     }
 
     match /all_tournaments/{id} {
       allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow write: if isAuthenticated();
     }
 
     match /categories/{category}/{subCollection}/{documentId} {

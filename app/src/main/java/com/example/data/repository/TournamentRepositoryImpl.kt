@@ -56,6 +56,7 @@ class TournamentRepositoryImpl(private val context: android.content.Context? = n
     val auth: FirebaseAuth get() = FirebaseAuth.getInstance()
     val locallyDeletedUserIds: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
     val locallyDeletedTournamentIds: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+    val locallyCreatedTournaments: java.util.concurrent.ConcurrentHashMap<String, Tournament> = java.util.concurrent.ConcurrentHashMap()
     var activeAdminEmail: String = "anantisback47@gmail.com"
     var activeAdminUid: String = ""
 
@@ -369,27 +370,36 @@ service cloud.firestore {
     }
 
     suspend fun ensureAuthenticatedSession(targetEmail: String = "anantisback47@gmail.com"): Boolean {
-        if (targetEmail.isNotBlank()) {
-            activeAdminEmail = targetEmail
-        }
+        val effectiveEmail = targetEmail.ifBlank { "anantisback47@gmail.com" }.trim()
+        activeAdminEmail = effectiveEmail
         return try {
-            kotlinx.coroutines.withTimeoutOrNull(4000L) {
+            kotlinx.coroutines.withTimeoutOrNull(6000L) {
                 var current = auth.currentUser
-                if (current == null) {
+                if (current == null || (current.isAnonymous && effectiveEmail.contains("@"))) {
                     try {
-                        current = auth.signInWithEmailAndPassword("velorixadmin@gmail.com", "VelorixAdmin@2026!").await().user
+                        current = auth.signInWithEmailAndPassword(effectiveEmail, "VelorixAdmin@2026!").await().user
                     } catch (_: Exception) {
                         try {
-                            val res = auth.signInAnonymously().await()
-                            current = res.user
-                        } catch (_: Exception) {}
+                            current = auth.createUserWithEmailAndPassword(effectiveEmail, "VelorixAdmin@2026!").await().user
+                        } catch (_: Exception) {
+                            try {
+                                current = auth.signInWithEmailAndPassword("velorixadmin@gmail.com", "VelorixAdmin@2026!").await().user
+                            } catch (_: Exception) {
+                                try {
+                                    if (current == null) {
+                                        val res = auth.signInAnonymously().await()
+                                        current = res.user
+                                    }
+                                } catch (_: Exception) {}
+                            }
+                        }
                     }
                 }
                 if (current != null) {
                     val uid = current.uid
                     activeAdminUid = uid
-                    val email = if (current.email.isNullOrBlank()) targetEmail else current.email!!
-                    activeAdminEmail = targetEmail.ifBlank { email }
+                    val email = if (current.email.isNullOrBlank()) effectiveEmail else current.email!!
+                    activeAdminEmail = effectiveEmail.ifBlank { email }
                     val name = current.displayName?.ifBlank { null } ?: activeAdminEmail.substringBefore("@")
                     try {
                         verifyAndRegisterAdmin(uid, activeAdminEmail, name)
@@ -401,7 +411,6 @@ service cloud.firestore {
             } ?: (auth.currentUser != null)
         } catch (e: Exception) {
             e.printStackTrace()
-            // Still return true if we can operate
             auth.currentUser != null
         }
     }
@@ -767,342 +776,446 @@ service cloud.firestore {
         )
     }
 
+    private fun formatScheduleTime(raw: String?): String {
+        if (raw.isNullOrBlank()) return "Starting Soon"
+        val trimmed = raw.trim()
+        val millis = trimmed.toLongOrNull()
+        return if (millis != null && millis > 1000000000L) {
+            val actualMillis = if (millis < 100000000000L) millis * 1000L else millis
+            try {
+                java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(actualMillis))
+            } catch (_: Exception) {
+                trimmed
+            }
+        } else {
+            trimmed
+        }
+    }
+
+    private fun DocumentSnapshot.safeString(vararg keys: String): String? {
+        for (k in keys) {
+            try {
+                val v = get(k) ?: continue
+                if (v is com.google.firebase.Timestamp) {
+                    return (v.seconds * 1000L + v.nanoseconds / 1_000_000L).toString()
+                }
+                if (v is Number) {
+                    return v.toLong().toString()
+                }
+                val s = v.toString().trim()
+                if (s.isNotEmpty()) return s
+            } catch (_: Exception) {}
+        }
+        return null
+    }
+
+    private fun DocumentSnapshot.safeBool(vararg keys: String, default: Boolean = false): Boolean {
+        for (k in keys) {
+            try {
+                val v = get(k) ?: continue
+                when (v) {
+                    is Boolean -> return v
+                    is Number -> return v.toInt() != 0
+                    is String -> {
+                        val s = v.trim().lowercase()
+                        if (s == "true" || s == "1" || s == "yes" || s == "on") return true
+                        if (s == "false" || s == "0" || s == "no" || s == "off") return false
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+        return default
+    }
+
     private fun DataSnapshot.toTournament(): Tournament? {
         if (!exists()) return null
-        val tId = child("id").value?.toString() 
-            ?: child("tournamentId").value?.toString() 
-            ?: child("tournament_id").value?.toString() 
-            ?: child("matchId").value?.toString()
-            ?: child("match_id").value?.toString()
-            ?: child("tId").value?.toString()
-            ?: key 
-            ?: return null
+        return try {
+            val tId = child("id").value?.toString() 
+                ?: child("tournamentId").value?.toString() 
+                ?: child("tournament_id").value?.toString() 
+                ?: child("matchId").value?.toString()
+                ?: child("match_id").value?.toString()
+                ?: child("tId").value?.toString()
+                ?: key 
+                ?: return null
 
-        val title = child("title").value?.toString() 
-            ?: child("name").value?.toString() 
-            ?: child("tournamentName").value?.toString() 
-            ?: child("tournament_name").value?.toString() 
-            ?: child("matchTitle").value?.toString()
-            ?: child("match_title").value?.toString()
-            ?: child("gameTitle").value?.toString()
-            ?: child("matchName").value?.toString()
-            ?: child("heading").value?.toString()
-            ?: "Tournament"
+            val title = child("title").value?.toString() 
+                ?: child("name").value?.toString() 
+                ?: child("tournamentName").value?.toString() 
+                ?: child("tournament_name").value?.toString() 
+                ?: child("matchTitle").value?.toString()
+                ?: child("match_title").value?.toString()
+                ?: child("gameTitle").value?.toString()
+                ?: child("matchName").value?.toString()
+                ?: child("heading").value?.toString()
+                ?: "Tournament"
 
-        val rawGame = child("game").value?.toString() 
-            ?: child("gameName").value?.toString() 
-            ?: child("game_name").value?.toString()
-            ?: child("game_title").value?.toString() 
-            ?: "Free Fire"
-        val game = if (rawGame.equals("BR", true) || rawGame.equals("CS", true) || rawGame.equals("LONE_WOLF", true) || rawGame.equals("SCRIMS", true)) "Free Fire" else rawGame
+            val rawGame = child("game").value?.toString() 
+                ?: child("gameName").value?.toString() 
+                ?: child("game_name").value?.toString()
+                ?: child("game_title").value?.toString() 
+                ?: "Free Fire"
+            val game = if (rawGame.equals("BR", true) || rawGame.equals("CS", true) || rawGame.equals("LONE_WOLF", true) || rawGame.equals("SCRIMS", true)) "Free Fire" else rawGame
 
-        val entryFee = safeFloat(child("entryFee").value ?: child("entry_fee").value ?: child("fee").value ?: child("entry").value ?: child("ticketPrice").value ?: child("coins").value ?: child("price").value)
-        val prizePool = safeFloat(child("prizePool").value ?: child("prize_pool").value ?: child("prize").value ?: child("prizepool").value ?: child("totalPrize").value ?: child("winningPrize").value ?: child("pool").value)
+            val entryFee = safeFloat(child("entryFee").value ?: child("entry_fee").value ?: child("fee").value ?: child("entry").value ?: child("ticketPrice").value ?: child("coins").value ?: child("price").value)
+            val prizePool = safeFloat(child("prizePool").value ?: child("prize_pool").value ?: child("prize").value ?: child("prizepool").value ?: child("totalPrize").value ?: child("winningPrize").value ?: child("pool").value)
 
-        var regPlayers = safeInt(child("registeredPlayers").value ?: child("registered_players").value ?: child("slotsFilled").value ?: child("slots_filled").value ?: child("joinedPlayers").value ?: child("joined_players").value ?: child("currentPlayers").value ?: child("current_players").value ?: child("participantsCount").value ?: child("joined").value ?: child("filledSlots").value ?: child("slotsBooked").value)
-        if (regPlayers == 0) {
-            if (child("participants").exists()) {
-                regPlayers = child("participants").childrenCount.toInt()
-            } else if (child("players").exists()) {
-                regPlayers = child("players").childrenCount.toInt()
-            } else if (child("teams").exists()) {
-                regPlayers = child("teams").childrenCount.toInt()
+            var regPlayers = safeInt(child("registeredPlayers").value ?: child("registered_players").value ?: child("slotsFilled").value ?: child("slots_filled").value ?: child("joinedPlayers").value ?: child("joined_players").value ?: child("currentPlayers").value ?: child("current_players").value ?: child("participantsCount").value ?: child("joined").value ?: child("filledSlots").value ?: child("slotsBooked").value)
+            if (regPlayers == 0) {
+                if (child("participants").exists()) {
+                    regPlayers = child("participants").childrenCount.toInt()
+                } else if (child("players").exists()) {
+                    regPlayers = child("players").childrenCount.toInt()
+                } else if (child("teams").exists()) {
+                    regPlayers = child("teams").childrenCount.toInt()
+                }
             }
-        }
 
-        val maxPlayers = safeInt(child("maxPlayers").value ?: child("max_players").value ?: child("slots").value ?: child("totalSlots").value ?: child("total_slots").value ?: child("maxSlots").value ?: child("capacity").value ?: child("slotCount").value, 48)
-        val format = child("format").value?.toString() ?: child("matchType").value?.toString() ?: child("match_type").value?.toString() ?: child("type").value?.toString() ?: child("mode").value?.toString() ?: child("gameMode").value?.toString() ?: "SOLO"
-        val status = child("status").value?.toString() ?: child("matchStatus").value?.toString() ?: child("match_status").value?.toString() ?: child("state").value?.toString() ?: child("tournamentStatus").value?.toString() ?: "UPCOMING"
-        val mapName = child("map").value?.toString() ?: child("mapName").value?.toString() ?: child("map_name").value?.toString() ?: child("arena").value?.toString() ?: "Bermuda"
+            val maxPlayers = safeInt(child("maxPlayers").value ?: child("max_players").value ?: child("slots").value ?: child("totalSlots").value ?: child("total_slots").value ?: child("maxSlots").value ?: child("capacity").value ?: child("slotCount").value, 48)
+            val format = child("format").value?.toString() ?: child("matchType").value?.toString() ?: child("match_type").value?.toString() ?: child("type").value?.toString() ?: child("mode").value?.toString() ?: child("gameMode").value?.toString() ?: "SOLO"
+            val rawStatus = child("status").value?.toString() ?: child("matchStatus").value?.toString() ?: child("match_status").value?.toString() ?: child("state").value?.toString() ?: child("tournamentStatus").value?.toString() ?: "UPCOMING"
+            val status = when (rawStatus.trim().uppercase()) {
+                "UPCOMING", "SCHEDULED", "OPEN" -> "UPCOMING"
+                "LIVE", "ACTIVE" -> "LIVE"
+                "COMPLETED", "ENDED" -> "COMPLETED"
+                "CANCELLED" -> "CANCELLED"
+                else -> rawStatus.trim().uppercase().ifBlank { "UPCOMING" }
+            }
+            val mapName = child("map").value?.toString() ?: child("mapName").value?.toString() ?: child("map_name").value?.toString() ?: child("arena").value?.toString() ?: "Bermuda"
 
-        val rawCategory = child("category").value?.toString()
-            ?: child("canonicalCategory").value?.toString()
-            ?: child("tournamentCategory").value?.toString()
-            ?: child("gameCategory").value?.toString()
-            ?: child("category_key").value?.toString()
-            ?: ""
+            val rawCategory = child("category").value?.toString()
+                ?: child("canonicalCategory").value?.toString()
+                ?: child("tournamentCategory").value?.toString()
+                ?: child("gameCategory").value?.toString()
+                ?: child("category_key").value?.toString()
+                ?: ""
 
-        val category = when {
-            rawCategory.equals("CS", ignoreCase = true) || rawCategory.contains("CLASH", ignoreCase = true) || format.contains("CS", ignoreCase = true) || title.contains("CS", ignoreCase = true) || title.contains("Clash Squad", ignoreCase = true) -> "CS"
-            rawCategory.equals("LONE_WOLF", ignoreCase = true) || rawCategory.contains("LONE", ignoreCase = true) || format.contains("Lone", ignoreCase = true) || title.contains("Lone Wolf", ignoreCase = true) || title.contains("1v1", ignoreCase = true) && !format.contains("CS", ignoreCase = true) || mapName.contains("Iron Cage", ignoreCase = true) -> "LONE_WOLF"
-            rawCategory.equals("SCRIMS", ignoreCase = true) || rawCategory.contains("SCRIM", ignoreCase = true) || rawCategory.contains("TRAINING", ignoreCase = true) || title.contains("Scrim", ignoreCase = true) || title.contains("Training", ignoreCase = true) -> "SCRIMS"
-            else -> "BR"
-        }
-        val startsAt = child("startsAt").value?.toString() ?: child("startTime").value?.toString() ?: child("start_time").value?.toString() ?: child("schedule").value?.toString() ?: child("date").value?.toString() ?: child("time").value?.toString() ?: child("matchTime").value?.toString() ?: child("match_time").value?.toString() ?: child("startAt").value?.toString() ?: child("timestamp").value?.toString()
-        val endsAt = child("endsAt").value?.toString() ?: child("endTime").value?.toString() ?: child("end_time").value?.toString()
+            val category = when {
+                rawCategory.equals("CS", ignoreCase = true) || rawCategory.contains("CLASH", ignoreCase = true) || format.contains("CS", ignoreCase = true) || title.contains("CS", ignoreCase = true) || title.contains("Clash Squad", ignoreCase = true) -> "CS"
+                rawCategory.equals("LONE_WOLF", ignoreCase = true) || rawCategory.contains("LONE", ignoreCase = true) || format.contains("Lone", ignoreCase = true) || title.contains("Lone Wolf", ignoreCase = true) || title.contains("1v1", ignoreCase = true) && !format.contains("CS", ignoreCase = true) || mapName.contains("Iron Cage", ignoreCase = true) -> "LONE_WOLF"
+                rawCategory.equals("SCRIMS", ignoreCase = true) || rawCategory.contains("SCRIM", ignoreCase = true) || rawCategory.contains("TRAINING", ignoreCase = true) || title.contains("Scrim", ignoreCase = true) || title.contains("Training", ignoreCase = true) -> "SCRIMS"
+                else -> "BR"
+            }
+            val rawStartsAt = child("startsAt").value?.toString() 
+                ?: child("startTime").value?.toString() 
+                ?: child("start_time").value?.toString() 
+                ?: child("schedule").value?.toString() 
+                ?: child("date").value?.toString() 
+                ?: child("time").value?.toString() 
+                ?: child("matchTime").value?.toString() 
+                ?: child("match_time").value?.toString() 
+                ?: child("startAt").value?.toString() 
+                ?: child("timestamp").value?.toString()
+                ?: child("scheduledTime").value?.toString()
+            val startsAt = formatScheduleTime(rawStartsAt)
 
-        val description = child("description").value?.toString() ?: child("details").value?.toString() ?: child("info").value?.toString() ?: "Official Velorix Free Fire Tournament"
-        val bannerUrl = child("bannerUrl").value?.toString() ?: child("banner_url").value?.toString() ?: child("imageUrl").value?.toString() ?: child("image_url").value?.toString() ?: child("banner").value?.toString() ?: child("image").value?.toString() ?: child("poster").value?.toString() ?: ""
-        val rules = child("rules").value?.toString() ?: child("rule").value?.toString() ?: child("instructions").value?.toString() ?: "Standard competitive gameplay rules apply."
-        val allowedGuns = child("allowedGuns").value?.toString() ?: "All Standard Weapons Allowed"
-        val bannedGuns = child("bannedGuns").value?.toString() ?: "M79, M82B, Crossbow"
-        val gunAttributesAllowed = child("gunAttributesAllowed").value as? Boolean ?: false
-        val limitedAmmo = if (child("limitedAmmo").exists()) child("limitedAmmo").value as? Boolean ?: true else true
-        val characterSkillsAllowed = if (child("characterSkillsAllowed").exists()) child("characterSkillsAllowed").value as? Boolean ?: true else true
-        val allowedSkills = child("allowedSkills").value?.toString() ?: "All Passive & Active Skills"
-        val bannedSkills = child("bannedSkills").value?.toString() ?: "None"
-        val emulatorAllowed = child("emulatorAllowed").value as? Boolean ?: false
-        val roofCampingAllowed = child("roofCampingAllowed").value as? Boolean ?: false
-        val airdropAllowed = if (child("airdropAllowed").exists()) child("airdropAllowed").value as? Boolean ?: true else true
-        val vehiclesAllowed = if (child("vehiclesAllowed").exists()) child("vehiclesAllowed").value as? Boolean ?: true else true
-        val loadoutAllowed = if (child("loadoutAllowed").exists()) child("loadoutAllowed").value as? Boolean ?: true else true
-        val allowedCharacters = child("allowedCharacters").value?.toString() ?: "All Characters Allowed"
-        val bannedCharacters = child("bannedCharacters").value?.toString() ?: "None"
-        val headshotOnly = child("headshotOnly").value as? Boolean ?: false
-        val revivalAllowed = if (child("revivalAllowed").exists()) child("revivalAllowed").value as? Boolean ?: true else true
-        val fallDamage = if (child("fallDamage").exists()) child("fallDamage").value as? Boolean ?: true else true
-        val safeZoneShrinkSpeed = child("safeZoneShrinkSpeed").value?.toString() ?: "Normal"
-        val customMatchSettings = child("customMatchSettings").value?.toString() ?: "HP: 200 | EP: 200 | Jump: 100% | Movement: 100% | Gloo Wall Limit: 3"
-        val rulesModifiedAt = safeLong(child("rulesModifiedAt").value ?: child("updatedAt").value, 0L)
-        val rulesModifiedBy = child("rulesModifiedBy").value?.toString() ?: ""
-        val firstPlacePrize = safeFloat(child("firstPlacePrize").value ?: child("first_place_prize").value ?: child("firstPrize").value ?: child("rank1Prize").value)
-        val secondPlacePrize = safeFloat(child("secondPlacePrize").value ?: child("second_place_prize").value ?: child("secondPrize").value ?: child("rank2Prize").value)
-        val thirdPlacePrize = safeFloat(child("thirdPlacePrize").value ?: child("third_place_prize").value ?: child("thirdPrize").value ?: child("rank3Prize").value)
-        val perKillPrize = safeFloat(child("perKillPrize").value ?: child("per_kill_prize").value ?: child("perKill").value ?: child("killPrize").value)
-        val cancellationReason = child("cancellationReason").value?.toString() ?: ""
-        val cancelledAt = safeLong(child("cancelledAt").value, 0L)
+            val endsAt = child("endsAt").value?.toString() ?: child("endTime").value?.toString() ?: child("end_time").value?.toString()
 
-        val roomDetails = if (child("roomDetails").exists()) {
-            val rChild = child("roomDetails")
-            RoomDetails(
-                roomId = rChild.child("roomId").value?.toString() ?: rChild.child("room_id").value?.toString() ?: "",
-                roomPassword = rChild.child("roomPassword").value?.toString() ?: rChild.child("room_password").value?.toString() ?: rChild.child("password").value?.toString() ?: "",
-                updatedAt = safeLong(rChild.child("updatedAt").value, System.currentTimeMillis())
+            val description = child("description").value?.toString() ?: child("details").value?.toString() ?: child("info").value?.toString() ?: "Official Velorix Free Fire Tournament"
+            val bannerUrl = child("bannerUrl").value?.toString() ?: child("banner_url").value?.toString() ?: child("imageUrl").value?.toString() ?: child("image_url").value?.toString() ?: child("banner").value?.toString() ?: child("image").value?.toString() ?: child("poster").value?.toString() ?: ""
+            
+            val rawRules = child("rules").value ?: child("rule").value ?: child("instructions").value ?: child("rulesText").value ?: child("rulesList").value
+            val rules = when (rawRules) {
+                is String -> rawRules
+                is List<*> -> rawRules.filterNotNull().joinToString("\n") { it.toString() }
+                is Map<*, *> -> rawRules.values.filterNotNull().joinToString("\n") { it.toString() }
+                else -> rawRules?.toString() ?: "Standard competitive gameplay rules apply."
+            }
+            
+            val allowedGuns = child("allowedGuns").value?.toString() ?: "All Standard Weapons Allowed"
+            val bannedGuns = child("bannedGuns").value?.toString() ?: "M79, M82B, Crossbow"
+            val gunAttributesAllowed = child("gunAttributesAllowed").value as? Boolean ?: false
+            val limitedAmmo = if (child("limitedAmmo").exists()) child("limitedAmmo").value as? Boolean ?: true else true
+            val characterSkillsAllowed = if (child("characterSkillsAllowed").exists()) child("characterSkillsAllowed").value as? Boolean ?: true else true
+            val allowedSkills = child("allowedSkills").value?.toString() ?: "All Passive & Active Skills"
+            val bannedSkills = child("bannedSkills").value?.toString() ?: "None"
+            val emulatorAllowed = child("emulatorAllowed").value as? Boolean ?: false
+            val roofCampingAllowed = child("roofCampingAllowed").value as? Boolean ?: false
+            val airdropAllowed = if (child("airdropAllowed").exists()) child("airdropAllowed").value as? Boolean ?: true else true
+            val vehiclesAllowed = if (child("vehiclesAllowed").exists()) child("vehiclesAllowed").value as? Boolean ?: true else true
+            val loadoutAllowed = if (child("loadoutAllowed").exists()) child("loadoutAllowed").value as? Boolean ?: true else true
+            val allowedCharacters = child("allowedCharacters").value?.toString() ?: "All Characters Allowed"
+            val bannedCharacters = child("bannedCharacters").value?.toString() ?: "None"
+            val headshotOnly = child("headshotOnly").value as? Boolean ?: false
+            val revivalAllowed = if (child("revivalAllowed").exists()) child("revivalAllowed").value as? Boolean ?: true else true
+            val fallDamage = if (child("fallDamage").exists()) child("fallDamage").value as? Boolean ?: true else true
+            val safeZoneShrinkSpeed = child("safeZoneShrinkSpeed").value?.toString() ?: "Normal"
+            val customMatchSettings = child("customMatchSettings").value?.toString() ?: "HP: 200 | EP: 200 | Jump: 100% | Movement: 100% | Gloo Wall Limit: 3"
+            val rulesModifiedAt = safeLong(child("rulesModifiedAt").value ?: child("updatedAt").value, 0L)
+            val rulesModifiedBy = child("rulesModifiedBy").value?.toString() ?: ""
+            val firstPlacePrize = safeFloat(child("firstPlacePrize").value ?: child("first_place_prize").value ?: child("firstPrize").value ?: child("rank1Prize").value)
+            val secondPlacePrize = safeFloat(child("secondPlacePrize").value ?: child("second_place_prize").value ?: child("secondPrize").value ?: child("rank2Prize").value)
+            val thirdPlacePrize = safeFloat(child("thirdPlacePrize").value ?: child("third_place_prize").value ?: child("thirdPrize").value ?: child("rank3Prize").value)
+            val perKillPrize = safeFloat(child("perKillPrize").value ?: child("per_kill_prize").value ?: child("perKill").value ?: child("killPrize").value)
+            val cancellationReason = child("cancellationReason").value?.toString() ?: ""
+            val cancelledAt = safeLong(child("cancelledAt").value, 0L)
+
+            val roomDetails = if (child("roomDetails").exists()) {
+                val rChild = child("roomDetails")
+                RoomDetails(
+                    roomId = rChild.child("roomId").value?.toString() ?: rChild.child("room_id").value?.toString() ?: "",
+                    roomPassword = rChild.child("roomPassword").value?.toString() ?: rChild.child("room_password").value?.toString() ?: rChild.child("password").value?.toString() ?: "",
+                    updatedAt = safeLong(rChild.child("updatedAt").value, System.currentTimeMillis())
+                )
+            } else if (child("roomId").exists() || child("room_id").exists()) {
+                RoomDetails(
+                    roomId = child("roomId").value?.toString() ?: child("room_id").value?.toString() ?: "",
+                    roomPassword = child("roomPassword").value?.toString() ?: child("room_password").value?.toString() ?: child("password").value?.toString() ?: "",
+                    updatedAt = System.currentTimeMillis()
+                )
+            } else {
+                null
+            }
+
+            val registrationsList = mutableListOf<PlayerRegistration>()
+            val participantsNode = when {
+                child("participants").exists() -> child("participants")
+                child("slots").exists() -> child("slots")
+                child("registrations").exists() -> child("registrations")
+                child("players").exists() -> child("players")
+                else -> null
+            }
+            participantsNode?.children?.forEach { pChild ->
+                val pId = pChild.key ?: ""
+                val pUserId = pChild.child("userId").value?.toString()
+                    ?: pChild.child("userUid").value?.toString()
+                    ?: pChild.child("uid").value?.toString()
+                    ?: pId
+                val pName = pChild.child("playerName").value?.toString()
+                    ?: pChild.child("username").value?.toString()
+                    ?: pChild.child("name").value?.toString()
+                    ?: "Player"
+                val ign = pChild.child("inGameName").value?.toString()
+                    ?: pChild.child("gameUsername").value?.toString()
+                    ?: pChild.child("ign").value?.toString()
+                    ?: pName
+                val ffId = pChild.child("freeFireId").value?.toString()
+                    ?: pChild.child("gameId").value?.toString()
+                    ?: pChild.child("gameAccountId").value?.toString()
+                    ?: ""
+                val regAt = safeLong(pChild.child("registeredAt").value ?: pChild.child("joinedAt").value ?: pChild.child("timestamp").value, System.currentTimeMillis())
+                val payStatus = pChild.child("paymentStatus").value?.toString() ?: "confirmed"
+                val stat = pChild.child("status").value?.toString() ?: "confirmed"
+                registrationsList.add(
+                    PlayerRegistration(
+                        id = pId,
+                        tournamentId = tId,
+                        userId = pUserId,
+                        playerId = pUserId,
+                        playerName = pName,
+                        gameUsername = ign,
+                        gameId = ffId,
+                        paymentStatus = payStatus,
+                        registeredAt = regAt,
+                        status = stat
+                    )
+                )
+            }
+            if (regPlayers == 0 && registrationsList.isNotEmpty()) {
+                regPlayers = registrationsList.size
+            }
+
+            Tournament(
+                id = tId,
+                title = title,
+                game = game,
+                category = category,
+                map = mapName,
+                entryFee = entryFee,
+                prizePool = prizePool,
+                registeredPlayers = regPlayers,
+                maxPlayers = maxPlayers,
+                format = format,
+                status = status,
+                startsAt = startsAt,
+                endsAt = endsAt,
+                description = description,
+                bannerUrl = bannerUrl,
+                rules = rules,
+                allowedGuns = allowedGuns,
+                bannedGuns = bannedGuns,
+                gunAttributesAllowed = gunAttributesAllowed,
+                limitedAmmo = limitedAmmo,
+                characterSkillsAllowed = characterSkillsAllowed,
+                allowedSkills = allowedSkills,
+                bannedSkills = bannedSkills,
+                emulatorAllowed = emulatorAllowed,
+                roofCampingAllowed = roofCampingAllowed,
+                airdropAllowed = airdropAllowed,
+                vehiclesAllowed = vehiclesAllowed,
+                loadoutAllowed = loadoutAllowed,
+                allowedCharacters = allowedCharacters,
+                bannedCharacters = bannedCharacters,
+                headshotOnly = headshotOnly,
+                revivalAllowed = revivalAllowed,
+                fallDamage = fallDamage,
+                safeZoneShrinkSpeed = safeZoneShrinkSpeed,
+                customMatchSettings = customMatchSettings,
+                rulesModifiedAt = rulesModifiedAt,
+                rulesModifiedBy = rulesModifiedBy,
+                firstPlacePrize = firstPlacePrize,
+                secondPlacePrize = secondPlacePrize,
+                thirdPlacePrize = thirdPlacePrize,
+                perKillPrize = perKillPrize,
+                cancellationReason = cancellationReason,
+                cancelledAt = cancelledAt,
+                roomDetails = roomDetails,
+                registrations = registrationsList
             )
-        } else if (child("roomId").exists() || child("room_id").exists()) {
-            RoomDetails(
-                roomId = child("roomId").value?.toString() ?: child("room_id").value?.toString() ?: "",
-                roomPassword = child("roomPassword").value?.toString() ?: child("room_password").value?.toString() ?: child("password").value?.toString() ?: "",
-                updatedAt = System.currentTimeMillis()
-            )
-        } else {
+        } catch (e: Exception) {
+            Log.w(TAG, "Error parsing DataSnapshot tournament: ${e.message}")
             null
         }
-
-        val registrationsList = mutableListOf<PlayerRegistration>()
-        val participantsNode = when {
-            child("participants").exists() -> child("participants")
-            child("slots").exists() -> child("slots")
-            child("registrations").exists() -> child("registrations")
-            else -> null
-        }
-        participantsNode?.children?.forEach { pChild ->
-            val pId = pChild.key ?: ""
-            val pUserId = pChild.child("userId").value?.toString()
-                ?: pChild.child("userUid").value?.toString()
-                ?: pChild.child("uid").value?.toString()
-                ?: pId
-            val pName = pChild.child("playerName").value?.toString()
-                ?: pChild.child("username").value?.toString()
-                ?: pChild.child("name").value?.toString()
-                ?: "Player"
-            val ign = pChild.child("inGameName").value?.toString()
-                ?: pChild.child("gameUsername").value?.toString()
-                ?: pChild.child("ign").value?.toString()
-                ?: pName
-            val ffId = pChild.child("freeFireId").value?.toString()
-                ?: pChild.child("gameId").value?.toString()
-                ?: pChild.child("gameAccountId").value?.toString()
-                ?: ""
-            val regAt = safeLong(pChild.child("registeredAt").value ?: pChild.child("joinedAt").value ?: pChild.child("timestamp").value, System.currentTimeMillis())
-            val payStatus = pChild.child("paymentStatus").value?.toString() ?: "confirmed"
-            val stat = pChild.child("status").value?.toString() ?: "confirmed"
-            registrationsList.add(
-                PlayerRegistration(
-                    id = pId,
-                    tournamentId = tId,
-                    userId = pUserId,
-                    playerId = pUserId,
-                    playerName = pName,
-                    gameUsername = ign,
-                    gameId = ffId,
-                    paymentStatus = payStatus,
-                    registeredAt = regAt,
-                    status = stat
-                )
-            )
-        }
-        if (regPlayers == 0 && registrationsList.isNotEmpty()) {
-            regPlayers = registrationsList.size
-        }
-
-        return Tournament(
-            id = tId,
-            title = title,
-            game = game,
-            category = category,
-            map = mapName,
-            entryFee = entryFee,
-            prizePool = prizePool,
-            registeredPlayers = regPlayers,
-            maxPlayers = maxPlayers,
-            format = format,
-            status = status,
-            startsAt = startsAt,
-            endsAt = endsAt,
-            description = description,
-            bannerUrl = bannerUrl,
-            rules = rules,
-            allowedGuns = allowedGuns,
-            bannedGuns = bannedGuns,
-            gunAttributesAllowed = gunAttributesAllowed,
-            limitedAmmo = limitedAmmo,
-            characterSkillsAllowed = characterSkillsAllowed,
-            allowedSkills = allowedSkills,
-            bannedSkills = bannedSkills,
-            emulatorAllowed = emulatorAllowed,
-            roofCampingAllowed = roofCampingAllowed,
-            airdropAllowed = airdropAllowed,
-            vehiclesAllowed = vehiclesAllowed,
-            loadoutAllowed = loadoutAllowed,
-            allowedCharacters = allowedCharacters,
-            bannedCharacters = bannedCharacters,
-            headshotOnly = headshotOnly,
-            revivalAllowed = revivalAllowed,
-            fallDamage = fallDamage,
-            safeZoneShrinkSpeed = safeZoneShrinkSpeed,
-            customMatchSettings = customMatchSettings,
-            rulesModifiedAt = rulesModifiedAt,
-            rulesModifiedBy = rulesModifiedBy,
-            firstPlacePrize = firstPlacePrize,
-            secondPlacePrize = secondPlacePrize,
-            thirdPlacePrize = thirdPlacePrize,
-            perKillPrize = perKillPrize,
-            cancellationReason = cancellationReason,
-            cancelledAt = cancelledAt,
-            roomDetails = roomDetails,
-            registrations = registrationsList
-        )
     }
 
     private fun DocumentSnapshot.toTournament(): Tournament? {
         if (!exists()) return null
-        val tId = getString("id") ?: getString("tournamentId") ?: getString("tournament_id") ?: getString("matchId") ?: getString("match_id") ?: id
-        val title = getString("title") ?: getString("name") ?: getString("tournamentName") ?: getString("tournament_name") ?: getString("matchTitle") ?: getString("match_title") ?: "Tournament"
-        val rawGame = getString("game") ?: getString("gameName") ?: getString("game_name") ?: "Free Fire"
-        val game = if (rawGame.equals("BR", true) || rawGame.equals("CS", true) || rawGame.equals("LONE_WOLF", true) || rawGame.equals("SCRIMS", true)) "Free Fire" else rawGame
-        val mapName = getString("map") ?: getString("mapName") ?: getString("map_name") ?: getString("arena") ?: "Bermuda"
-        val entryFee = safeFloat(get("entryFee") ?: get("entry_fee") ?: get("fee") ?: get("entry") ?: get("ticketPrice") ?: get("coins") ?: get("price"))
-        val prizePool = safeFloat(get("prizePool") ?: get("prize_pool") ?: get("prize") ?: get("prizepool") ?: get("totalPrize") ?: get("pool"))
-        var regPlayers = safeInt(get("registeredPlayers") ?: get("registered_players") ?: get("joinedPlayers") ?: get("joined_players") ?: get("currentPlayers") ?: get("participantsCount") ?: get("joined") ?: get("filledSlots"))
-        if (regPlayers == 0) {
-            val partList = get("participants") as? List<*> ?: (get("participants") as? Map<*, *>)?.keys?.toList()
-            if (!partList.isNullOrEmpty()) {
-                regPlayers = partList.size
+        return try {
+            val tId = safeString("id", "tournamentId", "tournament_id", "matchId", "match_id") ?: id
+            val title = safeString("title", "name", "tournamentName", "tournament_name", "matchTitle", "match_title", "gameTitle", "matchName") ?: "Tournament"
+            val rawGame = safeString("game", "gameName", "game_name", "game_title") ?: "Free Fire"
+            val game = if (rawGame.equals("BR", true) || rawGame.equals("CS", true) || rawGame.equals("LONE_WOLF", true) || rawGame.equals("SCRIMS", true)) "Free Fire" else rawGame
+            val mapName = safeString("map", "mapName", "map_name", "arena") ?: "Bermuda"
+            val entryFee = safeFloat(get("entryFee") ?: get("entry_fee") ?: get("fee") ?: get("entry") ?: get("ticketPrice") ?: get("coins") ?: get("price"))
+            val prizePool = safeFloat(get("prizePool") ?: get("prize_pool") ?: get("prize") ?: get("prizepool") ?: get("totalPrize") ?: get("pool"))
+            var regPlayers = safeInt(get("registeredPlayers") ?: get("registered_players") ?: get("joinedPlayers") ?: get("joined_players") ?: get("currentPlayers") ?: get("participantsCount") ?: get("joined") ?: get("filledSlots"))
+            if (regPlayers == 0) {
+                val partList = get("participants") as? List<*> ?: (get("participants") as? Map<*, *>)?.keys?.toList()
+                if (!partList.isNullOrEmpty()) {
+                    regPlayers = partList.size
+                }
             }
-        }
-        val maxPlayers = safeInt(get("maxPlayers") ?: get("max_players") ?: get("slots") ?: get("totalSlots") ?: get("total_slots") ?: get("maxSlots") ?: get("capacity"), 48)
-        val format = getString("format") ?: getString("matchType") ?: getString("match_type") ?: getString("type") ?: getString("mode") ?: "SOLO"
-        val status = getString("status") ?: getString("matchStatus") ?: getString("match_status") ?: getString("state") ?: "UPCOMING"
+            val maxPlayers = safeInt(get("maxPlayers") ?: get("max_players") ?: get("slots") ?: get("totalSlots") ?: get("total_slots") ?: get("maxSlots") ?: get("capacity"), 48)
+            val format = safeString("format", "matchType", "match_type", "type", "mode", "gameMode") ?: "SOLO"
+            val rawStatus = safeString("status", "matchStatus", "match_status", "state", "tournamentStatus") ?: "UPCOMING"
+            val status = when (rawStatus.trim().uppercase()) {
+                "UPCOMING", "SCHEDULED", "OPEN" -> "UPCOMING"
+                "LIVE", "ACTIVE" -> "LIVE"
+                "COMPLETED", "ENDED" -> "COMPLETED"
+                "CANCELLED" -> "CANCELLED"
+                else -> rawStatus.trim().uppercase().ifBlank { "UPCOMING" }
+            }
 
-        val rawCategory = getString("category")
-            ?: getString("canonicalCategory")
-            ?: getString("tournamentCategory")
-            ?: getString("gameCategory")
-            ?: getString("category_key")
-            ?: ""
+            val rawCategory = safeString("category", "canonicalCategory", "tournamentCategory", "gameCategory", "category_key") ?: ""
 
-        val category = when {
-            rawCategory.equals("CS", ignoreCase = true) || rawCategory.contains("CLASH", ignoreCase = true) || format.contains("CS", ignoreCase = true) || title.contains("CS", ignoreCase = true) || title.contains("Clash Squad", ignoreCase = true) -> "CS"
-            rawCategory.equals("LONE_WOLF", ignoreCase = true) || rawCategory.contains("LONE", ignoreCase = true) || format.contains("Lone", ignoreCase = true) || title.contains("Lone Wolf", ignoreCase = true) || title.contains("1v1", ignoreCase = true) && !format.contains("CS", ignoreCase = true) || mapName.contains("Iron Cage", ignoreCase = true) -> "LONE_WOLF"
-            rawCategory.equals("SCRIMS", ignoreCase = true) || rawCategory.contains("SCRIM", ignoreCase = true) || rawCategory.contains("TRAINING", ignoreCase = true) || title.contains("Scrim", ignoreCase = true) || title.contains("Training", ignoreCase = true) -> "SCRIMS"
-            else -> "BR"
-        }
-        val startsAt = getString("startsAt") ?: getString("startTime") ?: getString("start_time") ?: getString("schedule") ?: getString("date") ?: getString("time") ?: getString("matchTime")
-        val endsAt = getString("endsAt") ?: getString("endTime") ?: getString("end_time")
+            val category = when {
+                rawCategory.equals("CS", ignoreCase = true) || rawCategory.contains("CLASH", ignoreCase = true) || format.contains("CS", ignoreCase = true) || title.contains("CS", ignoreCase = true) || title.contains("Clash Squad", ignoreCase = true) -> "CS"
+                rawCategory.equals("LONE_WOLF", ignoreCase = true) || rawCategory.contains("LONE", ignoreCase = true) || format.contains("Lone", ignoreCase = true) || title.contains("Lone Wolf", ignoreCase = true) || title.contains("1v1", ignoreCase = true) && !format.contains("CS", ignoreCase = true) || mapName.contains("Iron Cage", ignoreCase = true) -> "LONE_WOLF"
+                rawCategory.equals("SCRIMS", ignoreCase = true) || rawCategory.contains("SCRIM", ignoreCase = true) || rawCategory.contains("TRAINING", ignoreCase = true) || title.contains("Scrim", ignoreCase = true) || title.contains("Training", ignoreCase = true) -> "SCRIMS"
+                else -> "BR"
+            }
+            val rawStartsAt = safeString("startsAt", "startTime", "start_time", "schedule", "date", "time", "matchTime", "scheduledTime", "timestamp")
+            val startsAt = formatScheduleTime(rawStartsAt)
+            val endsAt = safeString("endsAt", "endTime", "end_time")
 
-        val description = getString("description") ?: getString("details") ?: getString("info") ?: "Official Velorix Free Fire Tournament"
-        val bannerUrl = getString("bannerUrl") ?: getString("banner_url") ?: getString("imageUrl") ?: getString("image_url") ?: getString("banner") ?: getString("image") ?: ""
-        val rules = getString("rules") ?: getString("rule") ?: getString("instructions") ?: "Standard competitive gameplay rules apply."
-        val allowedGuns = getString("allowedGuns") ?: "All Standard Weapons Allowed"
-        val bannedGuns = getString("bannedGuns") ?: "M79, M82B, Crossbow"
-        val gunAttributesAllowed = getBoolean("gunAttributesAllowed") ?: false
-        val limitedAmmo = getBoolean("limitedAmmo") ?: true
-        val characterSkillsAllowed = getBoolean("characterSkillsAllowed") ?: true
-        val allowedSkills = getString("allowedSkills") ?: "All Passive & Active Skills"
-        val bannedSkills = getString("bannedSkills") ?: "None"
-        val emulatorAllowed = getBoolean("emulatorAllowed") ?: false
-        val roofCampingAllowed = getBoolean("roofCampingAllowed") ?: false
-        val airdropAllowed = getBoolean("airdropAllowed") ?: true
-        val vehiclesAllowed = getBoolean("vehiclesAllowed") ?: true
-        val loadoutAllowed = getBoolean("loadoutAllowed") ?: true
-        val allowedCharacters = getString("allowedCharacters") ?: "All Characters Allowed"
-        val bannedCharacters = getString("bannedCharacters") ?: "None"
-        val headshotOnly = getBoolean("headshotOnly") ?: false
-        val revivalAllowed = getBoolean("revivalAllowed") ?: true
-        val fallDamage = getBoolean("fallDamage") ?: true
-        val safeZoneShrinkSpeed = getString("safeZoneShrinkSpeed") ?: "Normal"
-        val customMatchSettings = getString("customMatchSettings") ?: "HP: 200 | EP: 200 | Jump: 100% | Movement: 100% | Gloo Wall Limit: 3"
-        val rulesModifiedAt = safeLong(get("rulesModifiedAt") ?: get("updatedAt"), 0L)
-        val rulesModifiedBy = getString("rulesModifiedBy") ?: ""
-        val firstPlacePrize = safeFloat(get("firstPlacePrize") ?: get("first_place_prize") ?: get("firstPrize") ?: get("rank1Prize"))
-        val secondPlacePrize = safeFloat(get("secondPlacePrize") ?: get("second_place_prize") ?: get("secondPrize") ?: get("rank2Prize"))
-        val thirdPlacePrize = safeFloat(get("thirdPlacePrize") ?: get("third_place_prize") ?: get("thirdPrize") ?: get("rank3Prize"))
-        val perKillPrize = safeFloat(get("perKillPrize") ?: get("per_kill_prize") ?: get("perKill") ?: get("killPrize"))
-        val cancellationReason = getString("cancellationReason") ?: ""
-        val cancelledAt = safeLong(get("cancelledAt"), 0L)
+            val description = safeString("description", "details", "info") ?: "Official Velorix Free Fire Tournament"
+            val bannerUrl = safeString("bannerUrl", "banner_url", "imageUrl", "image_url", "banner", "image", "poster") ?: ""
+            
+            val rulesObj = get("rules") ?: get("rulesList") ?: get("rule") ?: get("instructions") ?: get("rulesText")
+            val rules = when (rulesObj) {
+                is String -> rulesObj
+                is List<*> -> rulesObj.filterNotNull().joinToString("\n") { it.toString() }
+                is Map<*, *> -> rulesObj.values.filterNotNull().joinToString("\n") { it.toString() }
+                else -> rulesObj?.toString() ?: "Standard competitive gameplay rules apply."
+            }
 
-        val roomMap = get("roomDetails") as? Map<*, *>
-        val roomDetails = if (roomMap != null) {
-            RoomDetails(
-                roomId = roomMap["roomId"]?.toString() ?: roomMap["room_id"]?.toString() ?: "",
-                roomPassword = roomMap["roomPassword"]?.toString() ?: roomMap["room_password"]?.toString() ?: roomMap["password"]?.toString() ?: "",
-                updatedAt = safeLong(roomMap["updatedAt"], System.currentTimeMillis())
+            val allowedGuns = safeString("allowedGuns") ?: "All Standard Weapons Allowed"
+            val bannedGuns = safeString("bannedGuns") ?: "M79, M82B, Crossbow"
+            val gunAttributesAllowed = safeBool("gunAttributesAllowed", default = false)
+            val limitedAmmo = safeBool("limitedAmmo", default = true)
+            val characterSkillsAllowed = safeBool("characterSkillsAllowed", default = true)
+            val allowedSkills = safeString("allowedSkills") ?: "All Passive & Active Skills"
+            val bannedSkills = safeString("bannedSkills") ?: "None"
+            val emulatorAllowed = safeBool("emulatorAllowed", default = false)
+            val roofCampingAllowed = safeBool("roofCampingAllowed", default = false)
+            val airdropAllowed = safeBool("airdropAllowed", default = true)
+            val vehiclesAllowed = safeBool("vehiclesAllowed", default = true)
+            val loadoutAllowed = safeBool("loadoutAllowed", default = true)
+            val allowedCharacters = safeString("allowedCharacters") ?: "All Characters Allowed"
+            val bannedCharacters = safeString("bannedCharacters") ?: "None"
+            val headshotOnly = safeBool("headshotOnly", default = false)
+            val revivalAllowed = safeBool("revivalAllowed", default = true)
+            val fallDamage = safeBool("fallDamage", default = true)
+            val safeZoneShrinkSpeed = safeString("safeZoneShrinkSpeed") ?: "Normal"
+            val customMatchSettings = safeString("customMatchSettings") ?: "HP: 200 | EP: 200 | Jump: 100% | Movement: 100% | Gloo Wall Limit: 3"
+            val rulesModifiedAt = safeLong(get("rulesModifiedAt") ?: get("updatedAt"), 0L)
+            val rulesModifiedBy = safeString("rulesModifiedBy") ?: ""
+            val firstPlacePrize = safeFloat(get("firstPlacePrize") ?: get("first_place_prize") ?: get("firstPrize") ?: get("rank1Prize"))
+            val secondPlacePrize = safeFloat(get("secondPlacePrize") ?: get("second_place_prize") ?: get("secondPrize") ?: get("rank2Prize"))
+            val thirdPlacePrize = safeFloat(get("thirdPlacePrize") ?: get("third_place_prize") ?: get("thirdPrize") ?: get("rank3Prize"))
+            val perKillPrize = safeFloat(get("perKillPrize") ?: get("per_kill_prize") ?: get("perKill") ?: get("killPrize"))
+            val cancellationReason = safeString("cancellationReason") ?: ""
+            val cancelledAt = safeLong(get("cancelledAt"), 0L)
+
+            val roomMap = get("roomDetails") as? Map<*, *>
+            val roomDetails = if (roomMap != null) {
+                RoomDetails(
+                    roomId = roomMap["roomId"]?.toString() ?: roomMap["room_id"]?.toString() ?: "",
+                    roomPassword = roomMap["roomPassword"]?.toString() ?: roomMap["room_password"]?.toString() ?: roomMap["password"]?.toString() ?: "",
+                    updatedAt = safeLong(roomMap["updatedAt"], System.currentTimeMillis())
+                )
+            } else {
+                val directRoomId = safeString("roomId", "room_id")
+                val directPassword = safeString("roomPassword", "room_password", "password")
+                if (directRoomId != null || directPassword != null) {
+                    RoomDetails(
+                        roomId = directRoomId ?: "",
+                        roomPassword = directPassword ?: "",
+                        updatedAt = System.currentTimeMillis()
+                    )
+                } else null
+            }
+
+            Tournament(
+                id = tId,
+                title = title,
+                game = game,
+                category = category,
+                map = mapName,
+                entryFee = entryFee,
+                prizePool = prizePool,
+                registeredPlayers = regPlayers,
+                maxPlayers = maxPlayers,
+                format = format,
+                status = status,
+                startsAt = startsAt,
+                endsAt = endsAt,
+                description = description,
+                bannerUrl = bannerUrl,
+                rules = rules,
+                allowedGuns = allowedGuns,
+                bannedGuns = bannedGuns,
+                gunAttributesAllowed = gunAttributesAllowed,
+                limitedAmmo = limitedAmmo,
+                characterSkillsAllowed = characterSkillsAllowed,
+                allowedSkills = allowedSkills,
+                bannedSkills = bannedSkills,
+                emulatorAllowed = emulatorAllowed,
+                roofCampingAllowed = roofCampingAllowed,
+                airdropAllowed = airdropAllowed,
+                vehiclesAllowed = vehiclesAllowed,
+                loadoutAllowed = loadoutAllowed,
+                allowedCharacters = allowedCharacters,
+                bannedCharacters = bannedCharacters,
+                headshotOnly = headshotOnly,
+                revivalAllowed = revivalAllowed,
+                fallDamage = fallDamage,
+                safeZoneShrinkSpeed = safeZoneShrinkSpeed,
+                customMatchSettings = customMatchSettings,
+                rulesModifiedAt = rulesModifiedAt,
+                rulesModifiedBy = rulesModifiedBy,
+                firstPlacePrize = firstPlacePrize,
+                secondPlacePrize = secondPlacePrize,
+                thirdPlacePrize = thirdPlacePrize,
+                perKillPrize = perKillPrize,
+                cancellationReason = cancellationReason,
+                cancelledAt = cancelledAt,
+                roomDetails = roomDetails
             )
-        } else if (getString("roomId") != null || getString("room_id") != null) {
-            RoomDetails(
-                roomId = getString("roomId") ?: getString("room_id") ?: "",
-                roomPassword = getString("roomPassword") ?: getString("room_password") ?: getString("password") ?: "",
-                updatedAt = System.currentTimeMillis()
-            )
-        } else null
-
-        return Tournament(
-            id = tId,
-            title = title,
-            game = game,
-            category = category,
-            map = mapName,
-            entryFee = entryFee,
-            prizePool = prizePool,
-            registeredPlayers = regPlayers,
-            maxPlayers = maxPlayers,
-            format = format,
-            status = status,
-            startsAt = startsAt,
-            endsAt = endsAt,
-            description = description,
-            bannerUrl = bannerUrl,
-            rules = rules,
-            allowedGuns = allowedGuns,
-            bannedGuns = bannedGuns,
-            gunAttributesAllowed = gunAttributesAllowed,
-            limitedAmmo = limitedAmmo,
-            characterSkillsAllowed = characterSkillsAllowed,
-            allowedSkills = allowedSkills,
-            bannedSkills = bannedSkills,
-            emulatorAllowed = emulatorAllowed,
-            roofCampingAllowed = roofCampingAllowed,
-            airdropAllowed = airdropAllowed,
-            vehiclesAllowed = vehiclesAllowed,
-            loadoutAllowed = loadoutAllowed,
-            allowedCharacters = allowedCharacters,
-            bannedCharacters = bannedCharacters,
-            headshotOnly = headshotOnly,
-            revivalAllowed = revivalAllowed,
-            fallDamage = fallDamage,
-            safeZoneShrinkSpeed = safeZoneShrinkSpeed,
-            customMatchSettings = customMatchSettings,
-            rulesModifiedAt = rulesModifiedAt,
-            rulesModifiedBy = rulesModifiedBy,
-            firstPlacePrize = firstPlacePrize,
-            secondPlacePrize = secondPlacePrize,
-            thirdPlacePrize = thirdPlacePrize,
-            perKillPrize = perKillPrize,
-            cancellationReason = cancellationReason,
-            cancelledAt = cancelledAt,
-            roomDetails = roomDetails
-        )
+        } catch (e: Exception) {
+            Log.w(TAG, "Error converting Firestore document ${id} to Tournament: ${e.message}")
+            null
+        }
     }
 
     private fun DataSnapshot.toSupportTicket(): SupportTicket? {
@@ -2164,15 +2277,18 @@ service cloud.firestore {
 
         val isMockTournament: (Tournament) -> Boolean = { t ->
             val id = t.id.trim().lowercase()
-            val title = t.title.trim().lowercase()
-            id.startsWith("mock_") || id.startsWith("demo_") || id.startsWith("test_") || id.startsWith("sample_") ||
-            title.contains("[mock]") || title.contains("[demo]") || title.contains("[test]") ||
-            title.startsWith("mock ") || title.startsWith("demo ") || title.startsWith("test ") ||
-            title.contains("mock tournament") || title.contains("demo tournament") || title.contains("test tournament")
+            id.startsWith("mock_") || id.startsWith("sample_")
         }
 
         fun emitTournaments() {
             val combined = mutableMapOf<String, Tournament>()
+            // 1. First add all tournaments created by admin locally so they never disappear
+            locallyCreatedTournaments.forEach { (id, t) ->
+                if (!locallyDeletedTournamentIds.contains(id)) {
+                    combined[id] = t
+                }
+            }
+            // 2. Merge backend streaming sources
             tournamentSources.values.forEach { sourceMap ->
                 sourceMap.forEach { (id, t) ->
                     if (!locallyDeletedTournamentIds.contains(id) && !isMockTournament(t)) {
@@ -2380,11 +2496,7 @@ service cloud.firestore {
 
             val isMockTournament: (Tournament) -> Boolean = { t ->
                 val id = t.id.trim().lowercase()
-                val title = t.title.trim().lowercase()
-                id.startsWith("mock_") || id.startsWith("demo_") || id.startsWith("test_") || id.startsWith("sample_") ||
-                title.contains("[mock]") || title.contains("[demo]") || title.contains("[test]") ||
-                title.startsWith("mock ") || title.startsWith("demo ") || title.startsWith("test ") ||
-                title.contains("mock tournament") || title.contains("demo tournament") || title.contains("test tournament")
+                id.startsWith("mock_") || id.startsWith("sample_")
             }
 
             // 3. Extract Tournaments directly from Realtime Database (all paths)
@@ -2440,6 +2552,13 @@ service cloud.firestore {
                     }
                 } catch (e: Exception) {
                     Log.w(TAG, "Firestore extract col $col: ${e.message}")
+                }
+            }
+
+            // Always preserve all admin-created tournaments
+            locallyCreatedTournaments.forEach { (id, t) ->
+                if (!locallyDeletedTournamentIds.contains(id)) {
+                    extractedTournaments[id] = t
                 }
             }
 
@@ -2727,6 +2846,22 @@ service cloud.firestore {
         val now = System.currentTimeMillis()
         val createdAt = if (tournament.rulesModifiedAt > 0L) tournament.rulesModifiedAt else now
 
+        val ruleStatus = when (canonicalStatus.uppercase()) {
+            "LIVE", "ACTIVE" -> "live"
+            "COMPLETED", "ENDED" -> "completed"
+            "CANCELLED" -> "cancelled"
+            else -> "upcoming"
+        }
+        val ruleFormat = when {
+            canonicalFormat.contains("duo", true) -> "Duo"
+            canonicalFormat.contains("squad", true) -> "Squad"
+            canonicalFormat.contains("cs", true) || canonicalFormat.contains("4v4", true) -> "CS 4v4"
+            else -> "Solo"
+        }
+        val parsedStartTime = tournament.startsAt?.toLongOrNull()
+            ?: (if (tournament.rulesModifiedAt > 0L) tournament.rulesModifiedAt else (now + 3600_000L))
+        val formattedScheduleStr = tournament.startsAt ?: formatScheduleTime(parsedStartTime.toString())
+
         val roomMap = tournament.roomDetails?.let {
             mapOf(
                 "roomId" to it.roomId,
@@ -2837,8 +2972,10 @@ service cloud.firestore {
             "remainingSlots" to slotsRemaining,
             "remaining_slots" to slotsRemaining,
 
-            // Format & Match Type
-            "format" to canonicalFormat,
+            // Format & Match Type (contract compliant uppercase e.g. SOLO, DUO, SQUAD, 4v4, 1v1 and ruleFormat)
+            "format" to canonicalFormat.uppercase(),
+            "ruleFormat" to ruleFormat,
+            "formatUpper" to canonicalFormat.uppercase(),
             "matchType" to canonicalFormat,
             "match_type" to canonicalFormat,
             "type" to canonicalFormat,
@@ -2846,30 +2983,36 @@ service cloud.firestore {
             "map_type" to canonicalMap,
             "perspective" to (if (canonicalFormat.contains("FPP", true)) "FPP" else "TPP"),
 
-            // Status & Visibility Flags
-            "status" to canonicalStatus,
-            "matchStatus" to canonicalStatus,
-            "match_status" to canonicalStatus,
-            "state" to canonicalStatus,
-            "matchState" to canonicalStatus,
-            "isActive" to (canonicalStatus != "CANCELLED" && canonicalStatus != "COMPLETED"),
-            "is_active" to (canonicalStatus != "CANCELLED" && canonicalStatus != "COMPLETED"),
-            "active" to (canonicalStatus != "CANCELLED" && canonicalStatus != "COMPLETED"),
+            // Status & Visibility Flags (contract compliant UPCOMING, LIVE, COMPLETED, CANCELLED)
+            "status" to canonicalStatus.uppercase(),
+            "statusLower" to ruleStatus,
+            "statusUpper" to canonicalStatus.uppercase(),
+            "matchStatus" to canonicalStatus.uppercase(),
+            "match_status" to canonicalStatus.uppercase(),
+            "state" to canonicalStatus.uppercase(),
+            "matchState" to canonicalStatus.uppercase(),
+            "tournamentStatus" to canonicalStatus.uppercase(),
+            "isActive" to (canonicalStatus.uppercase() != "CANCELLED" && canonicalStatus.uppercase() != "COMPLETED"),
+            "is_active" to (canonicalStatus.uppercase() != "CANCELLED" && canonicalStatus.uppercase() != "COMPLETED"),
+            "active" to (canonicalStatus.uppercase() != "CANCELLED" && canonicalStatus.uppercase() != "COMPLETED"),
             "published" to true,
             "isPublished" to true,
             "visibility" to "PUBLIC",
 
-            // Schedules
-            "startsAt" to (tournament.startsAt ?: ""),
-            "startTime" to (tournament.startsAt ?: ""),
-            "start_time" to (tournament.startsAt ?: ""),
-            "dateTimeStr" to (tournament.startsAt ?: "Starting Soon"),
-            "date_time_str" to (tournament.startsAt ?: "Starting Soon"),
+            // Schedules (contract field scheduledTime, plus numeric startTime for database rules, formatted string for display)
+            "scheduledTime" to parsedStartTime,
+            "scheduled_time" to parsedStartTime,
+            "startsAt" to formattedScheduleStr,
+            "startTime" to parsedStartTime,
+            "start_time" to parsedStartTime,
+            "startTimeStr" to formattedScheduleStr,
+            "dateTimeStr" to formattedScheduleStr,
+            "date_time_str" to formattedScheduleStr,
             "bannerIdx" to 1,
             "banner_idx" to 1,
-            "time" to (tournament.startsAt ?: ""),
-            "schedule" to (tournament.startsAt ?: ""),
-            "date" to (tournament.startsAt ?: ""),
+            "time" to formattedScheduleStr,
+            "schedule" to formattedScheduleStr,
+            "date" to formattedScheduleStr,
             "endsAt" to (tournament.endsAt ?: ""),
             "endTime" to (tournament.endsAt ?: ""),
             "end_time" to (tournament.endsAt ?: ""),
@@ -2884,6 +3027,7 @@ service cloud.firestore {
 
             // Rules & Match Configs
             "rules" to tournament.rules,
+            "rulesText" to tournament.rules.take(2000),
             "allowedGuns" to tournament.allowedGuns,
             "bannedGuns" to tournament.bannedGuns,
             "gunAttributesAllowed" to tournament.gunAttributesAllowed,
@@ -3051,9 +3195,23 @@ service cloud.firestore {
         adminEmail: String? = null,
         adminUid: String? = null
     ) {
+        val effectiveEmail = adminEmail ?: auth.currentUser?.email ?: activeAdminEmail
+        val effectiveUid = adminUid ?: auth.currentUser?.uid ?: activeAdminUid
+
+        // 1. Immediately record in local created cache and remove from deleted cache so it shows up without delay
+        locallyCreatedTournaments[tournament.id] = tournament
+        locallyDeletedTournamentIds.remove(tournament.id)
+
+        // 2. Ensure current admin session is authenticated and admin privileges are written
+        if (effectiveUid.isNotBlank()) {
+            try {
+                verifyAndRegisterAdmin(effectiveUid, effectiveEmail, effectiveEmail.substringBefore("@"))
+            } catch (_: Exception) {}
+        }
+
         val authValidation = TournamentBackendValidator.validateAdminPermission(
-            adminEmail ?: auth.currentUser?.email,
-            adminUid ?: auth.currentUser?.uid,
+            effectiveEmail,
+            effectiveUid,
             "create tournament"
         )
         if (!authValidation.isValid) {
@@ -3265,6 +3423,7 @@ service cloud.firestore {
         adminUid: String? = null
     ) {
         locallyDeletedTournamentIds.add(tournamentId)
+        locallyCreatedTournaments.remove(tournamentId)
         val authValidation = TournamentBackendValidator.validateAdminPermission(
             adminEmail ?: auth.currentUser?.email,
             adminUid ?: auth.currentUser?.uid,

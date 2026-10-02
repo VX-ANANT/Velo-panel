@@ -24,6 +24,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
@@ -62,131 +63,145 @@ fun AuthGlassInputBox(
     isError: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    val cornerRadius = 22.dp
+    val cornerRadius = 20.dp
     val shape = RoundedCornerShape(cornerRadius)
 
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(58.dp)
+            .height(56.dp)
             .clip(shape)
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        Color.White.copy(alpha = 0.08f),
-                        Color.White.copy(alpha = 0.025f)
-                    )
-                )
-            )
             .border(
                 BorderStroke(
-                    width = 1.2.dp,
+                    width = 0.75.dp,
                     brush = Brush.verticalGradient(
                         colors = listOf(
-                            if (isError) Color(0xFFFF5252).copy(alpha = 0.85f) else Color.White.copy(alpha = 0.35f),
-                            if (isError) Color(0xFFFF5252).copy(alpha = 0.40f) else Color.White.copy(alpha = 0.08f),
-                            if (isError) Color(0xFFFF5252).copy(alpha = 0.65f) else Color.White.copy(alpha = 0.20f)
+                            if (isError) Color(0xFFFF5252).copy(alpha = 0.85f) else Color.White.copy(alpha = 0.32f),
+                            if (isError) Color(0xFFFF5252).copy(alpha = 0.25f) else Color.White.copy(alpha = 0.06f),
+                            if (isError) Color(0xFFFF5252).copy(alpha = 0.60f) else Color(0xFF818CF8).copy(alpha = 0.14f),
+                            if (isError) Color(0xFFFF5252).copy(alpha = 0.40f) else Color.White.copy(alpha = 0.16f)
                         )
                     )
                 ),
                 shape = shape
             )
-            .drawBehind {
-                drawLiquidGlassOpticReflections(
-                    cornerRadius = cornerRadius.toPx(),
-                    intensity = 0.90f
-                )
-            }
-            .padding(horizontal = 16.dp),
-        contentAlignment = Alignment.CenterStart
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Glowing Cyber Icon on the left
-            if (leadingIcon != null || leadingIconPainter != null) {
-                Box(
-                    modifier = Modifier
-                        .size(34.dp)
-                        .drawBehind {
-                            drawCircle(
-                                brush = Brush.radialGradient(
-                                    colors = listOf(
-                                        Color(0x356366F1),
-                                        Color.Transparent
-                                    ),
-                                    center = Offset(size.width / 2f, size.height / 2f),
-                                    radius = size.width * 0.85f
-                                )
-                            )
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (leadingIconPainter != null) {
-                        Icon(
-                            painter = painterResource(id = leadingIconPainter),
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(20.dp)
+        // Translucent Clear Glass Substrate with Gaussian blur (exact same as bottom nav bar)
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .blur(radius = 5.dp)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = 0.14f),
+                            Color.White.copy(alpha = 0.06f)
                         )
-                    } else if (leadingIcon != null) {
-                        Icon(
-                            imageVector = leadingIcon,
-                            contentDescription = null,
-                            tint = Color.White.copy(alpha = 0.95f),
-                            modifier = Modifier.size(20.dp)
+                    )
+                )
+        )
+
+        // Glass Layer: Optical Specular Reflections & Bevels (exact same as bottom nav bar)
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .drawBehind {
+                    drawLiquidGlassOpticReflections(
+                        cornerRadius = cornerRadius.toPx(),
+                        intensity = 0.85f
+                    )
+                }
+                .padding(horizontal = 16.dp),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Glowing Cyber Icon on the left
+                if (leadingIcon != null || leadingIconPainter != null) {
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .drawBehind {
+                                drawCircle(
+                                    brush = Brush.radialGradient(
+                                        colors = listOf(
+                                            Color(0x356366F1),
+                                            Color.Transparent
+                                        ),
+                                        center = Offset(size.width / 2f, size.height / 2f),
+                                        radius = size.width * 0.85f
+                                    )
+                                )
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (leadingIconPainter != null) {
+                            Icon(
+                                painter = painterResource(id = leadingIconPainter),
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        } else if (leadingIcon != null) {
+                            Icon(
+                                imageVector = leadingIcon,
+                                contentDescription = null,
+                                tint = Color.White.copy(alpha = 0.95f),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                }
+
+                // Input field with transparent background
+                Box(
+                    modifier = Modifier.weight(1f),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    if (value.isEmpty()) {
+                        Text(
+                            text = placeholder,
+                            color = Color.White.copy(alpha = 0.42f),
+                            fontSize = 15.sp,
+                            fontFamily = VelorixFontFamily,
+                            fontWeight = FontWeight.Normal
                         )
                     }
-                }
-                Spacer(modifier = Modifier.width(12.dp))
-            }
 
-            // Input field with transparent background
-            Box(
-                modifier = Modifier.weight(1f),
-                contentAlignment = Alignment.CenterStart
-            ) {
-                if (value.isEmpty()) {
-                    Text(
-                        text = placeholder,
-                        color = Color.White.copy(alpha = 0.42f),
-                        fontSize = 15.sp,
-                        fontFamily = VelorixFontFamily,
-                        fontWeight = FontWeight.Normal
+                    BasicTextField(
+                        value = value,
+                        onValueChange = onValueChange,
+                        modifier = Modifier.fillMaxWidth(),
+                        textStyle = TextStyle(
+                            color = Color.White,
+                            fontSize = 15.sp,
+                            fontFamily = VelorixFontFamily,
+                            fontWeight = FontWeight.Medium
+                        ),
+                        cursorBrush = SolidColor(Color.White),
+                        singleLine = true,
+                        visualTransformation = if (isPassword && !passwordVisible) PasswordVisualTransformation() else VisualTransformation.None,
+                        keyboardOptions = keyboardOptions,
+                        keyboardActions = keyboardActions
                     )
                 }
 
-                BasicTextField(
-                    value = value,
-                    onValueChange = onValueChange,
-                    modifier = Modifier.fillMaxWidth(),
-                    textStyle = TextStyle(
-                        color = Color.White,
-                        fontSize = 15.sp,
-                        fontFamily = VelorixFontFamily,
-                        fontWeight = FontWeight.Medium
-                    ),
-                    cursorBrush = SolidColor(Color.White),
-                    singleLine = true,
-                    visualTransformation = if (isPassword && !passwordVisible) PasswordVisualTransformation() else VisualTransformation.None,
-                    keyboardOptions = keyboardOptions,
-                    keyboardActions = keyboardActions
-                )
-            }
-
-            // Trailing eye icon for password
-            if (isPassword && onTogglePassword != null) {
-                IconButton(
-                    onClick = onTogglePassword,
-                    modifier = Modifier.size(28.dp)
-                ) {
-                    Icon(
-                        imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                        contentDescription = "Toggle Password",
-                        tint = Color.White.copy(alpha = 0.65f),
-                        modifier = Modifier.size(18.dp)
-                    )
+                // Trailing eye icon for password
+                if (isPassword && onTogglePassword != null) {
+                    IconButton(
+                        onClick = onTogglePassword,
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                            contentDescription = "Toggle Password",
+                            tint = Color.White.copy(alpha = 0.65f),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
             }
         }
@@ -194,7 +209,7 @@ fun AuthGlassInputBox(
 }
 
 /**
- * Pure White High-Contrast Primary Button from Reference Screenshot
+ * Luminous Frosted Cyber-Glass Primary Action Button (non-whitish, sleek crystal glass)
  */
 @Composable
 fun PrimaryGlassAuthButton(
@@ -204,42 +219,85 @@ fun PrimaryGlassAuthButton(
     enabled: Boolean = true,
     modifier: Modifier = Modifier
 ) {
-    val shape = RoundedCornerShape(22.dp)
+    val cornerRadius = 22.dp
+    val shape = RoundedCornerShape(cornerRadius)
+
     Box(
         modifier = modifier
             .fillMaxWidth()
             .height(54.dp)
             .clip(shape)
-            .background(if (enabled) Color.White else Color.White.copy(alpha = 0.5f))
+            .border(
+                BorderStroke(
+                    width = 0.85.dp,
+                    brush = Brush.verticalGradient(
+                        listOf(
+                            Color.White.copy(alpha = if (enabled) 0.45f else 0.20f),
+                            Color.White.copy(alpha = if (enabled) 0.10f else 0.04f),
+                            Color(0xFF818CF8).copy(alpha = if (enabled) 0.28f else 0.10f),
+                            Color.White.copy(alpha = if (enabled) 0.20f else 0.08f)
+                        )
+                    )
+                ),
+                shape = shape
+            )
             .clickable(
                 enabled = enabled && !isLoading,
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = onClick
-            ),
-        contentAlignment = Alignment.Center
+            )
     ) {
-        if (isLoading) {
-            CircularProgressIndicator(
-                color = Color.Black,
-                strokeWidth = 2.5.dp,
-                modifier = Modifier.size(22.dp)
-            )
-        } else {
-            Text(
-                text = text,
-                color = Color.Black,
-                fontSize = 16.sp,
-                fontFamily = VelorixFontFamily,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 0.5.sp
-            )
+        // Translucent Clear Glass Substrate with Gaussian blur (same as bottom nav bar)
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .blur(radius = 5.dp)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color(0xFF818CF8).copy(alpha = if (enabled) 0.26f else 0.10f),
+                            Color(0xFF6366F1).copy(alpha = if (enabled) 0.18f else 0.06f),
+                            Color.White.copy(alpha = if (enabled) 0.06f else 0.02f)
+                        )
+                    )
+                )
+        )
+
+        // Glass Layer: Optical Specular Reflections & Bevels (same as bottom nav bar)
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .drawBehind {
+                    drawLiquidGlassOpticReflections(
+                        cornerRadius = cornerRadius.toPx(),
+                        intensity = 0.90f
+                    )
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            if (isLoading) {
+                CircularProgressIndicator(
+                    color = Color.White,
+                    strokeWidth = 2.dp,
+                    modifier = Modifier.size(20.dp)
+                )
+            } else {
+                Text(
+                    text = text,
+                    color = if (enabled) Color.White else Color.White.copy(alpha = 0.5f),
+                    fontSize = 15.sp,
+                    fontFamily = VelorixFontFamily,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.8.sp
+                )
+            }
         }
     }
 }
 
 /**
- * Liquid Glass Google Sign-In Button from Reference Screenshot
+ * Liquid Glass Google Sign-In Button matching bottom nav bar glass
  */
 @Composable
 fun GoogleGlassAuthButton(
@@ -255,62 +313,73 @@ fun GoogleGlassAuthButton(
             .fillMaxWidth()
             .height(54.dp)
             .clip(shape)
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        Color.White.copy(alpha = 0.08f),
-                        Color.White.copy(alpha = 0.02f)
-                    )
-                )
-            )
             .border(
                 BorderStroke(
-                    width = 1.2.dp,
+                    width = 0.75.dp,
                     brush = Brush.verticalGradient(
                         colors = listOf(
-                            Color.White.copy(alpha = 0.35f),
-                            Color.White.copy(alpha = 0.08f),
-                            Color.White.copy(alpha = 0.22f)
+                            Color.White.copy(alpha = 0.28f),
+                            Color.White.copy(alpha = 0.06f),
+                            Color(0xFF818CF8).copy(alpha = 0.14f),
+                            Color.White.copy(alpha = 0.16f)
                         )
                     )
                 ),
                 shape = shape
             )
-            .drawBehind {
-                drawLiquidGlassOpticReflections(
-                    cornerRadius = cornerRadius.toPx(),
-                    intensity = 0.85f
-                )
-            }
             .clickable(
                 enabled = !isLoading,
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = onClick
             )
-            .padding(horizontal = 16.dp),
-        contentAlignment = Alignment.Center
     ) {
-        if (isLoading) {
-            CircularProgressIndicator(
-                color = Color.White,
-                strokeWidth = 2.dp,
-                modifier = Modifier.size(20.dp)
-            )
-        } else {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
-            ) {
-                Surface(
-                    modifier = Modifier.size(28.dp),
-                    shape = CircleShape,
+        // Translucent Clear Glass Substrate with Gaussian blur (same as bottom nav bar)
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .blur(radius = 5.dp)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = 0.12f),
+                            Color.White.copy(alpha = 0.05f)
+                        )
+                    )
+                )
+        )
+
+        // Glass Layer: Optical Specular Reflections & Bevels (same as bottom nav bar)
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .drawBehind {
+                    drawLiquidGlassOpticReflections(
+                        cornerRadius = cornerRadius.toPx(),
+                        intensity = 0.80f
+                    )
+                }
+                .padding(horizontal = 16.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            if (isLoading) {
+                CircularProgressIndicator(
                     color = Color.White,
-                    shadowElevation = 2.dp
+                    strokeWidth = 2.dp,
+                    modifier = Modifier.size(20.dp)
+                )
+            } else {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
                 ) {
                     Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier
+                            .size(30.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.10f))
+                            .border(0.75.dp, Color.White.copy(alpha = 0.20f), CircleShape),
+                        contentAlignment = Alignment.Center
                     ) {
                         Image(
                             painter = painterResource(id = R.drawable.google_favicon),
@@ -318,16 +387,16 @@ fun GoogleGlassAuthButton(
                             modifier = Modifier.size(18.dp)
                         )
                     }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        text = "Sign in with Google",
+                        color = Color.White,
+                        fontSize = 15.sp,
+                        fontFamily = VelorixFontFamily,
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = 0.3.sp
+                    )
                 }
-                Spacer(modifier = Modifier.width(12.dp))
-                Text(
-                    text = "Sign in with Google",
-                    color = Color.White,
-                    fontSize = 15.sp,
-                    fontFamily = VelorixFontFamily,
-                    fontWeight = FontWeight.SemiBold,
-                    letterSpacing = 0.3.sp
-                )
             }
         }
     }

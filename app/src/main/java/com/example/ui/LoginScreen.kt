@@ -24,6 +24,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
@@ -794,13 +795,13 @@ fun LoginScreen(
         ) {
             Spacer(modifier = Modifier.height(16.dp))
 
-            // TOP LOGO: Spiked Chrome Velorix Tournaments Emblem from Reference Design
+            // TOP LOGO: Transparent background Velorix Logo
             Image(
-                painter = painterResource(id = R.drawable.velorix_auth_logo),
+                painter = painterResource(id = R.drawable.velorix_logo_transparent),
                 contentDescription = "Velorix Tournaments Logo",
                 modifier = Modifier
-                    .width(220.dp)
-                    .height(130.dp),
+                    .width(240.dp)
+                    .height(115.dp),
                 contentScale = ContentScale.Fit
             )
 
@@ -825,103 +826,136 @@ fun LoginScreen(
                     .widthIn(max = 430.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Sleek Frosted Glass Tab Switcher with Optical Highlights
+                // Sleek Frosted Glass Tab Switcher with Optical Highlights matching bottom nav bar
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(46.dp)
-                        .clip(RoundedCornerShape(23.dp))
-                        .background(
-                            Brush.verticalGradient(
-                                listOf(
-                                    Color.White.copy(alpha = 0.08f),
-                                    Color.White.copy(alpha = 0.02f)
-                                )
-                            )
-                        )
+                        .height(48.dp)
+                        .clip(RoundedCornerShape(24.dp))
                         .border(
-                            BorderStroke(
-                                1.dp,
+                            width = 0.75.dp,
+                            brush = Brush.verticalGradient(
+                                listOf(
+                                    Color.White.copy(alpha = 0.35f),
+                                    Color.White.copy(alpha = 0.06f),
+                                    Color(0xFF818CF8).copy(alpha = 0.14f),
+                                    Color.White.copy(alpha = 0.16f)
+                                )
+                            ),
+                            shape = RoundedCornerShape(24.dp)
+                        )
+                ) {
+                    // Translucent Clear Glass Substrate with Gaussian blur (same as bottom nav bar)
+                    Box(
+                        modifier = Modifier
+                            .matchParentSize()
+                            .blur(radius = 5.dp)
+                            .background(
                                 Brush.verticalGradient(
-                                    listOf(
-                                        Color.White.copy(alpha = 0.25f),
+                                    colors = listOf(
+                                        Color.White.copy(alpha = 0.14f),
                                         Color.White.copy(alpha = 0.06f)
                                     )
                                 )
-                            ),
-                            shape = RoundedCornerShape(23.dp)
-                        )
-                        .drawBehind {
-                            drawLiquidGlassOpticReflections(
-                                cornerRadius = 23.dp.toPx(),
-                                intensity = 0.6f
+                            )
+                    )
+
+                    // Glass Layer: Optical Specular Reflections & Bevels (same as bottom nav bar)
+                    Box(
+                        modifier = Modifier
+                            .matchParentSize()
+                            .drawBehind {
+                                drawLiquidGlassOpticReflections(
+                                    cornerRadius = 24.dp.toPx(),
+                                    intensity = 0.85f
+                                )
+                            }
+                            .padding(horizontal = 4.dp, vertical = 3.5.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxSize(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            AuthGlassTabPill(
+                                title = "SIGN IN",
+                                isSelected = authMode == AuthMode.LOGIN,
+                                modifier = Modifier.weight(1f),
+                                onClick = {
+                                    authMode = AuthMode.LOGIN
+                                    errorMessage = null
+                                    infoMessage = null
+                                }
+                            )
+
+                            AuthGlassTabPill(
+                                title = "REGISTER",
+                                isSelected = authMode == AuthMode.REGISTER,
+                                modifier = Modifier.weight(1f),
+                                onClick = {
+                                    authMode = AuthMode.REGISTER
+                                    errorMessage = null
+                                    infoMessage = null
+                                }
+                            )
+
+                            AuthGlassTabPill(
+                                title = "PHONE",
+                                isSelected = authMode == AuthMode.PHONE,
+                                modifier = Modifier.weight(1f),
+                                onClick = {
+                                    authMode = AuthMode.PHONE
+                                    errorMessage = null
+                                    infoMessage = null
+                                }
+                            )
+
+                            AuthGlassTabPill(
+                                title = "LINK",
+                                isSelected = authMode == AuthMode.MAGIC_LINK,
+                                modifier = Modifier.weight(1f),
+                                onClick = {
+                                    authMode = AuthMode.MAGIC_LINK
+                                    errorMessage = null
+                                    infoMessage = null
+                                }
                             )
                         }
-                        .padding(3.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxSize(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        AuthGlassTabPill(
-                            title = "SIGN IN",
-                            isSelected = authMode == AuthMode.LOGIN,
-                            modifier = Modifier.weight(1f),
-                            onClick = {
-                                authMode = AuthMode.LOGIN
-                                errorMessage = null
-                                infoMessage = null
-                            }
-                        )
-
-                        AuthGlassTabPill(
-                            title = "REGISTER",
-                            isSelected = authMode == AuthMode.REGISTER,
-                            modifier = Modifier.weight(1f),
-                            onClick = {
-                                authMode = AuthMode.REGISTER
-                                errorMessage = null
-                                infoMessage = null
-                            }
-                        )
-
-                        AuthGlassTabPill(
-                            title = "PHONE",
-                            isSelected = authMode == AuthMode.PHONE,
-                            modifier = Modifier.weight(1f),
-                            onClick = {
-                                authMode = AuthMode.PHONE
-                                errorMessage = null
-                                infoMessage = null
-                            }
-                        )
-
-                        AuthGlassTabPill(
-                            title = "LINK",
-                            isSelected = authMode == AuthMode.MAGIC_LINK,
-                            modifier = Modifier.weight(1f),
-                            onClick = {
-                                authMode = AuthMode.MAGIC_LINK
-                                errorMessage = null
-                                infoMessage = null
-                            }
-                        )
                     }
                 }
 
                 Spacer(modifier = Modifier.height(18.dp))
 
-                // Bound device resume chip (liquid glass)
+                // Bound device resume chip (liquid glass - not whitish)
                 val currentBound = boundAccount
                 if (currentBound != null) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(16.dp))
-                            .background(Color.White.copy(alpha = 0.06f))
-                            .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.18f)), RoundedCornerShape(16.dp))
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(
+                                        Color(0xFF0F172A).copy(alpha = 0.65f),
+                                        Color(0xFF090D1A).copy(alpha = 0.65f)
+                                    )
+                                )
+                            )
+                            .border(
+                                BorderStroke(
+                                    0.75.dp,
+                                    Brush.verticalGradient(
+                                        listOf(
+                                            Color(0xFF38BDF8).copy(alpha = 0.35f),
+                                            Color.White.copy(alpha = 0.06f),
+                                            Color(0xFF38BDF8).copy(alpha = 0.18f)
+                                        )
+                                    )
+                                ),
+                                RoundedCornerShape(16.dp)
+                            )
                             .drawBehind {
-                                drawLiquidGlassOpticReflections(cornerRadius = 16.dp.toPx(), intensity = 0.5f)
+                                drawLiquidGlassOpticReflections(cornerRadius = 16.dp.toPx(), intensity = 0.6f)
                             }
                             .padding(horizontal = 14.dp, vertical = 10.dp)
                     ) {
@@ -1164,19 +1198,35 @@ fun LoginScreen(
 
                         Spacer(modifier = Modifier.height(14.dp))
 
-                        // Instant Admin Access Pill (Translucent Glass with Glow)
+                        // Instant Admin Access Pill (Translucent Glass with Cyber Glow - not whitish)
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(46.dp)
                                 .clip(RoundedCornerShape(22.dp))
-                                .background(Color.White.copy(alpha = 0.05f))
+                                .background(
+                                    Brush.verticalGradient(
+                                        listOf(
+                                            Color(0xFF6366F1).copy(alpha = 0.12f),
+                                            Color(0xFF4F46E5).copy(alpha = 0.06f)
+                                        )
+                                    )
+                                )
                                 .border(
-                                    BorderStroke(1.dp, Color(0xFF818CF8).copy(alpha = 0.35f)),
+                                    BorderStroke(
+                                        0.75.dp,
+                                        Brush.verticalGradient(
+                                            listOf(
+                                                Color(0xFF818CF8).copy(alpha = 0.38f),
+                                                Color.White.copy(alpha = 0.06f),
+                                                Color(0xFF818CF8).copy(alpha = 0.18f)
+                                            )
+                                        )
+                                    ),
                                     shape = RoundedCornerShape(22.dp)
                                 )
                                 .drawBehind {
-                                    drawLiquidGlassOpticReflections(cornerRadius = 22.dp.toPx(), intensity = 0.5f)
+                                    drawLiquidGlassOpticReflections(cornerRadius = 22.dp.toPx(), intensity = 0.6f)
                                 }
                                 .clickable(enabled = !isLoading) {
                                     coroutineScope.launch {
@@ -1536,14 +1586,8 @@ private fun AuthGlassTabPill(
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
-    val bgColor by animateColorAsState(
-        targetValue = if (isSelected) Color.White.copy(alpha = 0.22f) else Color.Transparent,
-        animationSpec = tween(durationMillis = 200),
-        label = "pill_bg"
-    )
-
     val textColor by animateColorAsState(
-        targetValue = if (isSelected) Color.White else Color.White.copy(alpha = 0.55f),
+        targetValue = if (isSelected) Color.White else Color.White.copy(alpha = 0.60f),
         animationSpec = tween(durationMillis = 200),
         label = "pill_text"
     )
@@ -1551,15 +1595,47 @@ private fun AuthGlassTabPill(
     Box(
         modifier = modifier
             .fillMaxHeight()
-            .clip(RoundedCornerShape(20.dp))
-            .background(bgColor)
+            .padding(vertical = if (isSelected) 3.dp else 4.dp, horizontal = 2.dp)
+            .clip(RoundedCornerShape(16.dp))
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
+        if (isSelected) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .drawBehind {
+                        drawSelectionBackgroundGlow(intensity = 0.40f)
+                    }
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = 0.12f),
+                                Color(0xFF818CF8).copy(alpha = 0.08f),
+                                Color.White.copy(alpha = 0.03f)
+                            )
+                        )
+                    )
+                    .border(
+                        width = 0.75.dp,
+                        brush = Brush.verticalGradient(
+                            listOf(
+                                Color.White.copy(alpha = 0.38f),
+                                Color.White.copy(alpha = 0.06f),
+                                Color(0xFF818CF8).copy(alpha = 0.14f),
+                                Color.White.copy(alpha = 0.16f)
+                            )
+                        ),
+                        shape = RoundedCornerShape(16.dp)
+                    )
+            )
+        }
+
         Text(
             text = title,
             color = textColor,
-            fontSize = 12.sp,
+            fontSize = 11.5.sp,
             fontFamily = VelorixFontFamily,
             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
             letterSpacing = 0.5.sp

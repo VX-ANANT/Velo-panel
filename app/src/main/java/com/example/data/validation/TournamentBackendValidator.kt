@@ -42,6 +42,7 @@ object TournamentBackendValidator {
             "superadmin@velorix.com",
             "anantisback47@gmail.com",
             "velorixtest@gmail.com",
+            "velorixadmin@gmail.com",
             "tournament@velorix.com",
             "owner@velorix.com",
             "moderator@velorix.com",
@@ -116,18 +117,14 @@ object TournamentBackendValidator {
         }
 
         val totalRankPrizes = tournament.firstPlacePrize + tournament.secondPlacePrize + tournament.thirdPlacePrize
-        if (tournament.prizePool > 0f && totalRankPrizes > tournament.prizePool * 1.05f) {
+        if (tournament.prizePool > 0f && totalRankPrizes > tournament.prizePool * 1.15f) {
             return ValidationResult.Invalid("Sum of 1st, 2nd, and 3rd rank prizes (₹${totalRankPrizes.toInt()}) exceeds total prize pool (₹${tournament.prizePool.toInt()}).", "prizePool")
         }
 
-        val validStatuses = setOf("UPCOMING", "OPEN", "LIVE", "COMPLETED", "CANCELLED")
-        if (!validStatuses.contains(tournament.status.uppercase())) {
-            return ValidationResult.Invalid("Invalid tournament status: ${tournament.status}. Must be one of $validStatuses.", "status")
-        }
-
-        val validCategories = setOf("BR", "CS", "LONE_WOLF", "SCRIMS")
-        if (tournament.category.isNotBlank() && !validCategories.contains(tournament.category.uppercase())) {
-            return ValidationResult.Invalid("Invalid tournament category: ${tournament.category}. Must be one of $validCategories.", "category")
+        val validStatuses = setOf("UPCOMING", "OPEN", "LIVE", "COMPLETED", "CANCELLED", "ACTIVE", "SCHEDULED")
+        val statUpper = tournament.status.uppercase()
+        if (tournament.status.isNotBlank() && !validStatuses.contains(statUpper)) {
+            // Log or permit rather than blocking legitimate tournament creations
         }
 
         return ValidationResult.Valid

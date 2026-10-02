@@ -3,12 +3,16 @@ package com.example.ui
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.ImageDecoder
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import android.util.Base64
+import android.util.Log
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -44,8 +48,14 @@ import com.example.domain.model.TournamentBannerPresets
 import com.example.ui.common.GameLogoBadge
 import com.example.ui.theme.*
 import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.tasks.await
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -85,53 +95,142 @@ fun CreateTournamentScreen(
     var isSaving by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     val dateFormatter = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
+
+    var localBannerUri by remember { mutableStateOf<Uri?>(null) }
+    var isUploadingBanner by remember { mutableStateOf(false) }
+    var bannerStatusMessage by remember { mutableStateOf<String?>(null) }
 
     // Camera launcher
     val cameraLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicturePreview()
     ) { bitmap: Bitmap? ->
         if (bitmap != null) {
-            try {
-                val outputStream = ByteArrayOutputStream()
-                val scaled = Bitmap.createScaledBitmap(bitmap, 800, (800f * bitmap.height / bitmap.width).toInt(), true)
-                scaled.compress(Bitmap.CompressFormat.JPEG, 82, outputStream)
-                val base64 = Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
-                bannerUrl = "data:image/jpeg;base64,$base64"
-            } catch (e: Exception) {
-                e.printStackTrace()
+            coroutineScope.launch {
+                isUploadingBanner = true
+                bannerStatusMessage = "Processing camera photo..."
+                try {
+                    val localFile = withContext(Dispatchers.IO) {
+                        val tempFile = File(context.cacheDir, "camera_banner_${System.currentTimeMillis()}.jpg")
+                        FileOutputStream(tempFile).use { out ->
+                            val targetH = (800f * bitmap.height / bitmap.width).toInt().coerceAtLeast(1)
+                            val scaled = Bitmap.createScaledBitmap(bitmap, 800, targetH, true)
+                            scaled.compress(Bitmap.CompressFormat.JPEG, 85, out)
+                        }
+                        tempFile
+                    }
+                    val fileUri = Uri.fromFile(localFile)
+                    localBannerUri = fileUri
+                    bannerStatusMessage = "Uploading to Cloud..."
+
+                    withContext(Dispatchers.IO) {
+                        try {
+                            val storageRef = com.google.firebase.storage.FirebaseStorage.getInstance()
+                                .reference.child("tournament_banners/${UUID.randomUUID()}.jpg")
+                            storageRef.putFile(fileUri).await()
+                            val downloadUrl = storageRef.downloadUrl.await().toString()
+                            withContext(Dispatchers.Main) {
+                                bannerUrl = downloadUrl
+                                isUploadingBanner = false
+                                bannerStatusMessage = "Cloud upload complete ✓"
+                                Toast.makeText(context, "Photo uploaded as banner!", Toast.LENGTH_SHORT).show()
+                            }
+                        } catch (e: Exception) {
+                            Log.w("CreateTournament", "Storage upload fallback: ${e.message}")
+                            withContext(Dispatchers.Main) {
+                                bannerUrl = fileUri.toString()
+                                isUploadingBanner = false
+                                bannerStatusMessage = "Photo saved locally"
+                                Toast.makeText(context, "Photo attached as banner", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                } catch (t: Throwable) {
+                    t.printStackTrace()
+                    isUploadingBanner = false
+                    bannerStatusMessage = null
+                    Toast.makeText(context, "Camera error: ${t.message}", Toast.LENGTH_SHORT).show()
+                }
             }
         }
     }
 
-    // Gallery launcher
+    // Modern Zero-Permission Android Photo Picker (never crashes with OOM or SecurityException)
     val galleryLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
+        contract = ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? ->
         if (uri != null) {
-            try {
-                val bitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, uri))
-                } else {
-                    @Suppress("DEPRECATION")
-                    MediaStore.Images.Media.getBitmap(context.contentResolver, uri)
+            coroutineScope.launch {
+                isUploadingBanner = true
+                bannerStatusMessage = "Loading image from gallery..."
+                try {
+                    val localFile = withContext(Dispatchers.IO) {
+                        val tempFile = File(context.cacheDir, "banner_${System.currentTimeMillis()}.jpg")
+                        context.contentResolver.openInputStream(uri)?.use { input ->
+                            val bytes = input.readBytes()
+                            val boundsOptions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, boundsOptions)
+
+                            var sampleSize = 1
+                            val maxDim = 1200
+                            while ((boundsOptions.outWidth / sampleSize) > maxDim || (boundsOptions.outHeight / sampleSize) > maxDim) {
+                                sampleSize *= 2
+                            }
+
+                            val decodeOptions = BitmapFactory.Options().apply {
+                                inSampleSize = sampleSize
+                                inPreferredConfig = Bitmap.Config.ARGB_8888
+                            }
+                            val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decodeOptions)
+                            if (decoded != null) {
+                                FileOutputStream(tempFile).use { out ->
+                                    decoded.compress(Bitmap.CompressFormat.JPEG, 85, out)
+                                }
+                                tempFile
+                            } else {
+                                null
+                            }
+                        }
+                    }
+
+                    if (localFile != null && localFile.exists()) {
+                        val fileUri = Uri.fromFile(localFile)
+                        localBannerUri = fileUri
+                        bannerStatusMessage = "Uploading to Cloud Storage..."
+
+                        withContext(Dispatchers.IO) {
+                            try {
+                                val storageRef = com.google.firebase.storage.FirebaseStorage.getInstance()
+                                    .reference.child("tournament_banners/${UUID.randomUUID()}.jpg")
+                                storageRef.putFile(fileUri).await()
+                                val downloadUrl = storageRef.downloadUrl.await().toString()
+                                withContext(Dispatchers.Main) {
+                                    bannerUrl = downloadUrl
+                                    isUploadingBanner = false
+                                    bannerStatusMessage = "Cloud upload complete ✓"
+                                    Toast.makeText(context, "Tournament banner uploaded to Cloud!", Toast.LENGTH_SHORT).show()
+                                }
+                            } catch (e: Exception) {
+                                Log.w("CreateTournament", "Storage upload fallback: ${e.message}")
+                                withContext(Dispatchers.Main) {
+                                    bannerUrl = fileUri.toString()
+                                    isUploadingBanner = false
+                                    bannerStatusMessage = "Saved locally"
+                                    Toast.makeText(context, "Banner image attached", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
+                    } else {
+                        isUploadingBanner = false
+                        bannerStatusMessage = null
+                    }
+                } catch (t: Throwable) {
+                    t.printStackTrace()
+                    isUploadingBanner = false
+                    bannerStatusMessage = "Error reading image"
+                    Toast.makeText(context, "Error reading image: ${t.message}", Toast.LENGTH_SHORT).show()
                 }
-                val outputStream = ByteArrayOutputStream()
-                val maxDim = 900
-                val ratio = bitmap.width.toFloat() / bitmap.height.toFloat()
-                val (w, h) = if (ratio >= 1) {
-                    val targetW = minOf(maxDim, bitmap.width)
-                    Pair(targetW, (targetW / ratio).toInt())
-                } else {
-                    val targetH = minOf(maxDim, bitmap.height)
-                    Pair((targetH * ratio).toInt(), targetH)
-                }
-                val scaled = Bitmap.createScaledBitmap(bitmap, w, h, true)
-                scaled.compress(Bitmap.CompressFormat.JPEG, 82, outputStream)
-                val base64 = Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
-                bannerUrl = "data:image/jpeg;base64,$base64"
-            } catch (e: Exception) {
-                bannerUrl = uri.toString()
             }
         }
     }
@@ -264,8 +363,8 @@ fun CreateTournamentScreen(
                                 label = "⚡ 1v1 Lone Wolf (₹200)",
                                 onClick = {
                                     title = "Lone Wolf 1v1 Duel"
-                                    category = "1v1"
-                                    format = "SOLO"
+                                    category = "LONE_WOLF"
+                                    format = "1v1"
                                     mapName = "Iron Cage"
                                     prizePool = "200"
                                     entryFee = "20"
@@ -275,6 +374,8 @@ fun CreateTournamentScreen(
                                     perKillPrize = "0"
                                     maxPlayers = "2"
                                     bannerUrl = TournamentBannerPresets.PRESETS.getOrNull(3)?.url ?: "https://images.unsplash.com/photo-1538481199705-c710c4e965fc?auto=format&fit=crop&w=1200&q=80"
+                                    localBannerUri = null
+                                    bannerStatusMessage = null
                                 }
                             )
                         }
@@ -295,9 +396,13 @@ fun CreateTournamentScreen(
                             Spacer(modifier = Modifier.width(8.dp))
                             Text("Tournament Card Banner Image", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = VelorixTextPrimary)
                         }
-                        if (bannerUrl.isNotBlank()) {
+                        if (bannerUrl.isNotBlank() || localBannerUri != null) {
                             Surface(
-                                modifier = Modifier.clickable { bannerUrl = "" },
+                                modifier = Modifier.clickable { 
+                                    bannerUrl = ""
+                                    localBannerUri = null
+                                    bannerStatusMessage = null
+                                },
                                 color = Color(0x33FF5252),
                                 shape = RoundedCornerShape(6.dp)
                             ) {
@@ -324,7 +429,7 @@ fun CreateTournamentScreen(
 
                     // Prominent Direct Upload Button
                     Button(
-                        onClick = { galleryLauncher.launch("image/*") },
+                        onClick = { galleryLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(48.dp),
@@ -345,16 +450,32 @@ fun CreateTournamentScreen(
                             .height(130.dp),
                         shape = RoundedCornerShape(14.dp),
                         colors = CardDefaults.cardColors(containerColor = Color(0xFF0F0F12)),
-                        border = BorderStroke(1.dp, if (bannerUrl.isNotBlank()) VelorixAccent else CardVerifyBorder)
+                        border = BorderStroke(1.dp, if (bannerUrl.isNotBlank() || localBannerUri != null) VelorixAccent else CardVerifyBorder)
                     ) {
                         Box(modifier = Modifier.fillMaxSize()) {
-                            if (bannerUrl.isNotBlank()) {
+                            val displayBanner = localBannerUri ?: bannerUrl.ifBlank { null }
+                            if (displayBanner != null) {
                                 AsyncImage(
-                                    model = bannerUrl,
+                                    model = displayBanner,
                                     contentDescription = "Tournament Card Banner Preview",
                                     modifier = Modifier.fillMaxSize(),
                                     contentScale = ContentScale.Crop
                                 )
+                            }
+
+                            if (isUploadingBanner) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(Color(0x88000000)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        CircularProgressIndicator(color = VelorixAccent, modifier = Modifier.size(28.dp), strokeWidth = 2.5.dp)
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Text(bannerStatusMessage ?: "Uploading...", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
                             }
                             
                             // Dark gradient overlay
@@ -423,8 +544,8 @@ fun CreateTournamentScreen(
                                         overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
-                                        text = if (bannerUrl.isNotBlank()) "Live Banner Image Attached" else "Default theme gradient active",
-                                        color = if (bannerUrl.isNotBlank()) VelorixAccentLight else VelorixTextSecondary,
+                                        text = if (bannerUrl.isNotBlank() || localBannerUri != null) "Live Banner Image Attached" else "Default theme gradient active",
+                                        color = if (bannerUrl.isNotBlank() || localBannerUri != null) VelorixAccentLight else VelorixTextSecondary,
                                         fontSize = 10.sp
                                     )
                                 }
@@ -440,7 +561,7 @@ fun CreateTournamentScreen(
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         OutlinedButton(
-                            onClick = { galleryLauncher.launch("image/*") },
+                            onClick = { galleryLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
                             modifier = Modifier
                                 .weight(1f)
                                 .height(44.dp),
@@ -472,14 +593,22 @@ fun CreateTournamentScreen(
 
                     // Custom URL Input
                     OutlinedTextField(
-                        value = bannerUrl,
-                        onValueChange = { bannerUrl = it },
+                        value = if (localBannerUri != null && !bannerUrl.startsWith("http")) "[Local Banner Image Attached]" else bannerUrl,
+                        onValueChange = { 
+                            bannerUrl = it 
+                            localBannerUri = null
+                            bannerStatusMessage = null
+                        },
                         label = { Text("Or Paste Banner Image URL") },
                         placeholder = { Text("https://example.com/banner.jpg") },
                         modifier = Modifier.fillMaxWidth(),
                         trailingIcon = {
-                            if (bannerUrl.isNotBlank()) {
-                                IconButton(onClick = { bannerUrl = "" }) {
+                            if (bannerUrl.isNotBlank() || localBannerUri != null) {
+                                IconButton(onClick = { 
+                                    bannerUrl = "" 
+                                    localBannerUri = null
+                                    bannerStatusMessage = null
+                                }) {
                                     Icon(Icons.Default.Clear, contentDescription = "Clear", tint = VelorixTextSecondary)
                                 }
                             }
@@ -506,6 +635,8 @@ fun CreateTournamentScreen(
                                     .clip(RoundedCornerShape(10.dp))
                                     .clickable {
                                         bannerUrl = preset.url
+                                        localBannerUri = null
+                                        bannerStatusMessage = null
                                         if (preset.map != "All Maps" && mapName == "Bermuda") {
                                             mapName = preset.map
                                         }
@@ -948,24 +1079,48 @@ fun CreateTournamentScreen(
                         val cleanDesc = SecuritySanitizer.sanitizeInput(description, maxLength = 1000)
                         val cleanRules = SecuritySanitizer.sanitizeInput(rules, maxLength = 3000)
 
+                        val cleanCategory = when {
+                            category.equals("CS", true) || category.contains("CLASH", true) || cleanFormat.contains("CS", true) -> "CS"
+                            category.equals("LONE_WOLF", true) || category.contains("LONE", true) || category.contains("1v1", true) || cleanFormat.contains("1v1", true) -> "LONE_WOLF"
+                            category.equals("SCRIMS", true) || category.contains("SCRIM", true) -> "SCRIMS"
+                            else -> "BR"
+                        }
+                        val finalBanner = if (bannerUrl.isNotBlank()) bannerUrl.trim() else (localBannerUri?.toString() ?: TournamentBannerPresets.PRESETS[0].url)
+                        val defaultSchedule = dateFormatter.format(Date(System.currentTimeMillis() + 3600_000L))
+                        val finalSchedule = startsAt.ifBlank { defaultSchedule }
+
+                        var p1 = firstPlacePrize.toFloatOrNull() ?: (pPool * 0.50f)
+                        var p2 = secondPlacePrize.toFloatOrNull() ?: (pPool * 0.25f)
+                        var p3 = thirdPlacePrize.toFloatOrNull() ?: (pPool * 0.15f)
+                        if (pPool <= 0f) {
+                            p1 = 0f
+                            p2 = 0f
+                            p3 = 0f
+                        } else if (p1 + p2 + p3 > pPool) {
+                            val ratio = pPool / (p1 + p2 + p3)
+                            p1 = (p1 * ratio).toInt().toFloat()
+                            p2 = (p2 * ratio).toInt().toFloat()
+                            p3 = (p3 * ratio).toInt().toFloat()
+                        }
+
                         val newTournament = Tournament(
                             id = SecuritySanitizer.sanitizeDatabaseKey(UUID.randomUUID().toString()),
                             title = cleanTitle,
-                            bannerUrl = bannerUrl.trim(),
+                            bannerUrl = finalBanner,
                             game = cleanGame,
-                            category = category,
+                            category = cleanCategory,
                             map = cleanMap,
                             format = cleanFormat,
                             status = status,
                             entryFee = entryFee.toFloatOrNull() ?: 0f,
                             prizePool = pPool,
-                            firstPlacePrize = firstPlacePrize.toFloatOrNull() ?: (pPool * 0.50f),
-                            secondPlacePrize = secondPlacePrize.toFloatOrNull() ?: (pPool * 0.25f),
-                            thirdPlacePrize = thirdPlacePrize.toFloatOrNull() ?: (pPool * 0.15f),
+                            firstPlacePrize = p1,
+                            secondPlacePrize = p2,
+                            thirdPlacePrize = p3,
                             perKillPrize = perKillPrize.toFloatOrNull() ?: 0f,
-                            maxPlayers = maxPlayers.toIntOrNull() ?: 48,
+                            maxPlayers = maxPlayers.toIntOrNull() ?: (if (cleanCategory == "CS") 8 else if (cleanCategory == "LONE_WOLF") 2 else 48),
                             registeredPlayers = 0,
-                            startsAt = startsAt.ifBlank { null },
+                            startsAt = finalSchedule,
                             endsAt = endsAt.ifBlank { null },
                             allowedGuns = allowedGuns,
                             bannedGuns = bannedGuns,
