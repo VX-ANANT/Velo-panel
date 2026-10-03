@@ -1085,7 +1085,11 @@ fun CreateTournamentScreen(
                             category.equals("SCRIMS", true) || category.contains("SCRIM", true) -> "SCRIMS"
                             else -> "BR"
                         }
-                        val finalBanner = if (bannerUrl.isNotBlank()) bannerUrl.trim() else (localBannerUri?.toString() ?: TournamentBannerPresets.PRESETS[0].url)
+                        val finalBanner = if (bannerUrl.isNotBlank() && (bannerUrl.startsWith("http://") || bannerUrl.startsWith("https://"))) {
+                            bannerUrl.trim()
+                        } else {
+                            TournamentBannerPresets.PRESETS[0].url
+                        }
                         val defaultSchedule = dateFormatter.format(Date(System.currentTimeMillis() + 3600_000L))
                         val finalSchedule = startsAt.ifBlank { defaultSchedule }
 
@@ -1138,10 +1142,16 @@ fun CreateTournamentScreen(
                     modifier = Modifier.fillMaxWidth().height(52.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent),
                     shape = RoundedCornerShape(14.dp),
-                    enabled = !isSaving
+                    enabled = !isSaving && !isUploadingBanner
                 ) {
-                    if (isSaving) {
+                    if (isUploadingBanner) {
                         CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color.Black)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("UPLOADING BANNER...", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    } else if (isSaving) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color.Black)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("PUBLISHING TO CLOUD...", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                     } else {
                         Icon(Icons.Default.Add, contentDescription = null, tint = Color.Black)
                         Spacer(modifier = Modifier.width(8.dp))

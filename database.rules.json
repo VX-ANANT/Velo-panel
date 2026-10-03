@@ -176,35 +176,35 @@
     },
     "matches": {
       ".read": "auth != null",
-      ".write": "auth != null && (root.child('admins').child(auth.uid).child('active').val() === true || auth.token.email === 'anantisback47@gmail.com' || auth.token.email === 'velorixtest@gmail.com')"
+      ".write": "auth != null && !root.child('banned_users').child(auth.uid).exists()"
     },
     "categories": {
       ".read": "auth != null",
-      ".write": "auth != null && (root.child('admins').child(auth.uid).child('active').val() === true || auth.token.email === 'anantisback47@gmail.com' || auth.token.email === 'velorixtest@gmail.com')"
+      ".write": "auth != null && !root.child('banned_users').child(auth.uid).exists()"
     },
     "tournaments_by_category": {
       ".read": "auth != null",
-      ".write": "auth != null && (root.child('admins').child(auth.uid).child('active').val() === true || auth.token.email === 'anantisback47@gmail.com' || auth.token.email === 'velorixtest@gmail.com')"
+      ".write": "auth != null && !root.child('banned_users').child(auth.uid).exists()"
     },
     "matches_by_category": {
       ".read": "auth != null",
-      ".write": "auth != null && (root.child('admins').child(auth.uid).child('active').val() === true || auth.token.email === 'anantisback47@gmail.com' || auth.token.email === 'velorixtest@gmail.com')"
+      ".write": "auth != null && !root.child('banned_users').child(auth.uid).exists()"
     },
     "FreeFire": {
       ".read": "auth != null",
-      ".write": "auth != null && (root.child('admins').child(auth.uid).child('active').val() === true || auth.token.email === 'anantisback47@gmail.com' || auth.token.email === 'velorixtest@gmail.com')"
+      ".write": "auth != null && !root.child('banned_users').child(auth.uid).exists()"
     },
     "games": {
       ".read": "auth != null",
-      ".write": "auth != null && (root.child('admins').child(auth.uid).child('active').val() === true || auth.token.email === 'anantisback47@gmail.com' || auth.token.email === 'velorixtest@gmail.com')"
+      ".write": "auth != null && !root.child('banned_users').child(auth.uid).exists()"
     },
     "active_tournaments": {
       ".read": "auth != null",
-      ".write": "auth != null && (root.child('admins').child(auth.uid).child('active').val() === true || auth.token.email === 'anantisback47@gmail.com')"
+      ".write": "auth != null && !root.child('banned_users').child(auth.uid).exists()"
     },
     "custom_rooms": {
       ".read": "auth != null",
-      ".write": "auth != null && (root.child('admins').child(auth.uid).child('active').val() === true || auth.token.email === 'anantisback47@gmail.com')"
+      ".write": "auth != null && !root.child('banned_users').child(auth.uid).exists()"
     },
     "registrations": {
       "$tournamentId": {

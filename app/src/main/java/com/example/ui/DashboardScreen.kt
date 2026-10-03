@@ -301,22 +301,13 @@ fun DashboardScreen(
                                 )
                             }
                             "system" -> {
-                                GlobalSettingsScreenContent(
-                                    opticsManager = opticsManager,
-                                    accentColor = currentHyperTheme.primaryColor,
+                                com.example.ui.settings.FluidSettingsScreen(
                                     currentTheme = currentHyperTheme,
                                     onThemeSelect = { currentHyperTheme = it },
-                                    onPurgeDemoData = onPurgeDemoData,
                                     currentUserEmail = (uiState as? DashboardState.Success)?.currentUserEmail,
                                     onLogout = { showLogoutConfirmationDialog = true },
-                                    onNavigateTab = { target ->
-                                        if (target == "chatbot") onNavClick("chatbot")
-                                        else if (target == "sfx_lab") showAudioLabDialog = true
-                                        else selectedTab = target
-                                    },
-                                    onOpenAudioLab = { showAudioLabDialog = true },
-                                    onOpenApiKeyDialog = { showApiKeyDialog = true },
-                                    onOpenRateLimiter = { showRateLimiterDialog = true }
+                                    onPurgeDemoData = onPurgeDemoData,
+                                    onBackToDashboard = { selectedTab = "dashboard" }
                                 )
                             }
                             "leaderboard" -> {
@@ -432,30 +423,14 @@ fun DashboardScreen(
                                 }
                             }
                             "settings" -> {
-                                Column(modifier = Modifier.fillMaxSize()) {
-                                    SubAppNavigationHeader(
-                                        title = "Settings",
-                                        onBack = { selectedTab = "system" },
-                                        accentColor = currentHyperTheme.primaryColor
-                                    )
-                                    GlobalSettingsScreenContent(
-                                        opticsManager = opticsManager,
-                                        accentColor = currentHyperTheme.primaryColor,
-                                        currentTheme = currentHyperTheme,
-                                        onThemeSelect = { currentHyperTheme = it },
-                                        onPurgeDemoData = onPurgeDemoData,
-                                        currentUserEmail = (uiState as? DashboardState.Success)?.currentUserEmail,
-                                        onLogout = { showLogoutConfirmationDialog = true },
-                                        onNavigateTab = { target ->
-                                            if (target == "chatbot") onNavClick("chatbot")
-                                            else if (target == "sfx_lab") showAudioLabDialog = true
-                                            else selectedTab = target
-                                        },
-                                        onOpenAudioLab = { showAudioLabDialog = true },
-                                        onOpenApiKeyDialog = { showApiKeyDialog = true },
-                                        onOpenRateLimiter = { showRateLimiterDialog = true }
-                                    )
-                                }
+                                com.example.ui.settings.FluidSettingsScreen(
+                                    currentTheme = currentHyperTheme,
+                                    onThemeSelect = { currentHyperTheme = it },
+                                    currentUserEmail = (uiState as? DashboardState.Success)?.currentUserEmail,
+                                    onLogout = { showLogoutConfirmationDialog = true },
+                                    onPurgeDemoData = onPurgeDemoData,
+                                    onBackToDashboard = { selectedTab = "dashboard" }
+                                )
                             }
                         }
                     }
