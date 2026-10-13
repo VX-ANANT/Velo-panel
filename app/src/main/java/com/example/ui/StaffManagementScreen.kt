@@ -1,6 +1,7 @@
 package com.example.ui
 
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -47,6 +48,8 @@ fun StaffManagementScreen(
     onDeleteAdmin: ((adminUid: String) -> Unit)? = null,
     onNavigateBack: () -> Unit
 ) {
+    BackHandler { onNavigateBack() }
+
     ElaborateScreen("Staff Management & Admin Roles", onNavigateBack) { padding ->
         Box(
             modifier = Modifier

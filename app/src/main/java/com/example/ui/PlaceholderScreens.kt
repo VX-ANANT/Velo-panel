@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
+import com.example.util.TournamentImageUploader
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.domain.model.Tournament
@@ -117,6 +118,7 @@ fun TournamentsListScreenContent(
     onTournamentClick: ((String) -> Unit)? = null,
     onSettingsClick: ((String) -> Unit)? = null,
     onBracketClick: ((String) -> Unit)? = null,
+    onDuplicateTournament: ((com.example.domain.model.Tournament) -> Unit)? = null,
     onExportJson: (() -> Unit)? = null,
     onImportJson: ((String) -> Unit)? = null,
     onSyncCloud: (() -> Unit)? = null
@@ -125,6 +127,7 @@ fun TournamentsListScreenContent(
     var selectedCategory by remember { mutableStateOf("ALL") }
     var searchQuery by remember { mutableStateOf("") }
     val tournamentsList = (uiState as? DashboardState.Success)?.tournaments ?: emptyList()
+    val dynamicCategories = (uiState as? DashboardState.Success)?.categories ?: com.example.domain.model.FreeFireCategories.DEFAULT_CATEGORIES
     val context = androidx.compose.ui.platform.LocalContext.current
     
     var showExportDialog by remember { mutableStateOf(false) }
@@ -290,21 +293,15 @@ fun TournamentsListScreenContent(
             }
         }
         Spacer(modifier = Modifier.height(10.dp))
-        // Category Filter Chips
+        // Category Filter Chips extracted dynamically from Firebase
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            val categories = listOf(
-                "ALL" to "All Categories",
-                "BR" to "Battle Royale",
-                "CS" to "Clash Squad",
-                "LONE_WOLF" to "Lone Wolf",
-                "SCRIMS" to "Scrims"
-            )
-            categories.forEach { (catKey, catLabel) ->
+            val allChips = listOf("ALL" to "All Categories") + dynamicCategories.map { it.id to (if (it.name.isNotBlank()) it.name else it.label) }
+            allChips.forEach { (catKey, catLabel) ->
                 val isSelected = selectedCategory == catKey
                 FilterChip(
                     selected = isSelected,
@@ -366,7 +363,7 @@ fun TournamentsListScreenContent(
                                 .clip(RoundedCornerShape(12.dp))
                         ) {
                             AsyncImage(
-                                model = t.bannerUrl,
+                                model = TournamentImageUploader.resolveBannerModel(t.bannerUrl),
                                 contentDescription = t.title,
                                 modifier = Modifier.fillMaxSize(),
                                 contentScale = ContentScale.Crop
@@ -524,7 +521,7 @@ fun TournamentsListScreenContent(
                                 if (onTournamentClick != null) onTournamentClick(t.id)
                                 else onSettingsClick?.invoke(t.id)
                             },
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1.2f),
                             text = "DETAILS & RULES"
                         )
                         GlassOutlinedButton(
@@ -532,6 +529,23 @@ fun TournamentsListScreenContent(
                             modifier = Modifier.weight(1f),
                             text = "ADMIN EDIT"
                         )
+                        IconButton(
+                            onClick = {
+                                onDuplicateTournament?.invoke(t)
+                                Toast.makeText(context, "Duplicating '${t.title}'...", Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier
+                                .size(40.dp)
+                                .background(Color(0xFF38BDF8).copy(alpha = 0.15f), RoundedCornerShape(10.dp))
+                                .border(1.dp, Color(0xFF38BDF8).copy(alpha = 0.4f), RoundedCornerShape(10.dp))
+                        ) {
+                            Icon(
+                                Icons.Default.ContentCopy,
+                                contentDescription = "Duplicate / Clone Tournament",
+                                tint = Color(0xFF38BDF8),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -1642,7 +1656,8 @@ fun UsersManagementScreenContent(
     onAddFunds: (UserProfile, Double) -> Unit,
     onDeleteUser: (UserProfile) -> Unit,
     onUpdateUser: (UserProfile) -> Unit = {},
-    onRefreshUserData: (() -> Unit)? = null
+    onRefreshUserData: (() -> Unit)? = null,
+    onUnbanGuestSessions: (() -> Unit)? = null
 ) {
     val successState = uiState as? DashboardState.Success
     val usersList = successState?.users ?: emptyList()
@@ -1670,7 +1685,7 @@ fun UsersManagementScreenContent(
         usersList.filter { u ->
             val emailLower = u.email.trim().lowercase()
             val isMock = emailLower.contains("@example.com") || emailLower.contains("mock.dummy")
-            if (isMock) return@filter false
+            if (isMock || u.isGuestSession) return@filter false
 
             val matchesQuery = searchQuery.isBlank() || 
                 u.username.contains(searchQuery, ignoreCase = true) ||
@@ -1858,6 +1873,24 @@ fun UsersManagementScreenContent(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (onUnbanGuestSessions != null) {
+                        val context = LocalContext.current
+                        OutlinedButton(
+                            onClick = {
+                                Toast.makeText(context, "Unbanning all guest & non-logged in sessions...", Toast.LENGTH_SHORT).show()
+                                onUnbanGuestSessions()
+                            },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF34D399)),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF34D399).copy(alpha = 0.6f)),
+                            contentPadding = PaddingValues(horizontal = 9.dp, vertical = 6.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.bounceClick(scaleDown = 0.95f)
+                        ) {
+                            Icon(Icons.Default.Shield, contentDescription = "Unban Guests", tint = Color(0xFF34D399), modifier = Modifier.size(13.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Unban Guests", color = Color(0xFF34D399), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
                     if (onRefreshUserData != null) {
                         val context = LocalContext.current
                         val isUserSyncing = (uiState as? DashboardState.Success)?.isSyncing ?: false
@@ -1914,13 +1947,13 @@ fun UsersManagementScreenContent(
                 Spacer(modifier = Modifier.width(8.dp))
                 Box(
                     modifier = Modifier
-                        .background(VelorixAccent.copy(alpha = 0.18f), RoundedCornerShape(8.dp))
-                        .border(1.dp, VelorixAccent.copy(alpha = 0.35f), RoundedCornerShape(8.dp))
+                        .background(Color(0xFF18181B), RoundedCornerShape(12.dp))
+                        .border(1.dp, Color(0xFF27272A), RoundedCornerShape(12.dp))
                         .padding(horizontal = 10.dp, vertical = 5.dp)
                 ) {
                     Text(
-                        text = "${usersList.size} Total",
-                        color = VelorixAccent,
+                        text = "${usersList.count { !it.isGuestSession }} Registered Players",
+                        color = Color(0xFF34D399),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1
@@ -1929,23 +1962,63 @@ fun UsersManagementScreenContent(
             }
         }
 
-        // Search Bar
-        OutlinedTextField(
-            value = searchQuery,
-            onValueChange = { searchQuery = it },
-            placeholder = { Text("Search by ID, Username, Email, Game ID...", color = Color.Gray, fontSize = 13.sp) },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search", tint = Color.Gray) },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color.White,
-                focusedBorderColor = VelorixAccent,
-                unfocusedBorderColor = CardVerifyBorder
-            )
-        )
+        // Apple Cupertino-style Search Bar
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(46.dp)
+                .background(Color(0xFF141418), RoundedCornerShape(16.dp))
+                .border(1.dp, Color(0xFF27272A), RoundedCornerShape(16.dp))
+                .padding(horizontal = 12.dp),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    Icons.Default.Search,
+                    contentDescription = "Search",
+                    tint = Color(0xFF71717A),
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Box(modifier = Modifier.weight(1f)) {
+                    if (searchQuery.isEmpty()) {
+                        Text(
+                            "Search player by name, email, game ID or UID...",
+                            color = Color(0xFF71717A),
+                            fontSize = 13.sp
+                        )
+                    }
+                    androidx.compose.foundation.text.BasicTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        singleLine = true,
+                        textStyle = androidx.compose.ui.text.TextStyle(
+                            color = Color.White,
+                            fontSize = 13.5.sp
+                        ),
+                        cursorBrush = androidx.compose.ui.graphics.SolidColor(VelorixAccent),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                if (searchQuery.isNotEmpty()) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Clear",
+                        tint = Color.Gray,
+                        modifier = Modifier
+                            .size(16.dp)
+                            .clickable { searchQuery = "" }
+                    )
+                }
+            }
+        }
 
-        // Filter chips (horizontally scrollable)
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // BitChord Apple-style Segmented Control Bar
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier
@@ -1953,15 +2026,45 @@ fun UsersManagementScreenContent(
                 .horizontalScroll(rememberScrollState())
                 .padding(bottom = 12.dp)
         ) {
-            listOf("ALL", "ACTIVE", "BANNED", "ADMIN").forEach { f ->
-                val isSel = selectedFilter == f
-                Box(
+            listOf(
+                Triple("ALL", "All Players", usersList.count { !it.isGuestSession }),
+                Triple("ACTIVE", "Active", usersList.count { !it.isGuestSession && !it.isBanned }),
+                Triple("BANNED", "Banned", usersList.count { !it.isGuestSession && it.isBanned }),
+                Triple("ADMIN", "Staff", usersList.count { !it.isGuestSession && it.role.contains("admin", ignoreCase = true) })
+            ).forEach { (key, label, count) ->
+                val isSel = selectedFilter == key
+                val bg = if (isSel) Color(0xFF27272A) else Color(0xFF141418)
+                val border = if (isSel) Color(0xFF52525B) else Color(0xFF27272A)
+                val textColor = if (isSel) Color.White else Color(0xFFA1A1AA)
+
+                Row(
                     modifier = Modifier
-                        .background(if (isSel) VelorixAccent else CardLiveBg, RoundedCornerShape(8.dp))
-                        .clickable { selectedFilter = f }
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(bg)
+                        .border(1.dp, border, RoundedCornerShape(20.dp))
+                        .clickable { selectedFilter = key }
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Text(f, color = if (isSel) Color.Black else Color.LightGray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = label,
+                        fontSize = 11.5.sp,
+                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
+                        color = textColor
+                    )
+                    Box(
+                        modifier = Modifier
+                            .background(if (isSel) Color(0xFF3F3F46) else Color(0xFF1F1F23), CircleShape)
+                            .padding(horizontal = 5.dp, vertical = 1.dp)
+                    ) {
+                        Text(
+                            text = count.toString(),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isSel) Color.White else Color(0xFF71717A)
+                        )
+                    }
                 }
             }
         }
@@ -2189,10 +2292,17 @@ fun UsersManagementScreenContent(
                             Text("Funds", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF00E676), maxLines = 1)
                         }
 
+                        val ctx = LocalContext.current
                         Button(
-                            onClick = { onToggleBan(user) },
+                            onClick = { 
+                                if (user.isGuestSession) {
+                                    Toast.makeText(ctx, "Guest sessions cannot be banned globally.", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    onToggleBan(user)
+                                }
+                            },
                             modifier = Modifier.weight(1f).height(42.dp).bounceClick(scaleDown = 0.96f),
-                            shape = RoundedCornerShape(10.dp),
+                            shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = if (user.isBanned) Color(0xFF1B5E20) else Color(0xFFB71C1C)),
                             border = androidx.compose.foundation.BorderStroke(1.dp, if (user.isBanned) Color(0xFF4CAF50) else Color(0xFFEF5350)),
                             contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
@@ -2665,7 +2775,14 @@ fun UserDetailsInspectorDialog(
                                         }
                                         Switch(
                                             checked = isBannedState,
-                                            onCheckedChange = { isBannedState = it },
+                                            onCheckedChange = { 
+                                                if (user.isGuestSession) {
+                                                    Toast.makeText(context, "Guest sessions cannot be banned globally.", Toast.LENGTH_SHORT).show()
+                                                } else {
+                                                    isBannedState = it
+                                                }
+                                            },
+                                            enabled = !user.isGuestSession,
                                             colors = SwitchDefaults.colors(checkedThumbColor = Color.Red, checkedTrackColor = Color.Red.copy(alpha = 0.5f))
                                         )
                                     }

@@ -1,5 +1,6 @@
 package com.example.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.BorderStroke
@@ -51,6 +52,8 @@ fun BracketManagementScreen(
     viewModel: BracketViewModel,
     onNavigateBack: () -> Unit
 ) {
+    BackHandler { onNavigateBack() }
+
     val uiState by viewModel.uiState.collectAsState()
     var viewMode by remember { mutableStateOf("tree") } // "tree" (stage pan) or "list"
 

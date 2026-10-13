@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -60,6 +61,8 @@ fun DailyRevenueAnalyticsScreen(
     onTournamentClick: (String) -> Unit = {},
     onBroadcastRoomCredentials: ((tournamentId: String, roomId: String, roomPass: String) -> Unit)? = null
 ) {
+    BackHandler { onBack() }
+
     val context = LocalContext.current
     var selectedTimeframe by remember { mutableStateOf(RevenueTimeframe.TODAY) }
     var searchQuery by remember { mutableStateOf("") }
@@ -81,7 +84,7 @@ fun DailyRevenueAnalyticsScreen(
     val filteredTournaments = remember(tournaments, selectedTimeframe, searchQuery, filterGame) {
         tournaments.filter { t ->
             val matchTime = try {
-                t.startsAt?.toLongOrNull() ?: 0L
+                t.parsedStartsAtMillis ?: 0L
             } catch (_: Exception) { 0L }
 
             val inTimeframe = when (selectedTimeframe) {

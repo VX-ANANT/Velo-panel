@@ -66,19 +66,27 @@ service cloud.firestore {
     // Users and Profiles
     match /users/{userId} {
       allow read: if isAuthenticated();
-      allow create: if isOwner(userId);
-      allow update: if isOwner(userId) || isAdmin();
-      allow delete: if isAdmin();
+      allow write: if isAuthenticated();
     }
 
     match /userProfiles/{userId} {
       allow read: if isAuthenticated();
-      allow write: if isOwner(userId) || isAdmin();
+      allow write: if isAuthenticated();
+    }
+
+    match /players/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+
+    match /banned_users/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
     }
 
     match /admins/{adminId} {
       allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow write: if isAuthenticated();
     }
 
     // Support, Payouts, and Transactions

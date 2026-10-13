@@ -306,6 +306,9 @@ fun TournamentApp(
                     onRefreshUserData = {
                         viewModel.loadUserData()
                     },
+                    onUnbanGuestSessions = {
+                        viewModel.unbanAllGuestSessions()
+                    },
                     onGrantAdmin = { email, name, role ->
                         viewModel.grantAdminAccess(email.hashCode().toString(), email, name, role)
                     },
@@ -347,6 +350,9 @@ fun TournamentApp(
                     },
                     onUpdateTournament = { updated ->
                         viewModel.updateTournament(updated)
+                    },
+                    onDuplicateTournament = { tournament ->
+                        viewModel.duplicateTournament(tournament)
                     },
                     onApprovePayout = { req ->
                         viewModel.approvePayout(req)
@@ -409,7 +415,7 @@ fun TournamentApp(
                 if (tournament != null) {
                     val successState = uiState as? DashboardState.Success
                     val proofsForTourney = successState?.matchProofs?.filter { it.tournamentId == tournamentId } ?: emptyList()
-                    val startsAtLong = tournament.startsAt?.toLongOrNull()
+                    val startsAtLong = tournament.parsedStartsAtMillis
 
                     TournamentDetailsScreen(
                         tournament = tournament,
@@ -514,7 +520,10 @@ fun TournamentApp(
                 }
             }
             composable("chatbot") {
-                AdminChatbotScreen(onNavigateBack = { navController.popBackStack() })
+                AdminChatbotScreen(
+                    onNavigateBack = { navController.popBackStack() },
+                    tournamentRepository = tournamentRepository
+                )
             }
             composable("verification") {
                 val verificationViewModel: com.example.ui.viewmodel.PlayerVerificationViewModel = viewModel(
@@ -566,11 +575,17 @@ fun TournamentApp(
                 )
             }
             composable("create_tournament") {
+                val successState = uiState as? DashboardState.Success
+                val dynamicCategories = successState?.categories ?: com.example.domain.model.FreeFireCategories.DEFAULT_CATEGORIES
                 com.example.ui.CreateTournamentScreen(
+                    categories = dynamicCategories,
+                    onSaveCategory = { viewModel.saveCategory(it) },
                     onNavigateBack = { navController.popBackStack() },
                     onCreate = { newTournament ->
                         viewModel.createTournament(newTournament)
-                        navController.popBackStack()
+                    },
+                    onCreateBatch = { batch ->
+                        viewModel.createTournamentsBatch(batch)
                     }
                 )
             }

@@ -1,5 +1,6 @@
 package com.example.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -34,6 +35,8 @@ fun TournamentSettingsScreen(
     onCancelTournament: (String, String) -> Unit = { _, _ -> },
     onDeleteTournament: (String) -> Unit = {}
 ) {
+    BackHandler { onNavigateBack() }
+
     // Basic Details
     var title by remember { mutableStateOf(tournament.title) }
     var game by remember { mutableStateOf(tournament.game) }

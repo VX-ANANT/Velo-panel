@@ -346,14 +346,20 @@ class UserRoleManager(
         reason: String,
         bannedBy: String
     ): Result<UserProfile> = runCatching {
+        if (isBanned && user.isGuestSession) {
+            throw IllegalArgumentException("Guest/anonymous sessions cannot be banned.")
+        }
         val now = System.currentTimeMillis()
+        val effectiveReason = if (isBanned) reason.ifBlank { "Banned by Admin Panel" } else ""
         val updatedUser = user.copy(
             isBanned = isBanned,
-            banReason = if (isBanned) reason.ifBlank { "Banned by Admin Panel" } else "",
+            banReason = effectiveReason,
             bannedAt = if (isBanned) now else 0L
         )
 
         val userUpdates = mapOf<String, Any>(
+            "id" to user.id,
+            "uid" to user.id,
             "isBanned" to isBanned,
             "banned" to isBanned,
             "status" to if (isBanned) "BANNED" else "ACTIVE",
@@ -367,40 +373,76 @@ class UserRoleManager(
 
         val banRecord = mapOf(
             "uid" to user.id,
+            "id" to user.id,
+            "userId" to user.id,
             "email" to user.email,
             "gameId" to user.gameId,
             "reason" to updatedUser.banReason,
             "bannedBy" to bannedBy,
+            "bannedAt" to now,
             "timestamp" to now,
+            "permanent" to true,
             "status" to if (isBanned) "BANNED" else "UNBANNED"
         )
 
-        // 1. Primary RTDB update
+        var rtdbUpdated = false
+        var lastRtdbError: Exception? = null
+
+        // 1. Primary RTDB update across user, profile, players, and banned_users nodes
         try {
             database.child("users").child(user.id).updateChildren(userUpdates).await()
+            rtdbUpdated = true
+        } catch (e: Exception) {
+            lastRtdbError = e
+            Log.w(TAG, "RTDB write users/${user.id}: ${e.message}")
+        }
+
+        try {
             database.child("userProfiles").child(user.id).updateChildren(userUpdates).await()
+            rtdbUpdated = true
+        } catch (e: Exception) {
+            if (lastRtdbError == null) lastRtdbError = e
+            Log.w(TAG, "RTDB write userProfiles/${user.id}: ${e.message}")
+        }
+
+        try {
             database.child("players").child(user.id).updateChildren(userUpdates).await()
+            rtdbUpdated = true
+        } catch (e: Exception) {
+            if (lastRtdbError == null) lastRtdbError = e
+            Log.w(TAG, "RTDB write players/${user.id}: ${e.message}")
+        }
+
+        try {
             if (isBanned) {
                 database.child("banned_users").child(user.id).setValue(banRecord).await()
             } else {
                 database.child("banned_users").child(user.id).removeValue().await()
             }
+            rtdbUpdated = true
         } catch (e: Exception) {
-            Log.e(TAG, "RTDB toggleUserBan error: ${e.message}")
-            throw e
+            if (lastRtdbError == null) lastRtdbError = e
+            Log.w(TAG, "RTDB write banned_users/${user.id}: ${e.message}")
         }
 
         // 2. Secondary Firestore update
+        var firestoreUpdated = false
         try {
             firestore.collection("users").document(user.id).set(userUpdates, SetOptions.merge()).await()
             firestore.collection("userProfiles").document(user.id).set(userUpdates, SetOptions.merge()).await()
+            firestore.collection("players").document(user.id).set(userUpdates, SetOptions.merge()).await()
             if (isBanned) {
                 firestore.collection("banned_users").document(user.id).set(banRecord, SetOptions.merge()).await()
             } else {
                 firestore.collection("banned_users").document(user.id).delete().await()
             }
+            firestoreUpdated = true
         } catch (e: Exception) {
-            Log.d(TAG, "Firestore toggleUserBan skipped (RTDB is primary): ${e.message}")
+            Log.d(TAG, "Firestore toggleUserBan mirror skipped: ${e.message}")
+        }
+
+        if (!rtdbUpdated && !firestoreUpdated) {
+            throw lastRtdbError ?: RuntimeException("Permission denied or database write failed")
         }
 
         updatedUser

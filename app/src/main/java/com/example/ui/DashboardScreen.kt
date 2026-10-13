@@ -158,6 +158,7 @@ fun DashboardScreen(
     onPublishAnnouncement: ((com.example.domain.model.GlobalAnnouncement) -> Unit)? = null,
     onDeleteAnnouncement: ((String) -> Unit)? = null,
     onUpdateTournament: ((com.example.domain.model.Tournament) -> Unit)? = null,
+    onDuplicateTournament: ((com.example.domain.model.Tournament) -> Unit)? = null,
     onApprovePayout: ((com.example.domain.model.PayoutRequest) -> Unit)? = null,
     onRejectPayout: ((com.example.domain.model.PayoutRequest, String) -> Unit)? = null,
     onImportTournamentsJson: ((String) -> Unit)? = null,
@@ -167,7 +168,8 @@ fun DashboardScreen(
     onClearAllNotifications: (() -> Unit)? = null,
     onTestPushNotification: (() -> Unit)? = null,
     onPublishCampaign: ((String, String, String, String?) -> Unit)? = null,
-    onPurgeDemoData: (() -> Unit)? = null
+    onPurgeDemoData: (() -> Unit)? = null,
+    onUnbanGuestSessions: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val opticsManager = remember { LiquidGlassOpticsManager(context) }
@@ -279,6 +281,7 @@ fun DashboardScreen(
                                     onTournamentClick = onTournamentClick,
                                     onSettingsClick = onSettingsClick,
                                     onBracketClick = onBracketClick,
+                                    onDuplicateTournament = { onDuplicateTournament?.invoke(it) },
                                     onImportJson = { onImportTournamentsJson?.invoke(it) },
                                     onSyncCloud = { onSyncAllTournaments?.invoke() }
                                 )
@@ -292,6 +295,7 @@ fun DashboardScreen(
                                     onDeleteUser = onDeleteUser,
                                     onUpdateUser = { onUpdateUser?.invoke(it) },
                                     onRefreshUserData = onRefreshUserData,
+                                    onUnbanGuestSessions = onUnbanGuestSessions,
                                     onSaveComplaint = { onSaveComplaint?.invoke(it) },
                                     onDeleteComplaint = { onDeleteComplaint?.invoke(it) },
                                     onSendTicketMessage = onSendTicketMessage,
@@ -335,7 +339,8 @@ fun DashboardScreen(
                                     onAddFunds = onAddFunds,
                                     onDeleteUser = onDeleteUser,
                                     onUpdateUser = { onUpdateUser?.invoke(it) },
-                                    onRefreshUserData = onRefreshUserData
+                                    onRefreshUserData = onRefreshUserData,
+                                    onUnbanGuestSessions = onUnbanGuestSessions
                                 )
                             }
                             "complaints" -> {
@@ -1291,8 +1296,8 @@ fun DashboardContent(
                     )
                     UntitledActionTile(
                         modifier = Modifier.weight(1f),
-                        title = "Check-In & PINs",
-                        subtitle = "${uiState.banners.size} Tokens",
+                        title = "App Banners",
+                        subtitle = "${uiState.banners.size} Live Banners",
                         icon = UntitledIcons.Key,
                         iconTint = Color(0xFFFBBF24),
                         onClick = onCheckInTokensClick
@@ -1336,8 +1341,8 @@ fun DashboardContent(
                     )
                     UntitledActionTile(
                         modifier = Modifier.weight(1f),
-                        title = "Check-In & PINs",
-                        subtitle = "${uiState.banners.size} Tokens",
+                        title = "App Banners",
+                        subtitle = "${uiState.banners.size} Live Banners",
                         icon = UntitledIcons.Key,
                         iconTint = Color(0xFFFBBF24),
                         onClick = onCheckInTokensClick
@@ -1615,6 +1620,7 @@ fun OperationsHubScreenContent(
     onDeleteUser: (com.example.domain.model.UserProfile) -> Unit,
     onUpdateUser: ((com.example.domain.model.UserProfile) -> Unit)? = null,
     onRefreshUserData: (() -> Unit)? = null,
+    onUnbanGuestSessions: (() -> Unit)? = null,
     onSaveComplaint: ((com.example.domain.model.ComplaintTicket) -> Unit)? = null,
     onDeleteComplaint: ((String) -> Unit)? = null,
     onSendTicketMessage: ((ticketId: String, message: String, onComplete: (Boolean) -> Unit) -> Unit)? = null,
@@ -1841,7 +1847,8 @@ fun OperationsHubScreenContent(
                     onAddFunds = onAddFunds,
                     onDeleteUser = onDeleteUser,
                     onUpdateUser = { onUpdateUser?.invoke(it) },
-                    onRefreshUserData = onRefreshUserData
+                    onRefreshUserData = onRefreshUserData,
+                    onUnbanGuestSessions = onUnbanGuestSessions
                 )
             }
             2 -> {

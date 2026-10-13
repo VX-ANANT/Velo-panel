@@ -1,5 +1,6 @@
 package com.example.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -43,6 +44,8 @@ data class TechAttribution(
 fun AttributionsScreen(
     onNavigateBack: () -> Unit
 ) {
+    BackHandler { onNavigateBack() }
+
     val attributions = remember {
         listOf(
             TechAttribution(

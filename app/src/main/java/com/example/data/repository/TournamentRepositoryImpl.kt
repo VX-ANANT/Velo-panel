@@ -21,6 +21,8 @@ import com.example.domain.model.MatchProofSubmission
 import com.example.domain.model.GlobalAnnouncement
 import com.example.domain.model.AppNotification
 import com.example.domain.model.BackendExtractionResult
+import com.example.domain.model.TournamentCategory
+import com.example.domain.model.FreeFireCategories
 import com.example.notification.VelorixNotificationManager
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.Source
@@ -59,6 +61,14 @@ class TournamentRepositoryImpl(private val context: android.content.Context? = n
     val locallyCreatedTournaments: java.util.concurrent.ConcurrentHashMap<String, Tournament> = java.util.concurrent.ConcurrentHashMap()
     var activeAdminEmail: String = "anantisback47@gmail.com"
     var activeAdminUid: String = ""
+
+    init {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                cleanupBannedGuestSessions()
+            } catch (_: Exception) {}
+        }
+    }
 
     fun recordAccountLocally(email: String, username: String = "", role: String = "super_admin", uid: String = "") {
         val cleanEmail = email.trim().lowercase()
@@ -729,6 +739,20 @@ service cloud.firestore {
             else -> "Player"
         }
 
+        val isGuest = (child("isGuest").value as? Boolean)
+            ?: (child("is_guest").value as? Boolean)
+            ?: (role.equals("guest", ignoreCase = true))
+            ?: (rawMap["isGuest"]?.toBooleanStrictOrNull())
+            ?: (rawMap["provider"]?.equals("anonymous", ignoreCase = true) == true)
+            ?: (rawMap["providerId"]?.equals("anonymous", ignoreCase = true) == true)
+            ?: false
+
+        val isAnonymous = (child("isAnonymous").value as? Boolean)
+            ?: (child("is_anonymous").value as? Boolean)
+            ?: (role.equals("anonymous", ignoreCase = true))
+            ?: (rawMap["isAnonymous"]?.toBooleanStrictOrNull())
+            ?: false
+
         return UserProfile(
             id = uId,
             username = resolvedUsername,
@@ -772,6 +796,8 @@ service cloud.firestore {
             referredBy = referredBy,
             referralCount = referralCount,
             referralBonusEarned = referralBonusEarned,
+            isGuest = isGuest,
+            isAnonymous = isAnonymous,
             rawAttributes = rawMap
         )
     }
@@ -1645,6 +1671,20 @@ service cloud.firestore {
             else -> "Player"
         }
 
+        val isGuest = getBoolean("isGuest")
+            ?: getBoolean("is_guest")
+            ?: (role.equals("guest", ignoreCase = true))
+            ?: (rawMap["isGuest"]?.toBooleanStrictOrNull())
+            ?: (rawMap["provider"]?.equals("anonymous", ignoreCase = true) == true)
+            ?: (rawMap["providerId"]?.equals("anonymous", ignoreCase = true) == true)
+            ?: false
+
+        val isAnonymous = getBoolean("isAnonymous")
+            ?: getBoolean("is_anonymous")
+            ?: (role.equals("anonymous", ignoreCase = true))
+            ?: (rawMap["isAnonymous"]?.toBooleanStrictOrNull())
+            ?: false
+
         return UserProfile(
             id = uId,
             username = resolvedUsername,
@@ -1688,6 +1728,8 @@ service cloud.firestore {
             referredBy = referredBy,
             referralCount = referralCount,
             referralBonusEarned = referralBonusEarned,
+            isGuest = isGuest,
+            isAnonymous = isAnonymous,
             rawAttributes = rawMap
         )
     }
@@ -1706,7 +1748,7 @@ service cloud.firestore {
                 val rtdbList = mutableListOf<UserProfile>()
                 for (userSnapshot in snapshot.children) {
                     val profile = userSnapshot.toUserProfile()
-                    if (profile != null && !locallyDeletedUserIds.contains(profile.id)) {
+                    if (profile != null && !locallyDeletedUserIds.contains(profile.id) && !profile.isGuestSession) {
                         rtdbList.add(profile)
                     }
                 }
@@ -1718,7 +1760,7 @@ service cloud.firestore {
                     if (fsTask.isSuccessful && fsTask.result != null) {
                         for (doc in fsTask.result.documents) {
                             val p = doc.toUserProfile()
-                            if (p != null && !locallyDeletedUserIds.contains(p.id)) {
+                            if (p != null && !locallyDeletedUserIds.contains(p.id) && !p.isGuestSession) {
                                 combined.add(p)
                             }
                         }
@@ -1757,7 +1799,7 @@ service cloud.firestore {
                             )
                         }
                     }
-                    onComplete?.invoke(finalMerged)
+                    onComplete?.invoke(finalMerged.filter { !it.isGuestSession })
                 }
             }
 
@@ -2047,7 +2089,7 @@ service cloud.firestore {
                 nameLower.contains("demo user") ||
                 nameLower.contains("test player")
             }
-            val cleanList = reconciledList.filter { !isMockUser(it) }
+            val cleanList = reconciledList.filter { !isMockUser(it) && !it.isGuestSession }
 
             trySend(cleanList.sortedWith(compareByDescending<UserProfile> { it.isBanned }.thenBy { it.username.lowercase() }))
         }
@@ -2269,6 +2311,162 @@ service cloud.firestore {
             adminsRef.removeEventListener(adminsListener)
             regRef.removeEventListener(regListener)
             fsListeners.forEach { it.remove() }
+        }
+    }
+
+    suspend fun getLiveCategoriesStream(): Flow<List<TournamentCategory>> = callbackFlow {
+        val categoriesMap = mutableMapOf<String, TournamentCategory>()
+
+        // 1. Initialize with default Free Fire categories
+        FreeFireCategories.DEFAULT_CATEGORIES.forEach { cat ->
+            categoriesMap[cat.id.uppercase()] = cat
+        }
+
+        fun emitCategories() {
+            val allTourneys = locallyCreatedTournaments.values.toList()
+            val result = categoriesMap.values.map { cat ->
+                val count = allTourneys.count { t -> t.canonicalCategory.equals(cat.id, ignoreCase = true) }
+                cat.copy(tournamentCount = count)
+            }.sortedWith(
+                compareBy<TournamentCategory> {
+                    when (it.id.uppercase()) {
+                        "BR" -> 0
+                        "CS" -> 1
+                        "LONE_WOLF" -> 2
+                        "SCRIMS" -> 3
+                        else -> 4
+                    }
+                }.thenBy { it.name }
+            )
+            trySend(result)
+        }
+
+        emitCategories()
+
+        // 2. Listen to RTDB category nodes
+        val rtdbCategoryNodes = listOf(
+            database.child("categories"),
+            database.child("FreeFire").child("categories"),
+            database.child("tournament_categories")
+        )
+
+        val rtdbListener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                if (!snapshot.exists()) return
+                snapshot.children.forEach { child ->
+                    val key = child.key ?: return@forEach
+                    val id = child.child("id").getValue(String::class.java) ?: key
+                    val name = child.child("name").getValue(String::class.java)
+                        ?: child.child("label").getValue(String::class.java)
+                        ?: child.getValue(String::class.java)
+                        ?: key
+                    val label = child.child("label").getValue(String::class.java) ?: name
+                    val desc = child.child("description").getValue(String::class.java) ?: ""
+                    val banner = child.child("bannerUrl").getValue(String::class.java)
+                        ?: child.child("imageUrl").getValue(String::class.java) ?: ""
+                    val icon = child.child("iconUrl").getValue(String::class.java) ?: ""
+                    val maxPlayers = (child.child("maxPlayers").getValue(Long::class.java) ?: child.child("defaultMaxPlayers").getValue(Long::class.java))?.toInt() ?: 48
+
+                    val existing = categoriesMap[id.uppercase()]
+                    categoriesMap[id.uppercase()] = TournamentCategory(
+                        id = id.uppercase(),
+                        name = name,
+                        label = label,
+                        shortName = name,
+                        description = desc.ifBlank { existing?.description ?: "" },
+                        iconUrl = icon.ifBlank { existing?.iconUrl ?: "" },
+                        bannerUrl = banner.ifBlank { existing?.bannerUrl ?: "" },
+                        defaultFormats = existing?.defaultFormats ?: listOf("SOLO", "DUO", "SQUAD"),
+                        defaultMaps = existing?.defaultMaps ?: listOf("Bermuda", "Purgatory", "Kalahari"),
+                        defaultMaxPlayers = maxPlayers,
+                        isCustom = existing?.isCustom ?: (!FreeFireCategories.ALL_CATEGORIES.any { it.key.equals(id, ignoreCase = true) })
+                    )
+                }
+                emitCategories()
+            }
+            override fun onCancelled(error: DatabaseError) {}
+        }
+
+        rtdbCategoryNodes.forEach { it.addValueEventListener(rtdbListener) }
+
+        // 3. Listen to Firestore "categories" collection
+        val fsListener = try {
+            firestore.collection("categories").addSnapshotListener { snapshots, error ->
+                if (error == null && snapshots != null) {
+                    for (doc in snapshots.documents) {
+                        val id = doc.id
+                        val name = doc.getString("name") ?: doc.getString("label") ?: id
+                        val label = doc.getString("label") ?: name
+                        val desc = doc.getString("description") ?: ""
+                        val banner = doc.getString("bannerUrl") ?: doc.getString("imageUrl") ?: ""
+                        val icon = doc.getString("iconUrl") ?: ""
+                        val maxP = doc.getLong("defaultMaxPlayers")?.toInt() ?: 48
+                        val existing = categoriesMap[id.uppercase()]
+
+                        categoriesMap[id.uppercase()] = TournamentCategory(
+                            id = id.uppercase(),
+                            name = name,
+                            label = label,
+                            shortName = name,
+                            description = desc.ifBlank { existing?.description ?: "" },
+                            iconUrl = icon.ifBlank { existing?.iconUrl ?: "" },
+                            bannerUrl = banner.ifBlank { existing?.bannerUrl ?: "" },
+                            defaultFormats = existing?.defaultFormats ?: listOf("SOLO", "DUO", "SQUAD"),
+                            defaultMaps = existing?.defaultMaps ?: listOf("Bermuda", "Purgatory", "Kalahari"),
+                            defaultMaxPlayers = maxP,
+                            isCustom = !FreeFireCategories.ALL_CATEGORIES.any { it.key.equals(id, ignoreCase = true) }
+                        )
+                    }
+                    emitCategories()
+                }
+            }
+        } catch (_: Exception) { null }
+
+        awaitClose {
+            rtdbCategoryNodes.forEach { it.removeEventListener(rtdbListener) }
+            fsListener?.remove()
+        }
+    }
+
+    suspend fun saveCategory(category: TournamentCategory) {
+        val catId = category.id.trim().uppercase().replace(" ", "_")
+        val map = mapOf(
+            "id" to catId,
+            "name" to category.name,
+            "label" to category.label,
+            "shortName" to category.shortName,
+            "description" to category.description,
+            "iconUrl" to category.iconUrl,
+            "bannerUrl" to category.bannerUrl,
+            "defaultFormats" to category.defaultFormats,
+            "defaultMaps" to category.defaultMaps,
+            "defaultMaxPlayers" to category.defaultMaxPlayers,
+            "isCustom" to true,
+            "updatedAt" to System.currentTimeMillis()
+        )
+        try {
+            database.child("categories").child(catId).setValue(map).await()
+            database.child("FreeFire").child("categories").child(catId).setValue(map).await()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error saving category to RTDB: ${e.message}")
+        }
+        try {
+            firestore.collection("categories").document(catId).set(map).await()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error saving category to Firestore: ${e.message}")
+        }
+        GlobalErrorManager.emitSuccess("Category '${category.name}' saved and synced across Firebase!")
+    }
+
+    suspend fun deleteCategory(categoryId: String) {
+        val catId = categoryId.trim().uppercase()
+        try {
+            database.child("categories").child(catId).removeValue().await()
+            database.child("FreeFire").child("categories").child(catId).removeValue().await()
+            firestore.collection("categories").document(catId).delete().await()
+            GlobalErrorManager.emitSuccess("Category '$catId' deleted from Firebase")
+        } catch (e: Exception) {
+            GlobalErrorManager.emitError("Failed to delete category: ${e.message}")
         }
     }
 
@@ -4708,6 +4906,190 @@ service cloud.firestore {
         awaitClose { ref.removeEventListener(listener) }
     }
 
+    suspend fun unbanAllGuestAndNonLoggedInSessions(): Int {
+        var unbannedCount = 0
+        try {
+            val unbanUpdates = mapOf<String, Any>(
+                "isBanned" to false,
+                "banned" to false,
+                "status" to "ACTIVE",
+                "accountStatus" to "ACTIVE",
+                "active" to true,
+                "isAuthorized" to true,
+                "walletFrozen" to false,
+                "banReason" to ""
+            )
+
+            // 1. Scan banned_users table in RTDB
+            try {
+                val banSnap = database.child("banned_users").get().await()
+                for (child in banSnap.children) {
+                    val key = child.key ?: ""
+                    val bUid = child.child("uid").value?.toString()?.trim() ?: ""
+                    val bEmail = child.child("email").value?.toString()?.trim()?.lowercase() ?: ""
+                    val bGameId = child.child("gameId").value?.toString()?.trim() ?: ""
+                    val bReason = child.child("reason").value?.toString()?.trim()?.lowercase() ?: ""
+
+                    var isGuestSessionBan = key.isBlank() ||
+                        key.startsWith("guest", ignoreCase = true) ||
+                        key.startsWith("anon", ignoreCase = true) ||
+                        bUid.startsWith("guest", ignoreCase = true) ||
+                        bUid.startsWith("anon", ignoreCase = true) ||
+                        bEmail.contains("guest") ||
+                        bEmail.contains("anonymous") ||
+                        (!bEmail.contains("@") && bGameId.isBlank()) ||
+                        bReason.contains("guest")
+
+                    val targetUid = bUid.ifBlank { if (!key.contains("@") && !key.contains(".")) key else "" }
+                    if (!isGuestSessionBan && targetUid.isNotBlank()) {
+                        try {
+                            val userSnap = database.child("users").child(targetUid).get().await()
+                            if (userSnap.exists()) {
+                                val uEmail = userSnap.child("email").value?.toString()?.trim()?.lowercase() ?: ""
+                                val uRole = userSnap.child("role").value?.toString()?.trim()?.lowercase() ?: ""
+                                val uName = userSnap.child("username").value?.toString()?.trim()?.lowercase() ?: ""
+                                val isAnon = userSnap.child("isAnonymous").value == true ||
+                                    userSnap.child("authProvider").value?.toString()?.equals("anonymous", ignoreCase = true) == true
+                                if (uEmail.isBlank() || !uEmail.contains("@") || isAnon || uRole == "guest" || uRole == "anonymous" ||
+                                    uName.startsWith("guest") || uName.startsWith("player (") || uName == "player") {
+                                    isGuestSessionBan = true
+                                }
+                            }
+                        } catch (_: Exception) {}
+                    }
+
+                    if (isGuestSessionBan) {
+                        try { child.ref.removeValue().await() } catch (_: Exception) {}
+                        try { firestore.collection("banned_users").document(key).delete().await() } catch (_: Exception) {}
+                        if (targetUid.isNotBlank()) {
+                            try { firestore.collection("banned_users").document(targetUid).delete().await() } catch (_: Exception) {}
+                            try { database.child("users").child(targetUid).updateChildren(unbanUpdates).await() } catch (_: Exception) {}
+                            try { database.child("userProfiles").child(targetUid).updateChildren(unbanUpdates).await() } catch (_: Exception) {}
+                            try { database.child("players").child(targetUid).updateChildren(unbanUpdates).await() } catch (_: Exception) {}
+                            try { firestore.collection("users").document(targetUid).update(unbanUpdates).await() } catch (_: Exception) {}
+                            try { firestore.collection("userProfiles").document(targetUid).update(unbanUpdates).await() } catch (_: Exception) {}
+                            try { firestore.collection("players").document(targetUid).update(unbanUpdates).await() } catch (_: Exception) {}
+                        }
+                        unbannedCount++
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.w(TAG, "unban RTDB banned_users error: ${e.message}")
+            }
+
+            // 2. Scan banned_users collection in Firestore
+            try {
+                val fsBanned = firestore.collection("banned_users").get().await()
+                for (doc in fsBanned.documents) {
+                    val docId = doc.id
+                    val email = doc.getString("email")?.trim()?.lowercase() ?: ""
+                    val uid = doc.getString("uid")?.trim() ?: ""
+                    val gameId = doc.getString("gameId")?.trim() ?: ""
+                    val isGuestSessionBan = docId.isBlank() ||
+                        docId.startsWith("guest", ignoreCase = true) ||
+                        docId.startsWith("anon", ignoreCase = true) ||
+                        uid.startsWith("guest", ignoreCase = true) ||
+                        uid.startsWith("anon", ignoreCase = true) ||
+                        email.contains("guest") ||
+                        email.contains("anonymous") ||
+                        (!email.contains("@") && gameId.isBlank())
+
+                    if (isGuestSessionBan) {
+                        try { doc.reference.delete().await() } catch (_: Exception) {}
+                        try { database.child("banned_users").child(docId).removeValue().await() } catch (_: Exception) {}
+                        val targetUid = uid.ifBlank { docId }
+                        if (targetUid.isNotBlank()) {
+                            try { database.child("users").child(targetUid).updateChildren(unbanUpdates).await() } catch (_: Exception) {}
+                            try { database.child("userProfiles").child(targetUid).updateChildren(unbanUpdates).await() } catch (_: Exception) {}
+                            try { database.child("players").child(targetUid).updateChildren(unbanUpdates).await() } catch (_: Exception) {}
+                            try { firestore.collection("users").document(targetUid).update(unbanUpdates).await() } catch (_: Exception) {}
+                            try { firestore.collection("userProfiles").document(targetUid).update(unbanUpdates).await() } catch (_: Exception) {}
+                            try { firestore.collection("players").document(targetUid).update(unbanUpdates).await() } catch (_: Exception) {}
+                        }
+                        unbannedCount++
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.w(TAG, "unban Firestore banned_users error: ${e.message}")
+            }
+
+            // 3. Scan all users in RTDB /users to sweep any banned user without a valid logged-in email
+            try {
+                val usersSnap = database.child("users").get().await()
+                for (uSnap in usersSnap.children) {
+                    val uid = uSnap.key ?: ""
+                    val isBanned = uSnap.child("isBanned").value == true ||
+                                  uSnap.child("banned").value == true ||
+                                  uSnap.child("status").value?.toString()?.equals("BANNED", ignoreCase = true) == true
+                    if (isBanned) {
+                        val email = uSnap.child("email").value?.toString()?.trim()?.lowercase() ?: ""
+                        val phone = uSnap.child("phoneNumber").value?.toString()?.trim() ?: uSnap.child("phone").value?.toString()?.trim() ?: ""
+                        val role = uSnap.child("role").value?.toString()?.trim()?.lowercase() ?: ""
+                        val uname = uSnap.child("username").value?.toString()?.trim()?.lowercase() ?: ""
+                        val isAnon = uSnap.child("isAnonymous").value == true ||
+                                     uSnap.child("authProvider").value?.toString()?.equals("anonymous", ignoreCase = true) == true ||
+                                     role == "guest" || role == "anonymous"
+
+                        if (isAnon || (!email.contains("@") && phone.isBlank()) || uname.startsWith("guest") || uname.startsWith("player (") || uname == "player") {
+                            try { database.child("banned_users").child(uid).removeValue().await() } catch (_: Exception) {}
+                            try { firestore.collection("banned_users").document(uid).delete().await() } catch (_: Exception) {}
+                            try { uSnap.ref.updateChildren(unbanUpdates).await() } catch (_: Exception) {}
+                            try { database.child("userProfiles").child(uid).updateChildren(unbanUpdates).await() } catch (_: Exception) {}
+                            try { database.child("players").child(uid).updateChildren(unbanUpdates).await() } catch (_: Exception) {}
+                            try { firestore.collection("users").document(uid).update(unbanUpdates).await() } catch (_: Exception) {}
+                            try { firestore.collection("userProfiles").document(uid).update(unbanUpdates).await() } catch (_: Exception) {}
+                            try { firestore.collection("players").document(uid).update(unbanUpdates).await() } catch (_: Exception) {}
+                            unbannedCount++
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.w(TAG, "unban RTDB users sweep error: ${e.message}")
+            }
+
+            // 4. Sweep Firestore users
+            try {
+                val fsUsers = firestore.collection("users").whereEqualTo("isBanned", true).get().await()
+                for (doc in fsUsers.documents) {
+                    val uid = doc.id
+                    val email = doc.getString("email")?.trim()?.lowercase() ?: ""
+                    val phone = doc.getString("phone")?.trim() ?: doc.getString("phoneNumber")?.trim() ?: ""
+                    val role = doc.getString("role")?.trim()?.lowercase() ?: ""
+                    val uname = doc.getString("username")?.trim()?.lowercase() ?: ""
+                    val isAnon = doc.getBoolean("isAnonymous") == true ||
+                                 doc.getString("authProvider")?.equals("anonymous", ignoreCase = true) == true ||
+                                 role == "guest" || role == "anonymous"
+
+                    if (isAnon || (!email.contains("@") && phone.isBlank()) || uname.startsWith("guest") || uname.startsWith("player (") || uname == "player") {
+                        try { doc.reference.update(unbanUpdates).await() } catch (_: Exception) {}
+                        try { firestore.collection("banned_users").document(uid).delete().await() } catch (_: Exception) {}
+                        try { database.child("banned_users").child(uid).removeValue().await() } catch (_: Exception) {}
+                        try { database.child("users").child(uid).updateChildren(unbanUpdates).await() } catch (_: Exception) {}
+                        try { database.child("userProfiles").child(uid).updateChildren(unbanUpdates).await() } catch (_: Exception) {}
+                        try { database.child("players").child(uid).updateChildren(unbanUpdates).await() } catch (_: Exception) {}
+                        unbannedCount++
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.w(TAG, "unban Firestore users sweep error: ${e.message}")
+            }
+
+            logAuditAction(
+                action = "UNBAN_GUEST_SESSIONS",
+                details = "Swept and restored unauthenticated/guest session access ($unbannedCount accounts unbanned)",
+                category = "SECURITY"
+            )
+            GlobalErrorManager.emitSuccess("Non-logged in & guest session bans completely removed ($unbannedCount restored)!")
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "unbanAllGuestAndNonLoggedInSessions: ${e.message}")
+        }
+        return unbannedCount
+    }
+
+    suspend fun cleanupBannedGuestSessions() {
+        unbanAllGuestAndNonLoggedInSessions()
+    }
+
     suspend fun banPlayer(
         uid: String,
         email: String = "",
@@ -4715,6 +5097,22 @@ service cloud.firestore {
         bannedBy: String = "",
         gameId: String = ""
     ) {
+        val cleanUid = uid.trim()
+        val cleanEmail = email.trim().lowercase()
+        val cleanGameId = gameId.trim()
+
+        // STRICT GUARD: Never ban guest or anonymous accounts!
+        if (cleanUid.startsWith("guest", ignoreCase = true) ||
+            cleanUid.startsWith("anon", ignoreCase = true) ||
+            cleanEmail.contains("guest") ||
+            cleanEmail.contains("anonymous") ||
+            (cleanUid.isBlank() && cleanEmail.isBlank() && cleanGameId.isBlank())
+        ) {
+            android.util.Log.w(TAG, "Blocked ban attempt on guest session: uid=$uid, email=$email")
+            GlobalErrorManager.emitError("Guest/anonymous sessions cannot be banned globally as this affects unauthenticated app access.")
+            return
+        }
+
         val now = System.currentTimeMillis()
         val effectiveReason = reason.ifBlank { "Violation of tournament rules" }
         val effectiveBannedBy = bannedBy.ifBlank { activeAdminEmail.ifBlank { "anantisback47@gmail.com" } }
@@ -4832,6 +5230,11 @@ service cloud.firestore {
             val cleanUid = uid?.trim() ?: ""
             val cleanEmail = email?.trim()?.lowercase() ?: ""
             val cleanGameId = gameId?.trim() ?: ""
+
+            // Guests, anonymous sessions, or blank accounts are NEVER considered banned
+            if (cleanUid.isBlank() && cleanEmail.isBlank() && cleanGameId.isBlank()) return false
+            if (cleanUid.startsWith("guest", ignoreCase = true) || cleanUid.startsWith("anon", ignoreCase = true)) return false
+            if (cleanEmail.contains("guest") || cleanEmail.contains("anonymous")) return false
 
             // Direct check in banned_users table
             if (cleanUid.isNotBlank()) {
@@ -5156,6 +5559,10 @@ service cloud.firestore {
     }
 
     suspend fun updateUserProfile(user: UserProfile) {
+        if (user.isGuestSession && user.isBanned) {
+            GlobalErrorManager.emitError("Action blocked: Guest sessions cannot be banned.")
+            return
+        }
         try {
             val map = mutableMapOf<String, Any>(
                 "id" to user.id,

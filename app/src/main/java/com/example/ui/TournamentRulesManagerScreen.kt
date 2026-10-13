@@ -3,6 +3,7 @@ package com.example.ui
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.BorderStroke
@@ -35,6 +36,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import android.graphics.Bitmap
+import android.net.Uri
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import com.example.domain.model.Tournament
 import com.example.domain.model.TournamentBannerPresets
 import com.example.ui.common.GlassBackgroundBox
@@ -42,6 +49,8 @@ import com.example.ui.common.GlassCard
 import com.example.ui.common.GlassTokens
 import com.example.ui.common.GlobalErrorManager
 import com.example.ui.theme.*
+import com.example.util.ImageUploadResult
+import com.example.util.TournamentImageUploader
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
@@ -55,6 +64,8 @@ fun TournamentRulesManagerScreen(
     onSaveTournament: suspend (Tournament) -> Unit,
     currentUserEmail: String? = null
 ) {
+    BackHandler { onNavigateBack() }
+
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
@@ -73,6 +84,94 @@ fun TournamentRulesManagerScreen(
     // Form fields state bound to selected tournament
     var bannerUrl by remember(currentTournament?.id) {
         mutableStateOf(currentTournament?.bannerUrl ?: "")
+    }
+    var isUploadingBanner by remember { mutableStateOf(false) }
+    var bannerStatusMessage by remember { mutableStateOf<String?>(null) }
+
+    val galleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            coroutineScope.launch {
+                isUploadingBanner = true
+                bannerStatusMessage = "Processing image..."
+                try {
+                    val result = TournamentImageUploader.uploadTournamentBanner(
+                        context = context,
+                        uri = uri,
+                        onProgress = { bannerStatusMessage = it }
+                    )
+                    when (result) {
+                        is ImageUploadResult.Success -> {
+                            bannerUrl = result.url
+                            isUploadingBanner = false
+                            bannerStatusMessage = "Uploaded via ${result.provider} ✓"
+                            Toast.makeText(context, "Tournament banner updated!", Toast.LENGTH_SHORT).show()
+                        }
+                        is ImageUploadResult.Failure -> {
+                            if (result.fallbackBase64 != null) {
+                                bannerUrl = result.fallbackBase64
+                                isUploadingBanner = false
+                                bannerStatusMessage = "Banner attached ✓"
+                                Toast.makeText(context, "Banner image attached", Toast.LENGTH_SHORT).show()
+                            } else {
+                                isUploadingBanner = false
+                                bannerStatusMessage = "Upload error: ${result.errorMessage}"
+                                Toast.makeText(context, "Upload error: ${result.errorMessage}", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                } catch (t: Throwable) {
+                    t.printStackTrace()
+                    isUploadingBanner = false
+                    bannerStatusMessage = null
+                    Toast.makeText(context, "Error: ${t.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicturePreview()
+    ) { bitmap: Bitmap? ->
+        if (bitmap != null) {
+            coroutineScope.launch {
+                isUploadingBanner = true
+                bannerStatusMessage = "Processing photo..."
+                try {
+                    val result = TournamentImageUploader.uploadTournamentBannerBitmap(
+                        context = context,
+                        bitmap = bitmap,
+                        onProgress = { bannerStatusMessage = it }
+                    )
+                    when (result) {
+                        is ImageUploadResult.Success -> {
+                            bannerUrl = result.url
+                            isUploadingBanner = false
+                            bannerStatusMessage = "Uploaded via ${result.provider} ✓"
+                            Toast.makeText(context, "Photo uploaded successfully!", Toast.LENGTH_SHORT).show()
+                        }
+                        is ImageUploadResult.Failure -> {
+                            if (result.fallbackBase64 != null) {
+                                bannerUrl = result.fallbackBase64
+                                isUploadingBanner = false
+                                bannerStatusMessage = "Photo attached ✓"
+                                Toast.makeText(context, "Photo attached as banner", Toast.LENGTH_SHORT).show()
+                            } else {
+                                isUploadingBanner = false
+                                bannerStatusMessage = "Upload failed"
+                                Toast.makeText(context, "Upload failed: ${result.errorMessage}", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                } catch (t: Throwable) {
+                    t.printStackTrace()
+                    isUploadingBanner = false
+                    bannerStatusMessage = null
+                    Toast.makeText(context, "Camera error: ${t.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
     }
     var allowedGuns by remember(currentTournament?.id) {
         mutableStateOf(currentTournament?.allowedGuns ?: "All Standard Weapons (AR, SMG, Shotguns, Snipers)")
@@ -442,7 +541,7 @@ fun TournamentRulesManagerScreen(
                                 Card(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .height(120.dp),
+                                        .height(130.dp),
                                     shape = RoundedCornerShape(12.dp),
                                     colors = CardDefaults.cardColors(containerColor = Color(0xFF0F0F12)),
                                     border = if (bannerUrl.isNotBlank()) BorderStroke(1.dp, VelorixAccent) else BorderStroke(1.dp, GlassTokens.GlassBorderSubtle)
@@ -450,12 +549,28 @@ fun TournamentRulesManagerScreen(
                                     Box(modifier = Modifier.fillMaxSize()) {
                                         if (bannerUrl.isNotBlank()) {
                                             AsyncImage(
-                                                model = bannerUrl,
+                                                model = TournamentImageUploader.resolveBannerModel(bannerUrl),
                                                 contentDescription = "Banner Preview",
                                                 modifier = Modifier.fillMaxSize(),
                                                 contentScale = ContentScale.Crop
                                             )
                                         }
+
+                                        if (isUploadingBanner) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .background(Color(0x88000000)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                                    CircularProgressIndicator(color = VelorixAccent, modifier = Modifier.size(28.dp), strokeWidth = 2.5.dp)
+                                                    Spacer(modifier = Modifier.height(6.dp))
+                                                    Text(bannerStatusMessage ?: "Uploading...", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                                }
+                                            }
+                                        }
+
                                         Box(
                                             modifier = Modifier
                                                 .fillMaxSize()
@@ -482,7 +597,7 @@ fun TournamentRulesManagerScreen(
                                                     border = BorderStroke(0.8.dp, VelorixAccent)
                                                 ) {
                                                     Text(
-                                                        text = "${currentTournament.format} • ${currentTournament.map}",
+                                                        text = "${currentTournament?.format ?: "SOLO"} • ${currentTournament?.map ?: "Bermuda"}",
                                                         color = VelorixAccentLight,
                                                         fontSize = 10.sp,
                                                         fontWeight = FontWeight.Bold,
@@ -495,7 +610,7 @@ fun TournamentRulesManagerScreen(
                                                     border = BorderStroke(0.8.dp, Color(0xFF69F0AE))
                                                 ) {
                                                     Text(
-                                                        text = "PRIZE: ₹${currentTournament.prizePool.toInt()}",
+                                                        text = "PRIZE: ₹${currentTournament?.prizePool?.toInt() ?: 0}",
                                                         color = Color(0xFF69F0AE),
                                                         fontSize = 10.sp,
                                                         fontWeight = FontWeight.ExtraBold,
@@ -505,7 +620,7 @@ fun TournamentRulesManagerScreen(
                                             }
 
                                             Text(
-                                                text = currentTournament.title,
+                                                text = currentTournament?.title ?: "Tournament",
                                                 color = Color.White,
                                                 fontWeight = FontWeight.Bold,
                                                 fontSize = 13.sp,
@@ -513,6 +628,36 @@ fun TournamentRulesManagerScreen(
                                                 overflow = TextOverflow.Ellipsis
                                             )
                                         }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(10.dp))
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Button(
+                                        onClick = { galleryLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                                        modifier = Modifier.weight(1f).height(44.dp),
+                                        shape = RoundedCornerShape(10.dp),
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6366F1))
+                                    ) {
+                                        Icon(Icons.Default.CloudUpload, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("UPLOAD PHOTO", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
+
+                                    OutlinedButton(
+                                        onClick = { cameraLauncher.launch(null) },
+                                        modifier = Modifier.weight(1f).height(44.dp),
+                                        shape = RoundedCornerShape(10.dp),
+                                        border = BorderStroke(1.dp, VelorixAccent),
+                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = VelorixAccentLight)
+                                    ) {
+                                        Icon(Icons.Default.PhotoCamera, contentDescription = null, tint = VelorixAccentLight, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("CAMERA", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                     }
                                 }
 

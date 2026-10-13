@@ -1,5 +1,6 @@
 package com.example.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -107,6 +108,16 @@ fun AdminChatbotScreen(
     var showAudioLabDialog by remember { mutableStateOf(false) }
     var showApiKeyDialog by remember { mutableStateOf(false) }
     var activeInspectorTab by remember { mutableIntStateOf(0) }
+
+    BackHandler {
+        if (showModelBottomSheet) {
+            showModelBottomSheet = false
+        } else if (showLiveInspectorSheet) {
+            showLiveInspectorSheet = false
+        } else {
+            onNavigateBack()
+        }
+    }
 
     val chatCooldownSeconds by UserRateLimiter.observeCooldownSeconds(UserRateLimiter.ActionType.GEMINI_CHAT_MESSAGE).collectAsStateWithLifecycle()
 

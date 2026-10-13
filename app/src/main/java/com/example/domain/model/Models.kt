@@ -102,8 +102,30 @@ data class UserProfile(
     var eligibleForCashTournaments: Boolean = true,
     @get:PropertyName("ageConfirmed") @set:PropertyName("ageConfirmed")
     var ageConfirmed: Boolean = false,
+    @get:PropertyName("isGuest") @set:PropertyName("isGuest")
+    var isGuest: Boolean = false,
+    @get:PropertyName("isAnonymous") @set:PropertyName("isAnonymous")
+    var isAnonymous: Boolean = false,
     var rawAttributes: Map<String, String> = emptyMap()
 ) {
+    val isGuestSession: Boolean get() {
+        if (isGuest || isAnonymous) return true
+        val roleLower = role.trim().lowercase()
+        if (roleLower == "guest" || roleLower == "anonymous") return true
+        val nameLower = username.trim().lowercase()
+        if (nameLower.startsWith("guest") || nameLower.contains("guest session") || nameLower.startsWith("anonymous")) return true
+        val emailLower = email.trim().lowercase()
+        if (emailLower.contains("guest") || emailLower.contains("anonymous") || emailLower.endsWith("@guest.com")) return true
+        val idLower = id.trim().lowercase()
+        if (idLower.startsWith("guest") || idLower.startsWith("anon_")) return true
+        val rawProvider = rawAttributes["provider"]?.lowercase() ?: rawAttributes["authProvider"]?.lowercase() ?: rawAttributes["providerId"]?.lowercase() ?: ""
+        if (rawProvider == "anonymous" || rawProvider == "guest") return true
+        if (rawAttributes["isGuest"]?.toBooleanStrictOrNull() == true || rawAttributes["isAnonymous"]?.toBooleanStrictOrNull() == true) return true
+        // If email, phone and gameId are all blank and username is Player or blank, it's an unauthenticated temporary session
+        if (email.isBlank() && phone.isBlank() && gameId.isBlank() && (nameLower.isBlank() || nameLower == "player" || nameLower.startsWith("player ("))) return true
+        return false
+    }
+
     val isMinor: Boolean get() = isUnder18 || (age in 1..17)
     val canJoinCashTournaments: Boolean get() = !isMinor && eligibleForCashTournaments
     val totalWalletBalance: Double get() = when {
@@ -492,6 +514,57 @@ data class Tournament(
     val isClashSquad: Boolean get() = canonicalCategory == "CS"
     val isLoneWolf: Boolean get() = canonicalCategory == "LONE_WOLF"
     val isScrim: Boolean get() = canonicalCategory == "SCRIMS"
+
+    val parsedStartsAtMillis: Long?
+        get() {
+            val raw = startsAt?.trim() ?: return null
+            raw.toLongOrNull()?.let { return it }
+            val patterns = arrayOf(
+                "yyyy-MM-dd HH:mm",
+                "yyyy-MM-dd HH:mm:ss",
+                "yyyy-MM-dd'T'HH:mm:ss.SSSZ",
+                "yyyy-MM-dd'T'HH:mm:ss",
+                "yyyy-MM-dd",
+                "dd-MM-yyyy HH:mm",
+                "dd/MM/yyyy HH:mm"
+            )
+            for (p in patterns) {
+                try {
+                    val sdf = java.text.SimpleDateFormat(p, java.util.Locale.getDefault())
+                    sdf.isLenient = false
+                    val date = sdf.parse(raw)
+                    if (date != null) return date.time
+                } catch (_: Exception) {}
+            }
+            return null
+        }
+}
+
+data class TournamentCategory(
+    val id: String = "",
+    val name: String = "",
+    val label: String = name,
+    val shortName: String = name,
+    val description: String = "",
+    val iconUrl: String = "",
+    val bannerUrl: String = "",
+    val defaultFormats: List<String> = listOf("SOLO", "DUO", "SQUAD"),
+    val defaultMaps: List<String> = listOf("Bermuda", "Purgatory", "Kalahari", "Alpine"),
+    val defaultMaxPlayers: Int = 48,
+    val isCustom: Boolean = false,
+    val tournamentCount: Int = 0
+) {
+    fun toCategoryMeta(): FreeFireCategories.CategoryMeta {
+        return FreeFireCategories.CategoryMeta(
+            key = id,
+            label = label.ifBlank { name },
+            shortName = shortName.ifBlank { name },
+            description = description,
+            defaultFormats = defaultFormats.ifEmpty { listOf("SOLO", "DUO", "SQUAD") },
+            defaultMaps = defaultMaps.ifEmpty { listOf("Bermuda", "Purgatory", "Kalahari") },
+            defaultMaxPlayers = if (defaultMaxPlayers > 0) defaultMaxPlayers else 48
+        )
+    }
 }
 
 object FreeFireCategories {
@@ -549,8 +622,34 @@ object FreeFireCategories {
         )
     )
 
-    fun getCategoryMeta(key: String): CategoryMeta {
-        return ALL_CATEGORIES.firstOrNull { it.key.equals(key, ignoreCase = true) } ?: ALL_CATEGORIES[0]
+    val DEFAULT_CATEGORIES: List<TournamentCategory> = ALL_CATEGORIES.map { meta ->
+        TournamentCategory(
+            id = meta.key,
+            name = meta.shortName,
+            label = meta.label,
+            shortName = meta.shortName,
+            description = meta.description,
+            defaultFormats = meta.defaultFormats,
+            defaultMaps = meta.defaultMaps,
+            defaultMaxPlayers = meta.defaultMaxPlayers,
+            isCustom = false
+        )
+    }
+
+    fun getCategoryMeta(key: String, dynamicCategories: List<TournamentCategory> = emptyList()): CategoryMeta {
+        dynamicCategories.firstOrNull { it.id.equals(key, ignoreCase = true) }?.let {
+            return it.toCategoryMeta()
+        }
+        return ALL_CATEGORIES.firstOrNull { it.key.equals(key, ignoreCase = true) }
+            ?: CategoryMeta(
+                key = key,
+                label = key.replace("_", " "),
+                shortName = key,
+                description = "Category: $key",
+                defaultFormats = listOf("SOLO", "DUO", "SQUAD"),
+                defaultMaps = listOf("Bermuda", "Purgatory", "Kalahari"),
+                defaultMaxPlayers = 48
+            )
     }
 }
 

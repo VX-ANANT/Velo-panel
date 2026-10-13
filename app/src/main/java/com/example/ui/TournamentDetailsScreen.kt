@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -33,6 +34,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.example.util.TournamentImageUploader
 import com.example.domain.model.MatchProofSubmission
 import com.example.domain.model.PlayerRegistration
 import com.example.domain.model.Tournament
@@ -84,9 +86,11 @@ fun TournamentDetailsScreen(
     val isLive = tournament.status.equals("LIVE", ignoreCase = true)
     val isCompleted = tournament.status.equals("COMPLETED", ignoreCase = true)
 
+    BackHandler { onNavigateBack() }
+
     // Calculate time diff to startsAt
     val startsAtMillis = remember(tournament.startsAt) {
-        tournament.startsAt?.toLongOrNull() ?: 0L
+        tournament.parsedStartsAtMillis ?: 0L
     }
     val minutesUntilStart = remember(startsAtMillis) {
         if (startsAtMillis > 0L) {
@@ -345,7 +349,7 @@ fun TournamentDetailsScreen(
                                     .height(160.dp)
                             ) {
                                 AsyncImage(
-                                    model = tournament.bannerUrl,
+                                    model = TournamentImageUploader.resolveBannerModel(tournament.bannerUrl),
                                     contentDescription = tournament.title,
                                     modifier = Modifier.fillMaxSize(),
                                     contentScale = ContentScale.Crop

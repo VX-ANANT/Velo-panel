@@ -43,6 +43,7 @@ sealed class DashboardState {
         val globalAnnouncements: List<com.example.domain.model.GlobalAnnouncement> = emptyList(),
         val matchProofs: List<com.example.domain.model.MatchProofSubmission> = emptyList(),
         val notifications: List<com.example.domain.model.AppNotification> = emptyList(),
+        val categories: List<com.example.domain.model.TournamentCategory> = com.example.domain.model.FreeFireCategories.DEFAULT_CATEGORIES,
         val pendingRegistrationsCount: Int = 0,
         val totalRegistrationsCount: Int = 0,
         val payoutPool: Float = 0f,
@@ -92,7 +93,9 @@ fun DashboardState.Success.withDerivedMetrics(
     newBannedUsers: Map<String, BannedUserRecord>? = null,
     newTokens: List<CheckInToken>? = null,
     newBanners: List<AppAnnouncementBanner>? = null,
-    newGlobalAnnouncements: List<com.example.domain.model.GlobalAnnouncement>? = null
+    newGlobalAnnouncements: List<com.example.domain.model.GlobalAnnouncement>? = null,
+    newCategories: List<com.example.domain.model.TournamentCategory>? = null,
+    categories: List<com.example.domain.model.TournamentCategory>? = null
 ): DashboardState.Success {
     val effectiveUsers = newUsers ?: users ?: this.users
     val effectiveAdmins = newAdmins ?: admins ?: this.admins
@@ -102,14 +105,15 @@ fun DashboardState.Success.withDerivedMetrics(
     val effectiveNotifs = newNotifications ?: this.notifications
     val effectiveTournaments = newTournaments ?: tournaments ?: this.tournaments
 
+    val cleanUsers = effectiveUsers.filter { !it.isGuestSession }
     val sortedLeaderboard = if (newUsers != null || leaderboardPlayers.isEmpty()) {
-        effectiveUsers.sortedWith(
+        cleanUsers.sortedWith(
             compareByDescending<UserProfile> { it.totalEarnings }
                 .thenByDescending { it.wins }
                 .thenByDescending { it.kills }
         )
     } else {
-        leaderboardPlayers
+        leaderboardPlayers.filter { !it.isGuestSession }
     }
 
     val activeAdmins = if (newAdmins != null) effectiveAdmins.count { it.active } else totalActiveAdminsCount
@@ -151,7 +155,7 @@ fun DashboardState.Success.withDerivedMetrics(
 
     return this.copy(
         tournaments = effectiveTournaments,
-        users = effectiveUsers,
+        users = cleanUsers,
         admins = effectiveAdmins,
         supportTickets = effectiveTickets,
         payoutRequests = effectivePayouts,
@@ -161,9 +165,10 @@ fun DashboardState.Success.withDerivedMetrics(
         checkInTokens = newTokens ?: this.checkInTokens,
         banners = newBanners ?: this.banners,
         globalAnnouncements = newGlobalAnnouncements ?: this.globalAnnouncements,
+        categories = newCategories ?: categories ?: this.categories,
         isSyncing = newSyncing ?: this.isSyncing,
         leaderboardPlayers = sortedLeaderboard,
-        totalRegisteredUsersCount = effectiveUsers.size,
+        totalRegisteredUsersCount = cleanUsers.size,
         totalActiveAdminsCount = activeAdmins,
         openSupportComplaintsCount = openComplaints,
         pendingCashoutsCount = pCashoutsCount,
@@ -553,9 +558,26 @@ class TournamentDashboardViewModel(
             }
         }
 
+        // 12. Stream Dynamic Categories extracted from Firebase RTDB & Firestore
+        val categoriesJob = viewModelScope.launch(Dispatchers.Default) {
+            try {
+                repository.getLiveCategoriesStream()
+                    .distinctUntilChanged()
+                    .flowOn(Dispatchers.Default)
+                    .collect { catList ->
+                        _uiState.update { curr ->
+                            val s = curr as? DashboardState.Success ?: DashboardState.Success(currentUserEmail = initialEmail)
+                            s.withDerivedMetrics(newCategories = catList)
+                        }
+                    }
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) e.printStackTrace()
+            }
+        }
+
         synchronized(activeStreamJobs) {
             activeStreamJobs.addAll(
-                listOf(userJob, ticketsJob, payoutsJob, adminsJob, bannedJob, tournamentsJob, tokensJob, bannersJob, annJob, proofsJob, notifsJob)
+                listOf(userJob, ticketsJob, payoutsJob, adminsJob, bannedJob, tournamentsJob, tokensJob, bannersJob, annJob, proofsJob, notifsJob, categoriesJob)
             )
         }
     }
@@ -669,6 +691,72 @@ class TournamentDashboardViewModel(
                 repository.createTournament(tournament, currAdminEmail, currAdminUid)
             } catch (e: Exception) {
                 GlobalErrorManager.emitFirestoreError("Create Tournament", e)
+            }
+        }
+    }
+
+    fun createTournamentsBatch(tournaments: List<Tournament>) {
+        if (tournaments.isEmpty()) return
+        _uiState.update { curr ->
+            val s = curr as? DashboardState.Success ?: return@update curr
+            val newIds = tournaments.map { it.id }.toSet()
+            val updatedList = tournaments + s.tournaments.filter { it.id !in newIds }
+            s.withDerivedMetrics(newTournaments = updatedList)
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val currAdminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
+            val currAdminUid = repository.auth.currentUser?.uid
+            var saved = 0
+            for (t in tournaments) {
+                try {
+                    repository.createTournament(t, currAdminEmail, currAdminUid)
+                    saved++
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+            GlobalErrorManager.emitSuccess("Published $saved tournaments across categories to Firebase!")
+        }
+    }
+
+    fun duplicateTournament(tournament: Tournament) {
+        val newId = com.example.data.validation.SecuritySanitizer.sanitizeDatabaseKey(java.util.UUID.randomUUID().toString())
+        val duplicated = tournament.copy(
+            id = newId,
+            title = "${tournament.title} (Clone)",
+            registeredPlayers = 0,
+            status = "UPCOMING"
+        )
+        createTournament(duplicated)
+        GlobalErrorManager.emitSuccess("Duplicated '${tournament.title}' successfully!")
+    }
+
+    fun saveCategory(category: com.example.domain.model.TournamentCategory) {
+        _uiState.update { curr ->
+            val s = curr as? DashboardState.Success ?: return@update curr
+            val updatedCategories = listOf(category) + s.categories.filter { it.id != category.id }
+            s.withDerivedMetrics(newCategories = updatedCategories)
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                repository.saveCategory(category)
+            } catch (e: Exception) {
+                GlobalErrorManager.emitError("Failed to save category: ${e.message}")
+            }
+        }
+    }
+
+    fun deleteCategory(categoryId: String) {
+        _uiState.update { curr ->
+            val s = curr as? DashboardState.Success ?: return@update curr
+            val updatedCategories = s.categories.filter { it.id != categoryId }
+            s.withDerivedMetrics(newCategories = updatedCategories)
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                repository.deleteCategory(categoryId)
+            } catch (e: Exception) {
+                GlobalErrorManager.emitError("Failed to delete category: ${e.message}")
             }
         }
     }
@@ -826,6 +914,10 @@ class TournamentDashboardViewModel(
     }
 
     fun toggleUserBan(user: UserProfile, explicitBanned: Boolean? = null) {
+        if (user.isGuestSession) {
+            GlobalErrorManager.emitError("Guest/anonymous sessions cannot be banned globally.")
+            return
+        }
         val newBanned = explicitBanned ?: !user.isBanned
         val reason = if (newBanned) user.banReason.ifBlank { "Banned by Admin Panel" } else ""
         val currAdminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
@@ -848,6 +940,16 @@ class TournamentDashboardViewModel(
             }.onFailure { e ->
                 e.printStackTrace()
                 GlobalErrorManager.emitError("Failed to toggle ban: ${e.message}")
+            }
+        }
+    }
+
+    fun unbanAllGuestSessions(onFinished: ((Int) -> Unit)? = null) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val count = repository.unbanAllGuestAndNonLoggedInSessions()
+            fetchData()
+            withContext(Dispatchers.Main) {
+                onFinished?.invoke(count)
             }
         }
     }
