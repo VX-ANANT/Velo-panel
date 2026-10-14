@@ -105,8 +105,13 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.material3.HorizontalDivider
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.layout.ContentScale
@@ -1649,52 +1654,13 @@ fun OperationsHubScreenContent(
                     .padding(4.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                // Tab 0: KYC Queue
-                val isKyc = selectedSection == 0
+                // Tab 0: Players Directory (Auto-Approval active, zero manual KYC bottleneck)
+                val isUsers = selectedSection == 0
                 Surface(
                     modifier = Modifier
                         .weight(1f)
                         .clip(RoundedCornerShape(10.dp))
                         .bounceClick(scaleDown = 0.95f) { selectedSection = 0 },
-                    color = if (isKyc) Color(0xFF18181B) else Color.Transparent,
-                    border = if (isKyc) BorderStroke(1.dp, Color(0xFF3F3F46)) else null
-                ) {
-                    Row(
-                        modifier = Modifier.padding(vertical = 10.dp, horizontal = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        Text(
-                            text = "KYC Queue",
-                            fontSize = 11.5.sp,
-                            fontWeight = if (isKyc) FontWeight.Bold else FontWeight.Medium,
-                            color = if (isKyc) Color.White else Color(0xFFA1A1AA)
-                        )
-                        if (uiState.pendingRegistrationsCount > 0) {
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Box(
-                                modifier = Modifier
-                                    .background(Color(0xFFEF4444), CircleShape)
-                                    .padding(horizontal = 5.dp, vertical = 1.dp)
-                            ) {
-                                Text(
-                                    text = "${uiState.pendingRegistrationsCount}",
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // Tab 1: User Directory
-                val isUsers = selectedSection == 1
-                Surface(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(10.dp))
-                        .bounceClick(scaleDown = 0.95f) { selectedSection = 1 },
                     color = if (isUsers) Color(0xFF18181B) else Color.Transparent,
                     border = if (isUsers) BorderStroke(1.dp, Color(0xFF3F3F46)) else null
                 ) {
@@ -1703,6 +1669,8 @@ fun OperationsHubScreenContent(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
                     ) {
+                        Icon(Icons.Default.Group, contentDescription = null, tint = if (isUsers) VelorixAccent else Color(0xFFA1A1AA), modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
                         Text(
                             text = "Players",
                             fontSize = 11.5.sp,
@@ -1715,6 +1683,49 @@ fun OperationsHubScreenContent(
                             fontSize = 10.sp,
                             color = Color(0xFF71717A)
                         )
+                    }
+                }
+
+                // Tab 1: Referral Ecosystem & Network
+                val isReferrals = selectedSection == 1
+                val totalReferrersCount = uiState.users.count { it.referralCode.isNotBlank() || it.referralCount > 0 }
+                Surface(
+                    modifier = Modifier
+                        .weight(1.1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .bounceClick(scaleDown = 0.95f) { selectedSection = 1 },
+                    color = if (isReferrals) Color(0xFF18181B) else Color.Transparent,
+                    border = if (isReferrals) BorderStroke(1.dp, Color(0xFF3F3F46)) else null
+                ) {
+                    Row(
+                        modifier = Modifier.padding(vertical = 10.dp, horizontal = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(Icons.Default.AccountTree, contentDescription = null, tint = if (isReferrals) Color(0xFF38BDF8) else Color(0xFFA1A1AA), modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Referrals",
+                            fontSize = 11.5.sp,
+                            fontWeight = if (isReferrals) FontWeight.Bold else FontWeight.Medium,
+                            color = if (isReferrals) Color.White else Color(0xFFA1A1AA)
+                        )
+                        if (totalReferrersCount > 0) {
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Box(
+                                modifier = Modifier
+                                    .background(Color(0xFF38BDF8).copy(alpha = 0.2f), CircleShape)
+                                    .border(0.5.dp, Color(0xFF38BDF8), CircleShape)
+                                    .padding(horizontal = 5.dp, vertical = 1.dp)
+                            ) {
+                                Text(
+                                    text = "$totalReferrersCount",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF38BDF8)
+                                )
+                            }
+                        }
                     }
                 }
 
@@ -1764,91 +1775,51 @@ fun OperationsHubScreenContent(
         // Tab Content Display
         when (selectedSection) {
             0 -> {
-                // KYC Verification Queue
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
+                // Players Directory with Auto-Approval status
+                Column(modifier = Modifier.fillMaxSize()) {
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .border(1.dp, Color(0xFF27272A), RoundedCornerShape(16.dp)),
-                        color = Color(0xFF09090B),
-                        shape = RoundedCornerShape(16.dp)
+                            .padding(bottom = 8.dp),
+                        color = Color(0xFF0F1B16),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.4f))
                     ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column {
-                                    Text(
-                                        text = "ID & PAYMENT VERIFICATION",
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = VelorixTextSecondary,
-                                        letterSpacing = 1.sp
-                                    )
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(
-                                        text = "${uiState.pendingRegistrationsCount} Pending In Queue",
-                                        fontSize = 18.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color.White
-                                    )
-                                }
-                                Box(
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .background(Color(0xFF18181B), CircleShape)
-                                        .border(1.dp, Color(0xFF27272A), CircleShape),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.VerifiedUser,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text(
-                                text = "Verify payment screenshots, in-game IDs, and age eligibility for tournament registrations.",
-                                fontSize = 12.sp,
-                                color = VelorixTextSecondary
-                            )
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Button(
-                                onClick = onVerifyClick,
-                                modifier = Modifier.fillMaxWidth().height(44.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color.White,
-                                    contentColor = Color.Black
-                                ),
-                                shape = RoundedCornerShape(10.dp)
-                            ) {
-                                Icon(Icons.Default.VerifiedUser, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                Icon(Icons.Default.VerifiedUser, contentDescription = null, tint = Color(0xFF34D399), modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("OPEN FULL VERIFICATION QUEUE", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                                Column {
+                                    Text("Zero-KYC Instant Authorization Active", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = Color(0xFF6EE7B7))
+                                    Text("All player registrations auto-approved for cash matches and instantaneous tournament joins.", fontSize = 10.sp, color = Color(0xFFA7F3D0))
+                                }
                             }
                         }
                     }
+
+                    UsersManagementScreenContent(
+                        uiState = uiState,
+                        onToggleBan = onToggleUserBan,
+                        onAddFunds = onAddFunds,
+                        onDeleteUser = onDeleteUser,
+                        onUpdateUser = { onUpdateUser?.invoke(it) },
+                        onRefreshUserData = onRefreshUserData,
+                        onUnbanGuestSessions = onUnbanGuestSessions
+                    )
                 }
             }
             1 -> {
-                // User Directory
-                UsersManagementScreenContent(
-                    uiState = uiState,
+                // Referral Network Hub
+                ReferralNetworkHubContent(
+                    users = uiState.users,
                     onToggleBan = onToggleUserBan,
                     onAddFunds = onAddFunds,
                     onDeleteUser = onDeleteUser,
-                    onUpdateUser = { onUpdateUser?.invoke(it) },
-                    onRefreshUserData = onRefreshUserData,
-                    onUnbanGuestSessions = onUnbanGuestSessions
+                    onUpdateUser = { onUpdateUser?.invoke(it) }
                 )
             }
             2 -> {
@@ -1867,6 +1838,364 @@ fun OperationsHubScreenContent(
                     getTicketMessagesStream = getTicketMessagesStream,
                     onIssueTicketCompensation = onIssueTicketCompensation
                 )
+            }
+        }
+    }
+}
+
+@Composable
+fun ReferralNetworkHubContent(
+    users: List<com.example.domain.model.UserProfile>,
+    onToggleBan: (com.example.domain.model.UserProfile) -> Unit,
+    onAddFunds: (com.example.domain.model.UserProfile, Double) -> Unit,
+    onDeleteUser: (com.example.domain.model.UserProfile) -> Unit,
+    onUpdateUser: ((com.example.domain.model.UserProfile) -> Unit)? = null
+) {
+    var searchQuery by remember { mutableStateOf("") }
+    var inspectedUser by remember { mutableStateOf<com.example.domain.model.UserProfile?>(null) }
+    var expandedUserId by remember { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+
+    val validUsers = remember(users) {
+        users.filter { !it.isGuestSession && !it.email.contains("mock.dummy") }
+    }
+
+    // Identify users who have referrals or referral codes
+    val activeReferrers = remember(validUsers, searchQuery) {
+        validUsers.filter { u ->
+            val hasCode = u.referralCode.isNotBlank()
+            val hasReferredCount = u.referralCount > 0
+            val hasReferredOthers = validUsers.any { other -> 
+                other.id != u.id && (
+                    (u.referralCode.isNotBlank() && other.referredBy.equals(u.referralCode, ignoreCase = true)) ||
+                    (other.referredBy.equals(u.id, ignoreCase = true)) ||
+                    (other.referredBy.equals(u.username, ignoreCase = true))
+                )
+            }
+            val matchesSearch = searchQuery.isBlank() ||
+                u.username.contains(searchQuery, ignoreCase = true) ||
+                u.referralCode.contains(searchQuery, ignoreCase = true) ||
+                u.gameId.contains(searchQuery, ignoreCase = true) ||
+                u.id.contains(searchQuery, ignoreCase = true)
+
+            (hasCode || hasReferredCount || hasReferredOthers) && matchesSearch
+        }.sortedByDescending { u ->
+            val actualCount = validUsers.count { other ->
+                other.id != u.id && (
+                    (u.referralCode.isNotBlank() && other.referredBy.equals(u.referralCode, ignoreCase = true)) ||
+                    (other.referredBy.equals(u.id, ignoreCase = true)) ||
+                    (other.referredBy.equals(u.username, ignoreCase = true))
+                )
+            }
+            maxOf(actualCount, u.referralCount)
+        }
+    }
+
+    val totalCodesGenerated = remember(validUsers) { validUsers.count { it.referralCode.isNotBlank() } }
+    val totalReferredUsersCount = remember(validUsers) {
+        validUsers.count { it.referredBy.isNotBlank() && !it.referredBy.equals("Direct Organic Signup", ignoreCase = true) }
+    }
+    val totalBonusPaid = remember(validUsers) {
+        validUsers.sumOf { it.referralBonusEarned }
+    }
+
+    // Inspect user modal if selected
+    inspectedUser?.let { userToInspect ->
+        UserDetailsInspectorDialog(
+            user = userToInspect,
+            allUsers = validUsers,
+            onDismiss = { inspectedUser = null },
+            onToggleBan = onToggleBan,
+            onAddFunds = onAddFunds,
+            onUpdateUser = { updated ->
+                onUpdateUser?.invoke(updated)
+                inspectedUser = updated
+            },
+            onDeleteUser = {
+                onDeleteUser(it)
+                inspectedUser = null
+            }
+        )
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        // Analytics KPI Banner
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Surface(
+                modifier = Modifier.weight(1f),
+                color = Color(0xFF12141A),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, Color(0xFF22283A))
+            ) {
+                Column(modifier = Modifier.padding(10.dp)) {
+                    Text("CODES ACTIVE", fontSize = 9.sp, color = VelorixTextSecondary, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text("$totalCodesGenerated", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                }
+            }
+
+            Surface(
+                modifier = Modifier.weight(1f),
+                color = Color(0xFF12141A),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, Color(0xFF22283A))
+            ) {
+                Column(modifier = Modifier.padding(10.dp)) {
+                    Text("REFERRED PLAYERS", fontSize = 9.sp, color = VelorixTextSecondary, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text("$totalReferredUsersCount", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8))
+                }
+            }
+
+            Surface(
+                modifier = Modifier.weight(1f),
+                color = Color(0xFF12141A),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, Color(0xFF22283A))
+            ) {
+                Column(modifier = Modifier.padding(10.dp)) {
+                    Text("TOTAL BONUS PAID", fontSize = 9.sp, color = VelorixTextSecondary, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text("₹${totalBonusPaid.toInt()}", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF34D399))
+                }
+            }
+        }
+
+        // Search Input
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = { searchQuery = it },
+            placeholder = { Text("Search by player IGN, referral code, or Free Fire UID...", fontSize = 12.sp) },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(16.dp)) },
+            modifier = Modifier.fillMaxWidth(),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = VelorixAccent,
+                unfocusedBorderColor = CardVerifyBorder,
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White
+            ),
+            shape = RoundedCornerShape(12.dp)
+        )
+
+        // Referral Network Records
+        if (activeReferrers.isEmpty()) {
+            Surface(
+                color = Color(0xFF141720),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, Color(0xFF232938)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Default.AccountTree, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(36.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("No Matching Referral Records", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("When players generate their referral codes and invite others, their network tree will appear here.", color = VelorixTextSecondary, fontSize = 11.5.sp, textAlign = TextAlign.Center)
+                }
+            }
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                activeReferrers.forEach { referrer ->
+                    val resolvedReferred = remember(validUsers, referrer) {
+                        validUsers.filter { other ->
+                            other.id != referrer.id && (
+                                (referrer.referralCode.isNotBlank() && other.referredBy.equals(referrer.referralCode, ignoreCase = true)) ||
+                                (other.referredBy.equals(referrer.id, ignoreCase = true)) ||
+                                (other.referredBy.equals(referrer.username, ignoreCase = true)) ||
+                                (other.rawAttributes["referredByCode"]?.equals(referrer.referralCode, ignoreCase = true) == true) ||
+                                (other.rawAttributes["referrerId"]?.equals(referrer.id, ignoreCase = true) == true)
+                            )
+                        }
+                    }
+                    val isExpanded = expandedUserId == referrer.id
+
+                    Surface(
+                        color = Color(0xFF12141C),
+                        shape = RoundedCornerShape(14.dp),
+                        border = BorderStroke(1.dp, if (isExpanded) VelorixAccent.copy(alpha = 0.5f) else Color(0xFF222736)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(38.dp)
+                                            .background(Color(0xFF1E2333), CircleShape)
+                                            .border(1.dp, VelorixAccent.copy(alpha = 0.4f), CircleShape),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = referrer.bestDisplayName.take(1).uppercase(),
+                                            color = VelorixAccent,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 15.sp
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column {
+                                        Text(
+                                            text = referrer.bestDisplayName,
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 13.5.sp
+                                        )
+                                        Text(
+                                            text = "IGN: ${referrer.effectiveIgn} • UID: ${referrer.id.take(8)}...",
+                                            color = VelorixTextSecondary,
+                                            fontSize = 10.5.sp
+                                        )
+                                    }
+                                }
+
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Surface(
+                                        color = Color(0xFF1E2638),
+                                        shape = RoundedCornerShape(6.dp),
+                                        border = BorderStroke(1.dp, Color(0xFF38BDF8).copy(alpha = 0.5f)),
+                                        modifier = Modifier.clickable {
+                                            if (referrer.referralCode.isNotBlank()) {
+                                                clipboard.setText(androidx.compose.ui.text.AnnotatedString(referrer.referralCode))
+                                                android.widget.Toast.makeText(context, "Code copied: ${referrer.referralCode}", android.widget.Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    ) {
+                                        Text(
+                                            text = referrer.referralCode.ifBlank { "NO CODE" },
+                                            color = Color(0xFF38BDF8),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = "${maxOf(resolvedReferred.size, referrer.referralCount)} Referred • ₹${referrer.referralBonusEarned.toInt()} Bonus",
+                                        color = Color(0xFF34D399),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            // Action buttons row: Inspect Profile and Toggle Itemized List
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = { inspectedUser = referrer },
+                                    modifier = Modifier.weight(1f).height(36.dp),
+                                    shape = RoundedCornerShape(8.dp),
+                                    border = BorderStroke(1.dp, Color(0xFF3F3F46)),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Icon(Icons.Default.AccountCircle, contentDescription = null, tint = Color.LightGray, modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Inspect Profile", fontSize = 11.sp, color = Color.LightGray)
+                                }
+
+                                Button(
+                                    onClick = {
+                                        expandedUserId = if (isExpanded) null else referrer.id
+                                    },
+                                    modifier = Modifier.weight(1.2f).height(36.dp),
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = if (isExpanded) VelorixAccent else Color(0xFF242A38),
+                                        contentColor = if (isExpanded) Color.Black else Color.White
+                                    ),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = if (isExpanded) "Hide Referred (${resolvedReferred.size})" else "Show Referred (${resolvedReferred.size})",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+
+                            // Itemized Referred Players Accordion
+                            if (isExpanded) {
+                                Spacer(modifier = Modifier.height(12.dp))
+                                HorizontalDivider(color = Color(0xFF22283A))
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                Text(
+                                    text = "PLAYERS ONBOARDED BY ${referrer.bestDisplayName.uppercase()} (${resolvedReferred.size})",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF38BDF8),
+                                    letterSpacing = 0.5.sp
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+
+                                if (resolvedReferred.isEmpty()) {
+                                    Text(
+                                        "No registered player accounts linked under code '${referrer.referralCode}' yet.",
+                                        fontSize = 11.sp,
+                                        color = VelorixTextSecondary
+                                    )
+                                } else {
+                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        resolvedReferred.forEachIndexed { rIdx, rUser ->
+                                            Surface(
+                                                color = Color(0xFF0C0E14),
+                                                shape = RoundedCornerShape(8.dp),
+                                                border = BorderStroke(1.dp, Color(0xFF1A1F2C)),
+                                                modifier = Modifier.fillMaxWidth().clickable { inspectedUser = rUser }
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.SpaceBetween
+                                                ) {
+                                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                                        Text("${rIdx + 1}.", color = Color.Gray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                                        Spacer(modifier = Modifier.width(6.dp))
+                                                        Column {
+                                                            Text(rUser.bestDisplayName, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                            Text("IGN: ${rUser.effectiveIgn} • FF UID: ${rUser.gameId.ifBlank { "Unlinked" }}", color = VelorixTextSecondary, fontSize = 10.sp)
+                                                        }
+                                                    }
+
+                                                    Surface(
+                                                        shape = RoundedCornerShape(4.dp),
+                                                        color = Color(0xFF10B981).copy(alpha = 0.2f),
+                                                        border = BorderStroke(0.5.dp, Color(0xFF10B981))
+                                                    ) {
+                                                        Text(
+                                                            text = "VERIFIED",
+                                                            color = Color(0xFF34D399),
+                                                            fontSize = 8.5.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }

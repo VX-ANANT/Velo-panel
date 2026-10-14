@@ -20,7 +20,7 @@ object VelorixLocalAgentEngine {
         // 1. Guardrail Check: Strictly reject out-of-scope queries
         for (kw in OUT_OF_SCOPE_KEYWORDS) {
             if (lower.contains(kw)) {
-                return "⚠️ **Out of App Scope**: Main Velorix Free Fire tournaments aur platform operations ke liye authorized hu. Main general knowledge, cooking, ya unrelated topics pe answer nahi de sakta. Free Fire match schedule, room credentials, ya player management me kya madad chahiye?"
+                return "[Out of App Scope]: Main Velorix Free Fire tournaments aur platform operations ke liye authorized hu. Main general knowledge, cooking, ya unrelated topics pe answer nahi de sakta. Free Fire match schedule, room credentials, ya player management me kya madad chahiye?"
             }
         }
 
@@ -48,7 +48,7 @@ Jab bhi aap admin panel me koi tournament add karte ho ya room details update ka
         // 3. Casual greetings & capabilities
         if (isGreeting(lower)) {
             return """
-Hey Admin! ⚡ **Velorix AI Command Agent** online.
+Hey Admin! **Velorix AI Command Agent** online.
 
 Main aapke Free Fire tournaments aur players ko manage karne ke liye ready hu. Aap mujhse natural language me ye karwa sakte hain:
 • **Tournament Setup**: *"Add a tournament for CS 4v4 Bermuda with ₹50 entry fee and ₹350 prize pool"*

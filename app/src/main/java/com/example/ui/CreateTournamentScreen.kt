@@ -264,7 +264,7 @@ fun CreateTournamentScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // Mode Selector: Single Tournament vs ⚡ Multi-Category Batch
+            // Mode Selector: Single Tournament vs Multi-Category Batch
             item {
                 Row(
                     modifier = Modifier
@@ -311,7 +311,7 @@ fun CreateTournamentScreen(
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "⚡ Batch Multi-Category",
+                                text = "Batch Multi-Tournament",
                                 color = if (creationMode == "batch") Color.Black else VelorixTextSecondary,
                                 fontSize = 12.5.sp,
                                 fontWeight = FontWeight.Bold
@@ -330,7 +330,7 @@ fun CreateTournamentScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
-                                Text("⚡ Batch Multi-Category Generator", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                Text("Batch Tournament Generator", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
                                 Text("Schedule multiple matches across multiple categories in 1 click", fontSize = 11.5.sp, color = VelorixTextSecondary)
                             }
                             Surface(
@@ -594,7 +594,7 @@ fun CreateTournamentScreen(
                         ) {
                             Icon(Icons.Default.Bolt, contentDescription = null, tint = Color.Black)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("⚡ GENERATE & PUBLISH ALL ($totalMatchesToCreate) MATCHES", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.5.sp)
+                            Text("GENERATE & PUBLISH ALL ($totalMatchesToCreate) MATCHES", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.5.sp)
                         }
                     }
                 }
@@ -635,7 +635,7 @@ fun CreateTournamentScreen(
                     ) {
                         item {
                             QuickTemplateChip(
-                                label = "⚡ Solo Scrim (₹500)",
+                                label = "Solo Scrim (₹500)",
                                 onClick = {
                                     title = "Velorix Daily Solo Battle"
                                     category = "BR"
@@ -654,7 +654,7 @@ fun CreateTournamentScreen(
                         }
                         item {
                             QuickTemplateChip(
-                                label = "⚡ Squad Championship (₹2,000)",
+                                label = "Squad Championship (₹2,000)",
                                 onClick = {
                                     title = "Velorix Pro Squad Cup"
                                     category = "BR"
@@ -673,7 +673,7 @@ fun CreateTournamentScreen(
                         }
                         item {
                             QuickTemplateChip(
-                                label = "⚡ Clash Squad 4v4 (₹1,000)",
+                                label = "Clash Squad 4v4 (₹1,000)",
                                 onClick = {
                                     title = "CS Hardcore 4v4 Showdown"
                                     category = "CS"
@@ -692,7 +692,7 @@ fun CreateTournamentScreen(
                         }
                         item {
                             QuickTemplateChip(
-                                label = "⚡ 1v1 Lone Wolf (₹200)",
+                                label = "1v1 Lone Wolf (₹200)",
                                 onClick = {
                                     title = "Lone Wolf 1v1 Duel"
                                     category = "LONE_WOLF"
@@ -770,7 +770,7 @@ fun CreateTournamentScreen(
                     ) {
                         Icon(Icons.Default.CloudUpload, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("📸 UPLOAD THUMBNAIL / BANNER", fontWeight = FontWeight.Bold, fontSize = 13.sp, letterSpacing = 0.5.sp)
+                        Text("UPLOAD THUMBNAIL / BANNER", fontWeight = FontWeight.Bold, fontSize = 13.sp, letterSpacing = 0.5.sp)
                     }
 
                     Spacer(modifier = Modifier.height(12.dp))
@@ -1318,6 +1318,33 @@ fun CreateTournamentScreen(
                             modifier = Modifier.weight(1f),
                             colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFFFF5252), unfocusedBorderColor = CardVerifyBorder)
                         )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Surface(
+                        color = Color(0xFF141720),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, Color(0xFF282D3D)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Info, contentDescription = null, tint = VelorixAccent, modifier = Modifier.size(15.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Player Prize Settlement Terms", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            val fP = firstPlacePrize.ifBlank { "0" }
+                            val sP = secondPlacePrize.ifBlank { "0" }
+                            val tP = thirdPlacePrize.ifBlank { "0" }
+                            val kP = perKillPrize.ifBlank { "0" }
+                            Text(
+                                "Total tournament purse is ₹${prizePool.ifBlank { "0" }}. Champion receives ₹$fP upon score verification. 2nd Place receives ₹$sP and 3rd Place receives ₹$tP. Players also earn ₹$kP per confirmed elimination. Disbursed automatically post-match.",
+                                fontSize = 11.sp,
+                                color = Color(0xFFD1D5DB),
+                                lineHeight = 15.sp
+                            )
+                        }
                     }
                 }
             }

@@ -11,6 +11,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -61,7 +63,8 @@ fun TournamentDetailsScreen(
     onPublishRoomCredentials: (String, String, Boolean) -> Unit = { _, _, _ -> },
     onApproveMatchProof: (String, Double, Int) -> Unit = { _, _, _ -> },
     onRejectMatchProof: (String, String) -> Unit = { _, _ -> },
-    onAddParticipant: ((String, PlayerRegistration) -> Unit)? = null
+    onAddParticipant: ((String, PlayerRegistration) -> Unit)? = null,
+    onUpdateTournament: ((Tournament) -> Unit)? = null
 ) {
     val context = LocalContext.current
     var showCancelDialog by remember { mutableStateOf(false) }
@@ -70,6 +73,26 @@ fun TournamentDetailsScreen(
     var showRoomBroadcastDialog by remember { mutableStateOf(false) }
     var showInspectProofsDialog by remember { mutableStateOf(false) }
     var showAddParticipantDialog by remember { mutableStateOf(false) }
+    var showEditPrizeDialog by remember { mutableStateOf(false) }
+
+    // Dynamic Prize Editing states
+    var editPrizePoolInput by remember(tournament.prizePool) { mutableStateOf(tournament.prizePool.toInt().toString()) }
+    var editFirstPlaceInput by remember(tournament.firstPlacePrize, tournament.prizePool) {
+        val defaultFirst = if (tournament.firstPlacePrize > 0f) tournament.firstPlacePrize else tournament.prizePool * 0.50f
+        mutableStateOf(defaultFirst.toInt().toString())
+    }
+    var editSecondPlaceInput by remember(tournament.secondPlacePrize, tournament.prizePool) {
+        val defaultSecond = if (tournament.secondPlacePrize > 0f) tournament.secondPlacePrize else tournament.prizePool * 0.25f
+        mutableStateOf(defaultSecond.toInt().toString())
+    }
+    var editThirdPlaceInput by remember(tournament.thirdPlacePrize, tournament.prizePool) {
+        val defaultThird = if (tournament.thirdPlacePrize > 0f) tournament.thirdPlacePrize else tournament.prizePool * 0.15f
+        mutableStateOf(defaultThird.toInt().toString())
+    }
+    var editPerKillInput by remember(tournament.perKillPrize) {
+        val defaultKill = if (tournament.perKillPrize > 0f) tournament.perKillPrize else 20f
+        mutableStateOf(defaultKill.toInt().toString())
+    }
 
     // Participant manual add states
     var manualPlayerIgn by remember { mutableStateOf("") }
@@ -1008,10 +1031,32 @@ fun TournamentDetailsScreen(
                     borderBrush = GlassTokens.GlassBorderGradient
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.PieChart, contentDescription = null, tint = Color(0xFFFFD700), modifier = Modifier.size(20.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("PRIZE POOL DISTRIBUTION & PIE CHART", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = VelorixTextPrimary, letterSpacing = 0.5.sp)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.PieChart, contentDescription = null, tint = Color(0xFFFFD700), modifier = Modifier.size(20.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("PRIZE POOL BREAKDOWN", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = VelorixTextPrimary, letterSpacing = 0.5.sp)
+                            }
+                            Surface(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .border(1.dp, VelorixAccent.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                                    .clickable { showEditPrizeDialog = true },
+                                color = VelorixAccent.copy(alpha = 0.15f)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.Edit, contentDescription = null, tint = VelorixAccent, modifier = Modifier.size(13.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Edit Prizes", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = VelorixAccent)
+                                }
+                            }
                         }
 
                         Spacer(modifier = Modifier.height(14.dp))
@@ -1063,6 +1108,36 @@ fun TournamentDetailsScreen(
                                     Text("Per Kill Bounty", fontSize = 12.sp, color = VelorixTextPrimary, fontWeight = FontWeight.SemiBold)
                                 }
                                 Text("₹${perKill.toInt()} / kill", fontSize = 13.sp, color = VelorixAccent, fontWeight = FontWeight.Bold)
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Human-Written Settlement Terms Box
+                        Surface(
+                            color = Color(0xFF141720),
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, Color(0xFF282D3D)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(14.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Info, contentDescription = null, tint = VelorixAccent, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "Official Prize Settlement Terms",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "Total guaranteed tournament purse is ₹${tournament.prizePool.toInt()}. The Champion (1st Place) will receive ₹${firstPrize.toInt()} credited directly into their Velorix wallet upon match audit. The 1st Runner-Up (2nd Place) secures ₹${secondPrize.toInt()}, and 3rd Place secures ₹${thirdPrize.toInt()}. In addition, each recorded elimination awards an instant bounty of ₹${perKill.toInt()} per kill. Prize funds are disbursed automatically upon room score audit.",
+                                    fontSize = 11.5.sp,
+                                    color = Color(0xFFD1D5DB),
+                                    lineHeight = 16.sp
+                                )
                             }
                         }
                     }
@@ -1676,6 +1751,186 @@ fun TournamentDetailsScreen(
                     colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent)
                 ) {
                     Text("Close Inspector", color = Color.Black, fontWeight = FontWeight.Bold)
+                }
+            },
+            containerColor = CardVerifyBg
+        )
+    }
+
+    // Edit Prize Distribution Structure Dialog
+    if (showEditPrizeDialog) {
+        val currPool = editPrizePoolInput.toFloatOrNull() ?: tournament.prizePool
+        AlertDialog(
+            onDismissRequest = { showEditPrizeDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.AccountBalanceWallet, contentDescription = null, tint = VelorixAccent)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Customize Prize Distribution", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        "Set custom prize distribution for ${tournament.title}. Changes will be recalculated and saved across user app and live nodes.",
+                        fontSize = 12.sp,
+                        color = Color.LightGray
+                    )
+
+                    OutlinedTextField(
+                        value = editPrizePoolInput,
+                        onValueChange = { editPrizePoolInput = it },
+                        label = { Text("Total Prize Pool (₹)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
+                    )
+
+                    Text("Preset Split Ratios", fontSize = 11.sp, color = VelorixTextSecondary, fontWeight = FontWeight.Bold)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Surface(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .border(1.dp, VelorixAccent.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                                .clickable {
+                                    editFirstPlaceInput = (currPool * 0.50f).toInt().toString()
+                                    editSecondPlaceInput = (currPool * 0.25f).toInt().toString()
+                                    editThirdPlaceInput = (currPool * 0.15f).toInt().toString()
+                                    editPerKillInput = "20"
+                                }
+                                .padding(vertical = 6.dp),
+                            color = Color(0xFF161922)
+                        ) {
+                            Text("50/25/15 + Kill", fontSize = 10.sp, color = VelorixAccent, textAlign = TextAlign.Center)
+                        }
+
+                        Surface(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .border(1.dp, Color(0xFFFFD54F).copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                                .clickable {
+                                    editFirstPlaceInput = (currPool * 0.60f).toInt().toString()
+                                    editSecondPlaceInput = (currPool * 0.25f).toInt().toString()
+                                    editThirdPlaceInput = (currPool * 0.15f).toInt().toString()
+                                    editPerKillInput = "0"
+                                }
+                                .padding(vertical = 6.dp),
+                            color = Color(0xFF161922)
+                        ) {
+                            Text("60/25/15 Pro", fontSize = 10.sp, color = Color(0xFFFFD54F), textAlign = TextAlign.Center)
+                        }
+
+                        Surface(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .border(1.dp, Color(0xFF81C784).copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                                .clickable {
+                                    editFirstPlaceInput = currPool.toInt().toString()
+                                    editSecondPlaceInput = "0"
+                                    editThirdPlaceInput = "0"
+                                    editPerKillInput = "0"
+                                }
+                                .padding(vertical = 6.dp),
+                            color = Color(0xFF161922)
+                        ) {
+                            Text("Winner Takes All", fontSize = 10.sp, color = Color(0xFF81C784), textAlign = TextAlign.Center)
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = editFirstPlaceInput,
+                            onValueChange = { editFirstPlaceInput = it },
+                            label = { Text("1st Place (₹)") },
+                            modifier = Modifier.weight(1f),
+                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFFFFD54F), unfocusedBorderColor = CardVerifyBorder)
+                        )
+                        OutlinedTextField(
+                            value = editSecondPlaceInput,
+                            onValueChange = { editSecondPlaceInput = it },
+                            label = { Text("2nd Place (₹)") },
+                            modifier = Modifier.weight(1f),
+                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFFC0C0C0), unfocusedBorderColor = CardVerifyBorder)
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = editThirdPlaceInput,
+                            onValueChange = { editThirdPlaceInput = it },
+                            label = { Text("3rd Place (₹)") },
+                            modifier = Modifier.weight(1f),
+                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFFCD7F32), unfocusedBorderColor = CardVerifyBorder)
+                        )
+                        OutlinedTextField(
+                            value = editPerKillInput,
+                            onValueChange = { editPerKillInput = it },
+                            label = { Text("Per Kill (₹)") },
+                            modifier = Modifier.weight(1f),
+                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFFFF5252), unfocusedBorderColor = CardVerifyBorder)
+                        )
+                    }
+
+                    Surface(
+                        color = Color(0xFF0F1117),
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, Color(0xFF232733)),
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Text("Narrative Summary:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = VelorixAccent)
+                            Spacer(modifier = Modifier.height(3.dp))
+                            Text(
+                                "Champion: ₹${editFirstPlaceInput} | Runner-Up: ₹${editSecondPlaceInput} | 3rd: ₹${editThirdPlaceInput} | Kill Bounty: ₹${editPerKillInput}/kill. Distributed automatically upon verified match result screenshot.",
+                                fontSize = 10.5.sp,
+                                color = Color.White.copy(alpha = 0.85f)
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val newPool = editPrizePoolInput.toFloatOrNull() ?: tournament.prizePool
+                        val newFirst = editFirstPlaceInput.toFloatOrNull() ?: 0f
+                        val newSecond = editSecondPlaceInput.toFloatOrNull() ?: 0f
+                        val newThird = editThirdPlaceInput.toFloatOrNull() ?: 0f
+                        val newPerKill = editPerKillInput.toFloatOrNull() ?: 0f
+
+                        val updatedTournament = tournament.copy(
+                            prizePool = newPool,
+                            firstPlacePrize = newFirst,
+                            secondPlacePrize = newSecond,
+                            thirdPlacePrize = newThird,
+                            perKillPrize = newPerKill
+                        )
+                        onUpdateTournament?.invoke(updatedTournament)
+                        showEditPrizeDialog = false
+                        Toast.makeText(context, "Prize distribution updated successfully!", Toast.LENGTH_SHORT).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent)
+                ) {
+                    Text("Save & Apply Structure", color = Color.Black, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEditPrizeDialog = false }) {
+                    Text("Cancel", color = VelorixTextSecondary)
                 }
             },
             containerColor = CardVerifyBg

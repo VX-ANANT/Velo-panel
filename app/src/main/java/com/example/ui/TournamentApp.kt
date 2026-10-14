@@ -155,13 +155,32 @@ fun TournamentApp(
                 exitTransition = { fadeOut(tween(durationMillis = 250)) }
             ) {
                 var hasNavigated by remember { mutableStateOf(false) }
+                val coroutineScope = rememberCoroutineScope()
 
-                fun proceedToNext() {
+                suspend fun proceedToNext() {
                     if (hasNavigated) return
                     hasNavigated = true
                     try {
-                        navController.navigate("login") {
-                            popUpTo("splash") { inclusive = true }
+                        val boundAccount = bindingManager.getBoundAccount()
+                        val currentUser = tournamentRepository.auth.currentUser
+                        val savedEmail = sharedPrefs.getString("user_email", null)
+                        val activeEmail = currentUser?.email ?: boundAccount?.email ?: savedEmail
+                        if (!activeEmail.isNullOrBlank()) {
+                            val cleanEmail = activeEmail.trim().lowercase()
+                            val username = cleanEmail.substringBefore("@")
+                            bindingManager.recordAccount(cleanEmail, username, role = "super_admin", autoLogin = true)
+                            tournamentRepository.recordAccountLocally(cleanEmail, username, role = "super_admin")
+                            tournamentRepository.ensureAuthenticatedSession(cleanEmail)
+                            viewModel.setManualLoginEmail(cleanEmail)
+                            sharedPrefs.edit().putString("user_email", cleanEmail).apply()
+                            viewModel.fetchData()
+                            navController.navigate("dashboard") {
+                                popUpTo("splash") { inclusive = true }
+                            }
+                        } else {
+                            navController.navigate("login") {
+                                popUpTo("splash") { inclusive = true }
+                            }
                         }
                     } catch (_: Exception) {
                         try {
@@ -173,13 +192,13 @@ fun TournamentApp(
                 }
 
                 LaunchedEffect(Unit) {
-                    delay(600L) // Brief smooth splash transition
+                    delay(300L) // Fast smooth splash transition
                     proceedToNext()
                 }
 
                 // Hard fallback timer
                 LaunchedEffect(Unit) {
-                    delay(1200L)
+                    delay(800L)
                     proceedToNext()
                 }
                 
@@ -187,7 +206,7 @@ fun TournamentApp(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(Color(0xFF0A0A0E))
-                        .clickable { proceedToNext() },
+                        .clickable { coroutineScope.launch { proceedToNext() } },
                     contentAlignment = Alignment.Center
                 ) {
                     Column(
@@ -456,6 +475,9 @@ fun TournamentApp(
                         },
                         onAddParticipant = { tId, reg ->
                             viewModel.joinTournament(tId, reg, 0f)
+                        },
+                        onUpdateTournament = { updated ->
+                            viewModel.updateTournament(updated)
                         }
                     )
                 } else {

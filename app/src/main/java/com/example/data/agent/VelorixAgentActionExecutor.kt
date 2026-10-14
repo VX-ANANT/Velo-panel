@@ -75,7 +75,7 @@ object VelorixAgentActionExecutor {
 
                     ExecutionResult(
                         success = true,
-                        message = "✅ Tournament \"$title\" created successfully with ID: $tournamentId! Synced to both RTDB and Firestore.",
+                        message = "Tournament \"$title\" created successfully with ID: $tournamentId! Synced to both RTDB and Firestore.",
                         createdTournament = tournament
                     )
                 }
@@ -113,7 +113,7 @@ object VelorixAgentActionExecutor {
 
                     ExecutionResult(
                         success = true,
-                        message = "✅ Room details updated! Room ID: $roomId distributed to registered players in $tournamentId."
+                        message = "Room details updated! Room ID: $roomId distributed to registered players in $tournamentId."
                     )
                 }
 
@@ -144,7 +144,7 @@ object VelorixAgentActionExecutor {
 
                     ExecutionResult(
                         success = true,
-                        message = "✅ Tournament $tournamentId updated with new parameters: $updates"
+                        message = "Tournament $tournamentId updated with new parameters: $updates"
                     )
                 }
 
@@ -165,7 +165,7 @@ object VelorixAgentActionExecutor {
 
                     ExecutionResult(
                         success = true,
-                        message = "🗑️ Tournament $tournamentId successfully removed from active rotation."
+                        message = "Tournament $tournamentId successfully removed from active rotation."
                     )
                 }
 
@@ -193,7 +193,7 @@ object VelorixAgentActionExecutor {
 
                     ExecutionResult(
                         success = true,
-                        message = "🛡️ Player $target has been blacklisted and banned from all tournament matchmaking."
+                        message = "Player $target has been blacklisted and banned from all tournament matchmaking."
                     )
                 }
 
@@ -217,7 +217,7 @@ object VelorixAgentActionExecutor {
 
                     ExecutionResult(
                         success = true,
-                        message = "✅ Player $target has been reinstated into matchmaking."
+                        message = "Player $target has been reinstated into matchmaking."
                     )
                 }
 

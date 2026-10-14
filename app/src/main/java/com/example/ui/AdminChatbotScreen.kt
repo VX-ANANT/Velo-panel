@@ -94,7 +94,7 @@ fun AdminChatbotScreen(
 ) {
     val initialMessage = remember {
         ChatMessage(
-            text = "**Velorix AI Command Agent Activated** ⚡\n\nI am authorized strictly for **Velorix Free Fire Tournaments**. You can instruct me in natural language to:\n• **Add a Tournament** (e.g. *\"Add a tournament for CS 4v4 Bermuda\"* or *\"Create a BR Solo match\"*)\n• **Update Room Details** (e.g. *\"Set room ID 98214 and password 1234 for CS match\"*)\n• **Anti-Cheat Enforcement** (e.g. *\"Ban user uid_xyz for speed hack\"*)\n• **Search Live Data** (e.g. *\"Search upcoming tournaments with available slots\"*)\n\n*Tap any command below or type your instruction.*",
+            text = "**Velorix AI Command Agent Activated**\n\nI am authorized strictly for **Velorix Free Fire Tournaments**. You can instruct me in natural language to:\n• **Add a Tournament** (e.g. *\"Add a tournament for CS 4v4 Bermuda\"* or *\"Create a BR Solo match\"*)\n• **Update Room Details** (e.g. *\"Set room ID 98214 and password 1234 for CS match\"*)\n• **Anti-Cheat Enforcement** (e.g. *\"Ban user uid_xyz for speed hack\"*)\n• **Search Live Data** (e.g. *\"Search upcoming tournaments with available slots\"*)\n\n*Tap any command below or type your instruction.*",
             isUser = false
         )
     }
@@ -530,7 +530,7 @@ fun AdminChatbotScreen(
             // Slideable iPhone Dynamic Island Status Pill
             IPhoneSlideableDynamicIslandPill(
                 title = "Super Admin AI Context",
-                statusText = "LIVE RTDB ⚡",
+                statusText = "LIVE RTDB",
                 detailText = "${liveTournaments.size} Live Tournaments • ${liveAuditLogs.size} Audit Logs • ${liveSupportTickets.count { it.status.equals("open", ignoreCase = true) }} Open Tickets",
                 isActive = true,
                 accentColor = Color(0xFF3B8A6E),

@@ -1832,6 +1832,7 @@ fun UsersManagementScreenContent(
     activeInspectedUser?.let { user ->
         UserDetailsInspectorDialog(
             user = user,
+            allUsers = usersList,
             onDismiss = { inspectedUser = null },
             onToggleBan = { 
                 onToggleBan(it)
@@ -2254,7 +2255,7 @@ fun UsersManagementScreenContent(
                                     .border(0.5.dp, Color(0xFFFF5722).copy(alpha = 0.4f), RoundedCornerShape(6.dp))
                                     .padding(horizontal = 6.dp, vertical = 2.dp)
                             ) {
-                                Text("🔥 ${user.loginStreak}d Streak", color = Color(0xFFFF8A65), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                Text("${user.loginStreak}d Active Streak", color = Color(0xFFFF8A65), fontSize = 9.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -2321,6 +2322,7 @@ fun UsersManagementScreenContent(
 @Composable
 fun UserDetailsInspectorDialog(
     user: UserProfile,
+    allUsers: List<UserProfile> = emptyList(),
     onDismiss: () -> Unit,
     onToggleBan: (UserProfile) -> Unit,
     onAddFunds: (UserProfile, Double) -> Unit,
@@ -2330,6 +2332,18 @@ fun UserDetailsInspectorDialog(
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     var selectedTab by remember { mutableIntStateOf(0) }
+
+    val referredPlayers = remember(allUsers, user) {
+        allUsers.filter { other ->
+            other.id != user.id && (
+                (user.referralCode.isNotBlank() && other.referredBy.equals(user.referralCode, ignoreCase = true)) ||
+                (user.id.isNotBlank() && other.referredBy.equals(user.id, ignoreCase = true)) ||
+                (user.username.isNotBlank() && other.referredBy.equals(user.username, ignoreCase = true)) ||
+                (other.rawAttributes["referredByCode"]?.equals(user.referralCode, ignoreCase = true) == true) ||
+                (other.rawAttributes["referrerId"]?.equals(user.id, ignoreCase = true) == true)
+            )
+        }
+    }
 
     // Editable state
     var editUsername by remember(user) { mutableStateOf(user.username) }
@@ -2631,10 +2645,10 @@ fun UserDetailsInspectorDialog(
                                 }
 
                                 // Daily Streak, Missions & Referrals (User Panel Feature)
-                                DetailSectionCard(title = "DAILY STREAK, MISSIONS & REFERRALS", icon = Icons.Default.LocalFireDepartment) {
+                                DetailSectionCard(title = "DAILY STREAK, MISSIONS & REFERRALS", icon = Icons.Default.MilitaryTech) {
                                     DetailItemRow(
                                         label = "Daily Login Streak",
-                                        value = if (user.loginStreak > 0) "🔥 ${user.loginStreak} Days Streak" else "No active streak",
+                                        value = if (user.loginStreak > 0) "${user.loginStreak} Days Active Streak" else "No active streak",
                                         isHighlight = user.loginStreak > 0
                                     )
                                     DetailItemRow(
@@ -2656,14 +2670,124 @@ fun UserDetailsInspectorDialog(
                                     )
                                     DetailItemRow(
                                         label = "Total Players Referred",
-                                        value = "${user.referralCount} Users",
-                                        isHighlight = user.referralCount > 0
+                                        value = "${if (referredPlayers.isNotEmpty()) referredPlayers.size else user.referralCount} Users",
+                                        isHighlight = user.referralCount > 0 || referredPlayers.isNotEmpty()
                                     )
                                     DetailItemRow(
                                         label = "Referral Bonus Earned",
                                         value = "₹${user.referralBonusEarned}",
                                         isHighlight = user.referralBonusEarned > 0
                                     )
+                                }
+
+                                // Itemized List of Referred Players (Requested by user)
+                                DetailSectionCard(
+                                    title = "REFERRED PLAYERS NETWORK (${referredPlayers.size} VERIFIED)",
+                                    icon = Icons.Default.Group
+                                ) {
+                                    if (referredPlayers.isEmpty()) {
+                                        Surface(
+                                            color = Color(0xFF10131A),
+                                            shape = RoundedCornerShape(8.dp),
+                                            border = BorderStroke(1.dp, Color(0xFF1E2330)),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Column(modifier = Modifier.padding(12.dp)) {
+                                                Text(
+                                                    "No players have registered via referral code ${user.referralCode.ifBlank { "N/A" }} yet.",
+                                                    fontSize = 11.5.sp,
+                                                    color = VelorixTextSecondary
+                                                )
+                                                Spacer(modifier = Modifier.height(2.dp))
+                                                Text(
+                                                    "When players input this player's code during signup, their details, Free Fire UID, and match activity will be listed here automatically.",
+                                                    fontSize = 10.5.sp,
+                                                    color = Color(0xFF6B7280)
+                                                )
+                                            }
+                                        }
+                                    } else {
+                                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            referredPlayers.forEachIndexed { idx, refUser ->
+                                                Surface(
+                                                    color = Color(0xFF10131A),
+                                                    shape = RoundedCornerShape(10.dp),
+                                                    border = BorderStroke(1.dp, Color(0xFF22283A)),
+                                                    modifier = Modifier.fillMaxWidth()
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .padding(10.dp),
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.SpaceBetween
+                                                    ) {
+                                                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                                            Box(
+                                                                modifier = Modifier
+                                                                    .size(30.dp)
+                                                                    .background(VelorixAccent.copy(alpha = 0.2f), CircleShape)
+                                                                    .border(1.dp, VelorixAccent.copy(alpha = 0.5f), CircleShape),
+                                                                contentAlignment = Alignment.Center
+                                                            ) {
+                                                                Text(
+                                                                    text = "${idx + 1}",
+                                                                    color = VelorixAccent,
+                                                                    fontSize = 11.sp,
+                                                                    fontWeight = FontWeight.Bold
+                                                                )
+                                                            }
+                                                            Spacer(modifier = Modifier.width(10.dp))
+                                                            Column {
+                                                                Text(
+                                                                    text = refUser.bestDisplayName,
+                                                                    color = Color.White,
+                                                                    fontSize = 12.sp,
+                                                                    fontWeight = FontWeight.Bold
+                                                                )
+                                                                Text(
+                                                                    text = "IGN: ${refUser.effectiveIgn} • FF UID: ${refUser.gameId.ifBlank { "Unlinked" }}",
+                                                                    color = VelorixTextSecondary,
+                                                                    fontSize = 10.sp
+                                                                )
+                                                                if (refUser.createdAt > 0) {
+                                                                    val refDateStr = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(refUser.createdAt))
+                                                                    Text(
+                                                                        text = "Registered: $refDateStr",
+                                                                        color = Color(0xFF6B7280),
+                                                                        fontSize = 9.sp
+                                                                    )
+                                                                }
+                                                            }
+                                                        }
+
+                                                        Column(horizontalAlignment = Alignment.End) {
+                                                            Surface(
+                                                                shape = RoundedCornerShape(4.dp),
+                                                                color = Color(0xFF10B981).copy(alpha = 0.2f),
+                                                                border = BorderStroke(0.5.dp, Color(0xFF10B981))
+                                                            ) {
+                                                                Text(
+                                                                    text = "ACTIVE",
+                                                                    color = Color(0xFF34D399),
+                                                                    fontSize = 8.5.sp,
+                                                                    fontWeight = FontWeight.Bold,
+                                                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                                                )
+                                                            }
+                                                            Spacer(modifier = Modifier.height(2.dp))
+                                                            Text(
+                                                                text = "${refUser.wins}W • ${refUser.kills}K",
+                                                                color = Color.LightGray,
+                                                                fontSize = 9.sp,
+                                                                fontWeight = FontWeight.SemiBold
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
 
                                 // Age, KYC & Cash Tournament Compliance (User Panel Feature)
