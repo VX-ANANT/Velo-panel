@@ -135,14 +135,13 @@ fun DailyRevenueAnalyticsScreen(
     }
 
     Scaffold(
-        containerColor = Color(0xFF070709),
+        containerColor = Color.Black,
         topBar = {
             Surface(
-                color = Color(0xFF09090B),
+                color = Color(0xFF09090D),
                 modifier = Modifier
                     .fillMaxWidth()
                     .statusBarsPadding()
-                    .border(BorderStroke(1.dp, Color(0xFF1F1F23)))
             ) {
                 Row(
                     modifier = Modifier
@@ -223,117 +222,112 @@ fun DailyRevenueAnalyticsScreen(
         ) {
             item { Spacer(modifier = Modifier.height(4.dp)) }
 
-            // Timeframe Segmented Control
+            // Timeframe Underline Selector
             item {
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    color = Color(0xFF0D0D10),
-                    border = BorderStroke(1.dp, Color(0xFF1C1C22))
-                ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         RevenueTimeframe.values().forEach { tf ->
                             val isSelected = selectedTimeframe == tf
-                            Surface(
+                            Column(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .clickable { selectedTimeframe = tf },
-                                color = if (isSelected) Color(0xFF1A1A22) else Color.Transparent,
-                                border = if (isSelected) BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.5f)) else null
+                                    .clickable { selectedTimeframe = tf }
+                                    .padding(vertical = 8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
                             ) {
                                 Text(
                                     text = tf.label,
-                                    color = if (isSelected) Color(0xFF10B981) else VelorixTextSecondary,
+                                    color = if (isSelected) Color.White else VelorixTextSecondary,
                                     fontSize = 11.sp,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier.padding(vertical = 8.dp)
+                                    textAlign = TextAlign.Center
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth(0.7f)
+                                        .height(if (isSelected) 1.5.dp else 0.5.dp)
+                                        .background(if (isSelected) Color(0xFF0A84FF) else Color.Transparent)
                                 )
                             }
                         }
                     }
+                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
                 }
             }
 
-            // Primary Profit & Revenue Cards
+            // Primary Profit & Revenue Cards (Solid #0C0C0E System Ledger — Zero Gradients, Zero Mint/Purple)
             item {
-                Row(
+                Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFF0C0C0E),
+                    border = BorderStroke(0.5.dp, Color(0xFF222226))
                 ) {
-                    // Gross Revenue Card
-                    GlassCard(
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(14.dp),
-                        brush = Brush.linearGradient(listOf(Color(0xFF0E0E12), Color(0xFF09090C))),
-                        borderBrush = Brush.linearGradient(listOf(Color(0xFF10B981).copy(alpha = 0.3f), Color(0xFF27272A)))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(IntrinsicSize.Min)
+                            .padding(vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Surface(
-                                modifier = Modifier.size(26.dp),
-                                shape = RoundedCornerShape(6.dp),
-                                color = Color(0xFF10B981).copy(alpha = 0.15f)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(Icons.Default.Payments, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(15.dp))
-                                }
+                        // Gross Revenue Column
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = 14.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Payments, contentDescription = null, tint = Color(0xFFA1A1AA), modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("GROSS COLLECTION", fontSize = 9.5.sp, fontWeight = FontWeight.Bold, color = Color(0xFF71717A), letterSpacing = 0.6.sp)
                             }
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("GROSS COLLECTION", fontSize = 9.5.sp, fontWeight = FontWeight.Bold, color = VelorixTextSecondary)
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "₹${"%.0f".format(totalGrossRevenue)}",
+                                fontSize = 21.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                color = Color(0xFFF4F4F5)
+                            )
+                            Text(
+                                text = "$totalRegistrations entry fees",
+                                fontSize = 11.sp,
+                                color = Color(0xFFA1A1AA)
+                            )
                         }
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Text(
-                            text = "₹${"%.0f".format(totalGrossRevenue)}",
-                            fontSize = 22.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color.White
-                        )
-                        Text(
-                            text = "$totalRegistrations entry fees",
-                            fontSize = 11.sp,
-                            color = Color(0xFF10B981)
-                        )
-                    }
 
-                    // Net Margin / House Profit
-                    GlassCard(
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(14.dp),
-                        brush = Brush.linearGradient(listOf(Color(0xFF0E0E12), Color(0xFF09090C))),
-                        borderBrush = Brush.linearGradient(listOf(Color(0xFF8B5CF6).copy(alpha = 0.3f), Color(0xFF27272A)))
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Surface(
-                                modifier = Modifier.size(26.dp),
-                                shape = RoundedCornerShape(6.dp),
-                                color = Color(0xFF8B5CF6).copy(alpha = 0.15f)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(Icons.AutoMirrored.Filled.TrendingUp, contentDescription = null, tint = Color(0xFF8B5CF6), modifier = Modifier.size(15.dp))
-                                }
+                        VerticalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+
+                        // Net Margin / House Profit Column
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = 14.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.AutoMirrored.Filled.TrendingUp, contentDescription = null, tint = Color(0xFF0A84FF), modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("NET ADMIN MARGIN", fontSize = 9.5.sp, fontWeight = FontWeight.Bold, color = Color(0xFF71717A), letterSpacing = 0.6.sp)
                             }
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("NET ADMIN MARGIN", fontSize = 9.5.sp, fontWeight = FontWeight.Bold, color = VelorixTextSecondary)
+                            Spacer(modifier = Modifier.height(8.dp))
+                            val isProfit = netAdminOperatingMargin >= 0
+                            Text(
+                                text = "${if (isProfit) "+" else ""}₹${"%.0f".format(netAdminOperatingMargin)}",
+                                fontSize = 21.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                color = if (isProfit) Color(0xFFF4F4F5) else Color(0xFFFF453A)
+                            )
+                            Text(
+                                text = if (totalGrossRevenue > 0) "${"%.1f".format((netAdminOperatingMargin / totalGrossRevenue) * 100)}% Margin" else "0% Margin",
+                                fontSize = 11.sp,
+                                color = Color(0xFF0A84FF)
+                            )
                         }
-                        Spacer(modifier = Modifier.height(10.dp))
-                        val isProfit = netAdminOperatingMargin >= 0
-                        Text(
-                            text = "${if (isProfit) "+" else ""}₹${"%.0f".format(netAdminOperatingMargin)}",
-                            fontSize = 22.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = if (isProfit) Color(0xFF8B5CF6) else Color(0xFFEF4444)
-                        )
-                        Text(
-                            text = if (totalGrossRevenue > 0) "${"%.1f".format((netAdminOperatingMargin / totalGrossRevenue) * 100)}% Margin" else "0% Margin",
-                            fontSize = 11.sp,
-                            color = VelorixTextSecondary
-                        )
                     }
                 }
             }
@@ -342,9 +336,9 @@ fun DailyRevenueAnalyticsScreen(
             item {
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp),
-                    color = Color(0xFF0A0A0E),
-                    border = BorderStroke(1.dp, Color(0xFF1E1E26))
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFF0C0C0E),
+                    border = BorderStroke(0.5.dp, Color(0xFF222226))
                 ) {
                     Row(
                         modifier = Modifier
@@ -354,9 +348,9 @@ fun DailyRevenueAnalyticsScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         StatColumn(label = "Matches", value = "${filteredTournaments.size}", subValue = "$liveMatchesCount Live")
-                        Box(modifier = Modifier.width(1.dp).height(30.dp).background(Color(0xFF22222A)))
+                        Box(modifier = Modifier.width(0.5.dp).height(30.dp).background(Color.White.copy(alpha = 0.08f)))
                         StatColumn(label = "Prize Pools", value = "₹${"%.0f".format(totalPrizePoolAllocated)}", subValue = "$completedMatchesCount Paid")
-                        Box(modifier = Modifier.width(1.dp).height(30.dp).background(Color(0xFF22222A)))
+                        Box(modifier = Modifier.width(0.5.dp).height(30.dp).background(Color.White.copy(alpha = 0.08f)))
                         StatColumn(label = "Pending Payout", value = "₹${"%.0f".format(pendingPayoutsSum)}", subValue = "Cashout Queue", isWarning = pendingPayoutsSum > 0)
                     }
                 }
@@ -373,26 +367,31 @@ fun DailyRevenueAnalyticsScreen(
                         text = "MATCH FINANCIAL AUDIT (${filteredTournaments.size})",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        color = VelorixTextSecondary,
+                        color = Color(0xFF71717A),
                         letterSpacing = 1.sp
                     )
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         listOf("ALL", "Free Fire", "BGMI").forEach { g ->
                             val isSel = filterGame == g
-                            Surface(
+                            Column(
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .clickable { filterGame = g },
-                                color = if (isSel) Color(0xFF1E1E26) else Color.Transparent,
-                                border = if (isSelectedGame(filterGame, g)) BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.4f)) else null
+                                    .clickable { filterGame = g }
+                                    .padding(vertical = 4.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
                             ) {
                                 Text(
                                     text = g,
-                                    color = if (isSel) Color(0xFF10B981) else Color.Gray,
+                                    color = if (isSel) Color.White else Color(0xFF71717A),
                                     fontSize = 10.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium
+                                )
+                                Spacer(modifier = Modifier.height(3.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .width(18.dp)
+                                        .height(if (isSel) 1.5.dp else 0.dp)
+                                        .background(if (isSel) Color(0xFF0A84FF) else Color.Transparent)
                                 )
                             }
                         }
@@ -487,87 +486,79 @@ fun DailyRevenueAnalyticsScreen(
 
                             Spacer(modifier = Modifier.height(10.dp))
 
-                            // Financial breakdown bar
-                            Surface(
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(8.dp),
-                                color = Color(0xFF121216),
-                                border = BorderStroke(1.dp, Color(0xFF1E1E26))
+                            // Financial breakdown row divided by hairlines (no inner box)
+                            HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    Text("Entry / Players", fontSize = 9.5.sp, color = VelorixTextSecondary)
+                                    Text("₹${tourney.entryFee.toInt()} × ${tourney.registeredPlayers}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                }
+
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text("Prize Pool", fontSize = 9.5.sp, color = VelorixTextSecondary)
+                                    Text("₹${tourney.prizePool.toInt()}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFF59E0B))
+                                }
+
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text("Net Profit", fontSize = 9.5.sp, color = VelorixTextSecondary)
+                                    Text(
+                                        text = "${if (profit >= 0) "+" else ""}₹${profit.toInt()}",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (profit >= 0) Color(0xFF10B981) else Color(0xFFEF4444)
+                                    )
+                                }
+                            }
+                            HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+
+                            // Action strip divided by vertical hairline (no inner bordered boxes)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Row(
                                     modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 10.dp, vertical = 8.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                        .weight(1f)
+                                        .clickable { showRoomDispatchDialog = tourney }
+                                        .padding(vertical = 6.dp),
+                                    horizontalArrangement = Arrangement.Center,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Column {
-                                        Text("Entry / Players", fontSize = 9.5.sp, color = VelorixTextSecondary)
-                                        Text("₹${tourney.entryFee.toInt()} × ${tourney.registeredPlayers}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                                    }
-
-                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                        Text("Prize Pool", fontSize = 9.5.sp, color = VelorixTextSecondary)
-                                        Text("₹${tourney.prizePool.toInt()}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFF59E0B))
-                                    }
-
-                                    Column(horizontalAlignment = Alignment.End) {
-                                        Text("Net Profit", fontSize = 9.5.sp, color = VelorixTextSecondary)
-                                        Text(
-                                            text = "${if (profit >= 0) "+" else ""}₹${profit.toInt()}",
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = if (profit >= 0) Color(0xFF10B981) else Color(0xFFEF4444)
-                                        )
-                                    }
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(10.dp))
-
-                            // Action buttons
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Surface(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(if (hasCredentials) Color(0xFF152A1E) else Color(0xFF1E1E26))
-                                        .border(1.dp, if (hasCredentials) Color(0xFF10B981).copy(alpha = 0.5f) else Color(0xFF2E2E38), RoundedCornerShape(8.dp))
-                                        .clickable { showRoomDispatchDialog = tourney }
-                                        .padding(vertical = 8.dp),
-                                    color = Color.Transparent
-                                ) {
-                                    Row(
-                                        horizontalArrangement = Arrangement.Center,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(
-                                            Icons.Default.VpnKey,
-                                            contentDescription = null,
-                                            tint = if (hasCredentials) Color(0xFF10B981) else Color.LightGray,
-                                            modifier = Modifier.size(13.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text(
-                                            text = if (hasCredentials) "ROOM: ${tourney.roomDetails?.roomId}" else "SET ROOM ID & PASS",
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = if (hasCredentials) Color(0xFF10B981) else Color.White
-                                        )
-                                    }
+                                    Icon(
+                                        Icons.Default.VpnKey,
+                                        contentDescription = null,
+                                        tint = if (hasCredentials) Color(0xFF10B981) else VelorixAccent,
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = if (hasCredentials) "ROOM: ${tourney.roomDetails?.roomId}" else "SET ROOM ID & PASS",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (hasCredentials) Color(0xFF10B981) else VelorixAccent
+                                    )
                                 }
 
-                                Surface(
+                                Box(
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(Color(0xFF1A1A22))
-                                        .border(1.dp, Color(0xFF2A2A36), RoundedCornerShape(8.dp))
+                                        .width(0.5.dp)
+                                        .height(16.dp)
+                                        .background(Color.White.copy(alpha = 0.14f))
+                                )
+
+                                Box(
+                                    modifier = Modifier
                                         .clickable { onTournamentClick(tourney.id) }
-                                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                                    color = Color.Transparent
+                                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                                    contentAlignment = Alignment.Center
                                 ) {
                                     Text("MANAGE", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
                                 }

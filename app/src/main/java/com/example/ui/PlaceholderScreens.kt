@@ -10,6 +10,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -60,52 +61,38 @@ fun ElaborateScreen(title: String, onNavigateBack: () -> Unit, content: @Composa
     GlassBackgroundBox {
         Scaffold(
             topBar = {
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 8.dp)
-                        .border(1.dp, GlassTokens.GlassBorderSubtle, RoundedCornerShape(20.dp)),
-                    shape = RoundedCornerShape(20.dp),
-                    color = Color.Transparent
-                ) {
-                    Box(modifier = Modifier.background(GlassTokens.GlassSurfacePrimary)) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                Column(modifier = Modifier.fillMaxWidth().background(Color(0xFF0B0F17))) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(
+                            onClick = onNavigateBack,
+                            modifier = Modifier.size(36.dp)
                         ) {
-                            Surface(
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .clip(CircleShape)
-                                    .clickable { onNavigateBack() },
-                                color = Color(0x332A1F45),
-                                border = BorderStroke(1.dp, GlassTokens.GlassBorderSubtle)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                        contentDescription = "Back",
-                                        tint = VelorixAccentLight,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Text(
-                                text = title,
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 18.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                                tint = VelorixAccentLight,
+                                modifier = Modifier.size(20.dp)
                             )
                         }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = title,
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
+                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
                 }
             },
-            containerColor = Color.Transparent
+            containerColor = Color.Black
         ) { padding ->
             content(padding)
         }
@@ -121,11 +108,14 @@ fun TournamentsListScreenContent(
     onDuplicateTournament: ((com.example.domain.model.Tournament) -> Unit)? = null,
     onExportJson: (() -> Unit)? = null,
     onImportJson: ((String) -> Unit)? = null,
-    onSyncCloud: (() -> Unit)? = null
+    onSyncCloud: (() -> Unit)? = null,
+    onCreateTournament: (() -> Unit)? = null,
+    viewModel: com.example.ui.viewmodel.TournamentDashboardViewModel? = null
 ) {
     var selectedTab by remember { mutableStateOf(0) }
     var selectedCategory by remember { mutableStateOf("ALL") }
     var searchQuery by remember { mutableStateOf("") }
+    var tournamentForStandingsModal by remember { mutableStateOf<com.example.domain.model.Tournament?>(null) }
     val tournamentsList = (uiState as? DashboardState.Success)?.tournaments ?: emptyList()
     val dynamicCategories = (uiState as? DashboardState.Success)?.categories ?: com.example.domain.model.FreeFireCategories.DEFAULT_CATEGORIES
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -155,7 +145,7 @@ fun TournamentsListScreenContent(
         }
     }
     
-    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp)) {
+    Column(modifier = Modifier.fillMaxSize().background(Color.Black).padding(horizontal = 12.dp)) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -163,97 +153,96 @@ fun TournamentsListScreenContent(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("All Tournaments", color = VelorixTextPrimary, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+            Column {
+                Text("All Tournaments", color = VelorixTextPrimary, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                Text("${filteredList.size} Matches listed", color = VelorixTextSecondary, fontSize = 11.sp)
+            }
             
-            // Fast Extraction & Push Action Pill
-            Surface(
-                color = Color(0xFF18181B),
-                shape = RoundedCornerShape(20.dp),
-                border = BorderStroke(1.dp, Color(0xFF27272A))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                if (onCreateTournament != null) {
                     IconButton(
-                        onClick = {
-                            val json = org.json.JSONArray().apply {
-                                tournamentsList.forEach { t ->
-                                    put(org.json.JSONObject().apply {
-                                        put("id", t.id)
-                                        put("tournamentId", t.id)
-                                        put("title", t.title)
-                                        put("game", t.game)
-                                        put("map", t.map)
-                                        put("format", t.format)
-                                        put("status", t.status)
-                                        put("prizePool", t.prizePool)
-                                        put("entryFee", t.entryFee)
-                                        put("registeredPlayers", t.registeredPlayers)
-                                        put("maxPlayers", t.maxPlayers)
-                                        put("bannerUrl", t.bannerUrl)
-                                    })
-                                }
-                            }.toString(2)
-                            extractedJsonText = json
-                            val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("TournamentsJSON", json))
-                            showExportDialog = true
-                        },
-                        modifier = Modifier.size(28.dp)
+                        onClick = onCreateTournament,
+                        modifier = Modifier
+                            .size(32.dp)
+                            .background(VelorixAccent.copy(alpha = 0.14f), CircleShape)
                     ) {
-                        Icon(Icons.Default.ContentCopy, contentDescription = "Export JSON", tint = Color.White, modifier = Modifier.size(15.dp))
+                        Icon(Icons.Default.Add, contentDescription = "Create Match", tint = VelorixAccent, modifier = Modifier.size(18.dp))
                     }
-                    
-                    IconButton(
-                        onClick = { showImportDialog = true },
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(Icons.Default.FileUpload, contentDescription = "Import / Push JSON", tint = Color(0xFF38BDF8), modifier = Modifier.size(15.dp))
-                    }
+                }
 
-                    val isCloudSyncing = (uiState as? DashboardState.Success)?.isSyncing ?: false
-                    IconButton(
-                        onClick = {
-                            syncStatusMessage = "Extracting live tournaments directly from Firebase backend..."
-                            onSyncCloud?.invoke()
-                        },
-                        modifier = Modifier.size(28.dp).bounceClick(scaleDown = 0.90f)
-                    ) {
-                        if (isCloudSyncing) {
-                            CircularProgressIndicator(
-                                color = Color(0xFF4ADE80),
-                                strokeWidth = 2.dp,
-                                modifier = Modifier.size(14.dp)
-                            )
-                        } else {
-                            Icon(
-                                Icons.Default.CloudSync,
-                                contentDescription = "Extract & Sync Backend",
-                                tint = Color(0xFF4ADE80),
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
+                IconButton(
+                    onClick = {
+                        val json = org.json.JSONArray().apply {
+                            tournamentsList.forEach { t ->
+                                put(org.json.JSONObject().apply {
+                                    put("id", t.id)
+                                    put("tournamentId", t.id)
+                                    put("title", t.title)
+                                    put("game", t.game)
+                                    put("map", t.map)
+                                    put("format", t.format)
+                                    put("status", t.status)
+                                    put("prizePool", t.prizePool)
+                                    put("entryFee", t.entryFee)
+                                    put("registeredPlayers", t.registeredPlayers)
+                                    put("maxPlayers", t.maxPlayers)
+                                    put("bannerUrl", t.bannerUrl)
+                                })
+                            }
+                        }.toString(2)
+                        extractedJsonText = json
+                        val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("TournamentsJSON", json))
+                        showExportDialog = true
+                    },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(Icons.Default.ContentCopy, contentDescription = "Export JSON", tint = Color.White, modifier = Modifier.size(16.dp))
+                }
+                
+                IconButton(
+                    onClick = { showImportDialog = true },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(Icons.Default.FileUpload, contentDescription = "Import / Push JSON", tint = Color(0xFF38BDF8), modifier = Modifier.size(16.dp))
+                }
+
+                val isCloudSyncing = (uiState as? DashboardState.Success)?.isSyncing ?: false
+                IconButton(
+                    onClick = {
+                        syncStatusMessage = "Extracting live tournaments directly from Firebase backend..."
+                        onSyncCloud?.invoke()
+                    },
+                    modifier = Modifier.size(32.dp).bounceClick(scaleDown = 0.90f)
+                ) {
+                    if (isCloudSyncing) {
+                        CircularProgressIndicator(
+                            color = Color(0xFF4ADE80),
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    } else {
+                        Icon(
+                            Icons.Default.CloudSync,
+                            contentDescription = "Extract & Sync Backend",
+                            tint = Color(0xFF4ADE80),
+                            modifier = Modifier.size(16.dp)
+                        )
                     }
                 }
             }
         }
         
         if (syncStatusMessage != null) {
-            Surface(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                color = Color(0xFF102A1E),
-                shape = RoundedCornerShape(8.dp),
-                border = BorderStroke(1.dp, Color(0xFF166534))
-            ) {
-                Text(
-                    text = syncStatusMessage ?: "",
-                    color = Color(0xFF86EFAC),
-                    fontSize = 11.sp,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                )
-            }
+            Text(
+                text = syncStatusMessage ?: "",
+                color = Color(0xFF86EFAC),
+                fontSize = 11.sp,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
         }
         
         OutlinedTextField(
@@ -275,6 +264,7 @@ fun TournamentsListScreenContent(
             containerColor = Color.Transparent,
             contentColor = VelorixAccent,
             edgePadding = 0.dp,
+            divider = { HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f)) },
             indicator = { tabPositions ->
                 if (selectedTab < tabPositions.size) {
                     TabRowDefaults.SecondaryIndicator(
@@ -292,39 +282,42 @@ fun TournamentsListScreenContent(
                 )
             }
         }
-        Spacer(modifier = Modifier.height(10.dp))
-        // Category Filter Chips extracted dynamically from Firebase
+        Spacer(modifier = Modifier.height(8.dp))
+        // Category Mode Underline Selector (No Box-in-Box)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             val allChips = listOf("ALL" to "All Categories") + dynamicCategories.map { it.id to (if (it.name.isNotBlank()) it.name else it.label) }
             allChips.forEach { (catKey, catLabel) ->
                 val isSelected = selectedCategory == catKey
-                FilterChip(
-                    selected = isSelected,
-                    onClick = { selectedCategory = catKey },
-                    label = {
-                        Text(
-                            catLabel,
-                            fontSize = 12.sp,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                        )
-                    },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = VelorixAccent.copy(alpha = 0.25f),
-                        selectedLabelColor = VelorixAccentLight,
-                        containerColor = Color(0xFF161224),
-                        labelColor = VelorixTextSecondary
-                    ),
-                    border = BorderStroke(1.dp, if (isSelected) VelorixAccent else CardVerifyBorder)
-                )
+                Column(
+                    modifier = Modifier
+                        .clickable { selectedCategory = catKey }
+                        .padding(vertical = 6.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = catLabel,
+                        fontSize = 12.sp,
+                        color = if (isSelected) VelorixAccentLight else VelorixTextSecondary,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Box(
+                        modifier = Modifier
+                            .width(24.dp)
+                            .height(1.5.dp)
+                            .background(if (isSelected) VelorixAccent else Color.Transparent)
+                    )
+                }
             }
         }
+        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
         Spacer(modifier = Modifier.height(10.dp))
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.padding(bottom = 90.dp)) {
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(bottom = 90.dp)) {
             if (filteredList.isEmpty()) {
                 item {
                     Text("No tournaments found matching criteria.", color = VelorixTextSecondary, modifier = Modifier.padding(16.dp))
@@ -339,16 +332,10 @@ fun TournamentsListScreenContent(
                     "CANCELLED" -> Color(0xFFFF8A80)
                     else -> VelorixAccent
                 }
-                val borderBrush = if (t.status.equals("CANCELLED", ignoreCase = true)) {
-                    androidx.compose.ui.graphics.SolidColor(Color(0xFFFF5252).copy(alpha = 0.6f))
-                } else {
-                    GlassTokens.GlassBorderSubtle
-                }
+                val isMoneyTournament = (t.entryFee > 0f) || (t.prizePool > 0.0)
 
                 GlassCard(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    borderBrush = borderBrush,
                     onClick = {
                         if (onTournamentClick != null) onTournamentClick(t.id)
                         else onSettingsClick?.invoke(t.id)
@@ -360,7 +347,7 @@ fun TournamentsListScreenContent(
                                 .fillMaxWidth()
                                 .heightIn(min = 100.dp, max = 140.dp)
                                 .aspectRatio(16f / 9f, matchHeightConstraintsFirst = false)
-                                .clip(RoundedCornerShape(12.dp))
+                                .clip(RoundedCornerShape(8.dp))
                         ) {
                             AsyncImage(
                                 model = TournamentImageUploader.resolveBannerModel(t.bannerUrl),
@@ -375,8 +362,8 @@ fun TournamentsListScreenContent(
                                         Brush.verticalGradient(
                                             listOf(
                                                 Color.Transparent,
-                                                Color(0x660E0919),
-                                                Color(0xEE0E0919)
+                                                Color(0x66000000),
+                                                Color(0xEE000000)
                                             )
                                         )
                                     )
@@ -407,144 +394,152 @@ fun TournamentsListScreenContent(
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = VelorixAccent.copy(alpha = 0.2f),
-                                border = BorderStroke(1.dp, VelorixAccent.copy(alpha = 0.5f))
-                            ) {
-                                Text(
-                                    text = t.canonicalCategory,
-                                    color = VelorixAccentLight,
-                                    fontSize = 8.5.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
-                                )
-                            }
-
-                            val isMoneyTournament = (t.entryFee > 0f) || (t.prizePool > 0.0)
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = if (isMoneyTournament) Color(0xFFF59E0B).copy(alpha = 0.15f) else Color(0xFF10B981).copy(alpha = 0.15f),
-                                border = BorderStroke(1.dp, if (isMoneyTournament) Color(0xFFF59E0B).copy(alpha = 0.4f) else Color(0xFF10B981).copy(alpha = 0.4f))
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        imageVector = if (isMoneyTournament) Icons.Default.Lock else Icons.Default.CheckCircle,
-                                        contentDescription = null,
-                                        tint = if (isMoneyTournament) Color(0xFFFBBF24) else Color(0xFF34D399),
-                                        modifier = Modifier.size(10.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(3.dp))
-                                    Text(
-                                        text = if (isMoneyTournament) "18+ CASH" else "TRAINING",
-                                        color = if (isMoneyTournament) Color(0xFFFBBF24) else Color(0xFF34D399),
-                                        fontSize = 8.5.sp,
-                                        fontWeight = FontWeight.ExtraBold
-                                    )
-                                }
-                            }
-
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = statusColor.copy(alpha = 0.15f),
-                                border = BorderStroke(1.dp, statusColor.copy(alpha = 0.4f))
-                            ) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = if (isMoneyTournament) "18+ CASH" else "TRAINING",
+                                color = if (isMoneyTournament) Color(0xFFFBBF24) else Color(0xFF34D399),
+                                fontSize = 9.5.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text("•", color = Color(0xFF52525B), fontSize = 10.sp)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(modifier = Modifier.size(6.dp).background(statusColor, CircleShape))
+                                Spacer(modifier = Modifier.width(5.dp))
                                 Text(
                                     text = t.status.uppercase(),
                                     color = statusColor,
-                                    fontSize = 9.5.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.ExtraBold
                                 )
                             }
                         }
                     }
 
                     if (t.status.equals("CANCELLED", ignoreCase = true) && t.cancellationReason.isNotBlank()) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Surface(
-                            color = Color(0x66331515),
-                            shape = RoundedCornerShape(8.dp),
-                            border = BorderStroke(1.dp, Color(0x66FF5252))
-                        ) {
-                            Text(
-                                text = "Cancelled: ${t.cancellationReason}",
-                                color = Color(0xFFFF8A80),
-                                fontSize = 11.sp,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Cancelled: ${t.cancellationReason}",
+                            color = Color(0xFFFF8A80),
+                            fontSize = 11.sp,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Clean Hairline Data Strip (No Box-in-Box)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Prize Pool", color = VelorixTextSecondary, fontSize = 10.sp)
+                            Text("₹${t.prizePool.toInt()}", color = VelorixAccentLight, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("Entry Fee", color = VelorixTextSecondary, fontSize = 10.sp)
+                            Text(if (t.entryFee > 0f) "₹${t.entryFee.toInt()}" else "FREE", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.End) {
+                            Text("Slots", color = VelorixTextSecondary, fontSize = 10.sp)
+                            Text("${t.registeredPlayers}/${t.maxPlayers}", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))
-                    
-                    // Responsive Data Strip (handles large amounts cleanly with weights)
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp),
-                        color = Color(0xFF09090B),
-                        border = BorderStroke(1.dp, Color(0xFF27272A))
+                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 10.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                                .background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(10.dp))
+                                .border(0.75.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(10.dp))
+                                .clickable {
+                                    if (onTournamentClick != null) onTournamentClick(t.id)
+                                    else onSettingsClick?.invoke(t.id)
+                                }
+                                .padding(horizontal = 11.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("Prize Pool", color = VelorixTextSecondary, fontSize = 9.5.sp)
-                                Text("₹${t.prizePool.toInt()}", color = VelorixAccentLight, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
-                            Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("Entry Fee", color = VelorixTextSecondary, fontSize = 9.5.sp)
-                                Text(if (t.entryFee > 0f) "₹${t.entryFee.toInt()}" else "FREE", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
-                            Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.End) {
-                                Text("Slots Filled", color = VelorixTextSecondary, fontSize = 9.5.sp)
-                                Text("${t.registeredPlayers}/${t.maxPlayers}", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
+                            Icon(
+                                Icons.Default.Visibility,
+                                contentDescription = "Match Details",
+                                tint = Color.White,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text("View", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                         }
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        GlassButton(
-                            onClick = { 
-                                if (onTournamentClick != null) onTournamentClick(t.id)
-                                else onSettingsClick?.invoke(t.id)
-                            },
-                            modifier = Modifier.weight(1.2f),
-                            text = "DETAILS & RULES"
-                        )
-                        GlassOutlinedButton(
-                            onClick = { onSettingsClick?.invoke(t.id) },
-                            modifier = Modifier.weight(1f),
-                            text = "ADMIN EDIT"
-                        )
-                        IconButton(
-                            onClick = {
-                                onDuplicateTournament?.invoke(t)
-                                Toast.makeText(context, "Duplicating '${t.title}'...", Toast.LENGTH_SHORT).show()
-                            },
+                        Row(
                             modifier = Modifier
-                                .size(40.dp)
-                                .background(Color(0xFF38BDF8).copy(alpha = 0.15f), RoundedCornerShape(10.dp))
-                                .border(1.dp, Color(0xFF38BDF8).copy(alpha = 0.4f), RoundedCornerShape(10.dp))
+                                .background(Color(0xFFFBBF24).copy(alpha = 0.14f), RoundedCornerShape(10.dp))
+                                .border(0.75.dp, Color(0xFFFBBF24).copy(alpha = 0.48f), RoundedCornerShape(10.dp))
+                                .clickable {
+                                    if (viewModel != null) {
+                                        tournamentForStandingsModal = t
+                                    } else {
+                                        onSettingsClick?.invoke(t.id)
+                                    }
+                                }
+                                .padding(horizontal = 11.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.EmojiEvents,
+                                contentDescription = "Declare Winners",
+                                tint = Color(0xFFFBBF24),
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text("Winners", color = Color(0xFFFBBF24), fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+                        }
+                        Row(
+                            modifier = Modifier
+                                .background(Color(0xFF38BDF8).copy(alpha = 0.14f), RoundedCornerShape(10.dp))
+                                .border(0.75.dp, Color(0xFF38BDF8).copy(alpha = 0.48f), RoundedCornerShape(10.dp))
+                                .clickable { onSettingsClick?.invoke(t.id) }
+                                .padding(horizontal = 11.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Edit,
+                                contentDescription = "Edit Match",
+                                tint = Color(0xFF38BDF8),
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text("Edit", color = Color(0xFF38BDF8), fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+                        }
+                        Row(
+                            modifier = Modifier
+                                .background(Color(0xFF38BDF8).copy(alpha = 0.12f), RoundedCornerShape(10.dp))
+                                .border(0.75.dp, Color(0xFF38BDF8).copy(alpha = 0.42f), RoundedCornerShape(10.dp))
+                                .clickable {
+                                    onDuplicateTournament?.invoke(t)
+                                    Toast.makeText(context, "Duplicating '${t.title}'...", Toast.LENGTH_SHORT).show()
+                                }
+                                .padding(horizontal = 11.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
                             Icon(
                                 Icons.Default.ContentCopy,
                                 contentDescription = "Duplicate / Clone Tournament",
                                 tint = Color(0xFF38BDF8),
-                                modifier = Modifier.size(18.dp)
+                                modifier = Modifier.size(14.dp)
                             )
+                            Text("Clone", color = Color(0xFF38BDF8), fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                         }
                     }
                 }
@@ -554,6 +549,14 @@ fun TournamentsListScreenContent(
                 Spacer(modifier = Modifier.height(115.dp))
             }
         }
+    }
+
+    if (tournamentForStandingsModal != null && viewModel != null) {
+        DeclareStandingsAndPrizesDialog(
+            tournament = tournamentForStandingsModal!!,
+            viewModel = viewModel,
+            onDismiss = { tournamentForStandingsModal = null }
+        )
     }
 
     // Export JSON Dialog
@@ -573,8 +576,8 @@ fun TournamentsListScreenContent(
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = Color.White,
                             unfocusedTextColor = Color.White,
-                            focusedBorderColor = Color(0xFF27272A),
-                            unfocusedBorderColor = Color(0xFF27272A)
+                            focusedBorderColor = Color.White.copy(alpha = 0.14f),
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.08f)
                         )
                     )
                 }
@@ -588,7 +591,7 @@ fun TournamentsListScreenContent(
                     Text("Done", fontWeight = FontWeight.Bold)
                 }
             },
-            containerColor = Color(0xFF121214)
+            containerColor = Color.Black
         )
     }
 
@@ -610,7 +613,7 @@ fun TournamentsListScreenContent(
                             focusedTextColor = Color.White,
                             unfocusedTextColor = Color.White,
                             focusedBorderColor = VelorixAccent,
-                            unfocusedBorderColor = Color(0xFF27272A)
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.08f)
                         )
                     )
                 }
@@ -636,7 +639,7 @@ fun TournamentsListScreenContent(
                     Text("Cancel", color = VelorixTextSecondary)
                 }
             },
-            containerColor = Color(0xFF121214)
+            containerColor = Color.Black
         )
     }
 }
@@ -705,9 +708,7 @@ fun AnalyticsScreen(
 @Composable
 fun AnalyticsCard(modifier: Modifier = Modifier, title: String, value: String) {
     GlassCard(
-        modifier = modifier,
-        shape = RoundedCornerShape(18.dp),
-        borderBrush = GlassTokens.GlassBorderSubtle
+        modifier = modifier
     ) {
         Text(title, color = VelorixTextSecondary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
         Spacer(modifier = Modifier.height(8.dp))
@@ -746,7 +747,7 @@ fun GlobalSettingsScreenContent(
         val rtdbRules = remember { repository.getProductionRtdbRules() }
         AlertDialog(
             onDismissRequest = { showRtdbRulesDialog = false },
-            containerColor = Color(0xFF18181B),
+            containerColor = Color.Black,
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.Security, contentDescription = null, tint = VelorixAccent)
@@ -762,27 +763,20 @@ fun GlobalSettingsScreenContent(
                         fontSize = 12.sp,
                         lineHeight = 16.sp
                     )
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color(0xFF09090B),
-                        border = BorderStroke(1.dp, Color(0xFF27272A)),
+                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .heightIn(max = 240.dp)
+                            .verticalScroll(rememberScrollState())
+                            .padding(vertical = 8.dp)
                     ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .verticalScroll(rememberScrollState())
-                                .padding(10.dp)
-                        ) {
-                            Text(
-                                text = rtdbRules,
-                                color = Color(0xFF38BDF8),
-                                fontSize = 11.sp,
-                                fontFamily = FontFamily.Monospace
-                            )
-                        }
+                        Text(
+                            text = rtdbRules,
+                            color = Color(0xFF38BDF8),
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
                     }
                 }
             },
@@ -813,7 +807,7 @@ fun GlobalSettingsScreenContent(
         val firestoreRules = remember { repository.getProductionFirestoreRules() }
         AlertDialog(
             onDismissRequest = { showFirestoreRulesDialog = false },
-            containerColor = Color(0xFF18181B),
+            containerColor = Color.Black,
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.LocalPolice, contentDescription = null, tint = Color(0xFF38BDF8))
@@ -829,27 +823,20 @@ fun GlobalSettingsScreenContent(
                         fontSize = 12.sp,
                         lineHeight = 16.sp
                     )
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color(0xFF09090B),
-                        border = BorderStroke(1.dp, Color(0xFF27272A)),
+                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .heightIn(max = 240.dp)
+                            .verticalScroll(rememberScrollState())
+                            .padding(vertical = 8.dp)
                     ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .verticalScroll(rememberScrollState())
-                                .padding(10.dp)
-                        ) {
-                            Text(
-                                text = firestoreRules,
-                                color = Color(0xFF34D399),
-                                fontSize = 11.sp,
-                                fontFamily = FontFamily.Monospace
-                            )
-                        }
+                        Text(
+                            text = firestoreRules,
+                            color = Color(0xFF34D399),
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
                     }
                 }
             },
@@ -879,7 +866,7 @@ fun GlobalSettingsScreenContent(
     if (showLogoutConfirmationDialog) {
         AlertDialog(
             onDismissRequest = { showLogoutConfirmationDialog = false },
-            containerColor = Color(0xFF18181B),
+            containerColor = Color.Black,
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.ExitToApp, contentDescription = null, tint = Color(0xFFEF4444))
@@ -917,7 +904,7 @@ fun GlobalSettingsScreenContent(
     if (showPurgeConfirmationDialog) {
         AlertDialog(
             onDismissRequest = { showPurgeConfirmationDialog = false },
-            containerColor = Color(0xFF18181B),
+            containerColor = Color.Black,
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFEF4444))
@@ -954,9 +941,10 @@ fun GlobalSettingsScreenContent(
     }
 
     LazyColumn(
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
         modifier = Modifier
             .fillMaxSize()
+            .background(Color(0xFF0B0F17))
             .padding(horizontal = 16.dp)
             .padding(bottom = 120.dp)
     ) {
@@ -975,105 +963,115 @@ fun GlobalSettingsScreenContent(
                     color = Color(0xFF94A3B8),
                     fontSize = 12.5.sp
                 )
+                Spacer(modifier = Modifier.height(10.dp))
+                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
             }
         }
 
-        // Section 1: Super Admin Profile Card
+        // Section 01: Administrator Identity
         item {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                color = Color(0xFF141416),
-                border = BorderStroke(1.dp, Color(0xFF27272A))
-            ) {
+            SystemClassifiedSection(sectionTitle = "01 · Administrator Identity") {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(14.dp),
+                        .padding(horizontal = 14.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(46.dp)
-                            .background(
-                                Brush.linearGradient(
-                                    listOf(accentColor, Color(0xFF6366F1))
-                                ),
-                                CircleShape
-                            )
-                            .border(1.5.dp, Color.White.copy(alpha = 0.4f), CircleShape),
+                            .size(42.dp)
+                            .background(Color(0xFF18181B), RoundedCornerShape(10.dp))
+                            .border(0.5.dp, Color(0xFF27272A), RoundedCornerShape(10.dp)),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = (currentUserEmail?.firstOrNull() ?: 'A').uppercase(),
                             color = Color.White,
-                            fontSize = 19.sp,
+                            fontSize = 17.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
                     Spacer(modifier = Modifier.width(14.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Super Administrator", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Super Administrator", color = Color(0xFFF4F4F5), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Surface(
-                                shape = RoundedCornerShape(4.dp),
-                                color = Color(0xFF102A1E),
-                                border = BorderStroke(0.5.dp, Color(0xFF166534))
-                            ) {
-                                Text(
-                                    "ONLINE",
-                                    color = Color(0xFF86EFAC),
-                                    fontSize = 8.5.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                )
-                            }
+                            Box(modifier = Modifier.size(6.dp).background(Color(0xFF34D399), CircleShape))
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                "VERIFIED",
+                                color = Color(0xFFA1A1AA),
+                                fontSize = 9.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            )
                         }
-                        Spacer(modifier = Modifier.height(3.dp))
-                        Text(currentUserEmail ?: "anantisback47@gmail.com", color = Color(0xFF94A3B8), fontSize = 12.sp)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(modifier = Modifier.size(6.dp).background(Color(0xFF22C55E), CircleShape))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Firebase RTDB & Firestore Connected", color = Color(0xFF86EFAC), fontSize = 10.5.sp)
-                        }
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(currentUserEmail ?: "anantisback47@gmail.com", color = Color(0xFFA1A1AA), fontSize = 12.sp)
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text("Firebase RTDB & Firestore Connected", color = Color(0xFF71717A), fontSize = 10.5.sp)
                     }
                 }
             }
         }
 
-        // Section 2: Audio & Sound Effects
+        // Section 02: Competition & Content Studio
         item {
-            SettingsSectionHeader("AUDIO & FEEDBACK")
+            SystemClassifiedSection(sectionTitle = "02 · Competition & Content Studio") {
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)) {
+                    SettingsModuleRow(
+                        title = "Rules & Match Specs",
+                        subtitle = "Gun bans, custom character & device limits",
+                        icon = Icons.Default.MilitaryTech,
+                        onClick = {
+                            soundManager.playBeatTap()
+                            onNavigateTab?.invoke("tournament_rules")
+                        }
+                    )
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
+                    SettingsModuleRow(
+                        title = "Check-In PINs & Banners",
+                        subtitle = "Generate match PINs & announcement slides",
+                        icon = Icons.Default.DashboardCustomize,
+                        onClick = {
+                            soundManager.playBeatTap()
+                            onNavigateTab?.invoke("lowcode")
+                        }
+                    )
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
+                    SettingsModuleRow(
+                        title = "Player Leaderboards",
+                        subtitle = "Rankings, points tally & Hall of Fame",
+                        icon = Icons.Default.EmojiEvents,
+                        onClick = {
+                            soundManager.playBeatTap()
+                            onNavigateTab?.invoke("leaderboard")
+                        }
+                    )
+                }
+            }
+        }
+
+        // Section 03: Interface & Acoustics
+        item {
             var sfxMuted by remember { mutableStateOf(soundManager.isMuted) }
             var sfxVol by remember { mutableFloatStateOf(soundManager.masterVolume) }
 
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                color = Color(0xFF141416),
-                border = BorderStroke(1.dp, Color(0xFF27272A))
-            ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            SystemClassifiedSection(sectionTitle = "03 · Interface & Acoustics") {
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 10.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(34.dp)
-                                    .background(Color(0xFF202024), RoundedCornerShape(8.dp)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(Icons.Default.VolumeUp, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
-                            }
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Icon(Icons.Default.VolumeUp, contentDescription = null, tint = Color(0xFFA1A1AA), modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
-                                Text("In-App Sound Effects", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
-                                Text("Tactile button taps, snaps & alerts", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
+                                Text("System Acoustic Feedback", color = Color(0xFFF4F4F5), fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+                                Text("Tactile button taps, snaps & alerts", color = Color(0xFF71717A), fontSize = 11.5.sp)
                             }
                         }
                         Switch(
@@ -1085,19 +1083,21 @@ fun GlobalSettingsScreenContent(
                             },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = Color.White,
-                                checkedTrackColor = Color(0xFF2563EB),
+                                checkedTrackColor = Color(0xFF38BDF8),
                                 uncheckedTrackColor = Color(0xFF27272A)
                             )
                         )
                     }
 
                     if (!sfxMuted) {
-                        HorizontalDivider(color = Color(0xFF27272A), thickness = 0.5.dp)
+                        HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 6.dp)
                         ) {
-                            Text("Volume", color = Color(0xFF94A3B8), fontSize = 12.sp)
+                            Text("Master Gain", color = Color(0xFFA1A1AA), fontSize = 12.sp)
                             Spacer(modifier = Modifier.width(12.dp))
                             Slider(
                                 value = sfxVol,
@@ -1109,16 +1109,16 @@ fun GlobalSettingsScreenContent(
                                 modifier = Modifier.weight(1f),
                                 colors = SliderDefaults.colors(
                                     thumbColor = Color.White,
-                                    activeTrackColor = Color(0xFF2563EB),
+                                    activeTrackColor = Color(0xFF38BDF8),
                                     inactiveTrackColor = Color(0xFF27272A)
                                 )
                             )
                             Spacer(modifier = Modifier.width(10.dp))
-                            Text("${(sfxVol * 100).toInt()}%", color = Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                            Text("${(sfxVol * 100).toInt()}%", color = Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
                         }
                     }
 
-                    HorizontalDivider(color = Color(0xFF27272A), thickness = 0.5.dp)
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
 
                     Row(
                         modifier = Modifier
@@ -1127,74 +1127,79 @@ fun GlobalSettingsScreenContent(
                                 soundManager.playBeatTap()
                                 onOpenAudioLab?.invoke()
                             }
-                            .padding(vertical = 4.dp),
+                            .padding(vertical = 12.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Headphones, contentDescription = null, tint = Color(0xFFD49A3D), modifier = Modifier.size(17.dp))
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text("SFX Audio Lab (Test Sound Effects)", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                            Icon(Icons.Default.Headphones, contentDescription = null, tint = Color(0xFFA1A1AA), modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text("Acoustic Diagnostic Lab", color = Color(0xFFF4F4F5), fontSize = 13.sp, fontWeight = FontWeight.Medium)
                         }
-                        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(15.dp))
+                        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = Color(0xFF71717A), modifier = Modifier.size(15.dp))
                     }
-                }
-            }
-        }
 
-        // Section 3: Appearance & Accent Theme
-        item {
-            SettingsSectionHeader("APPEARANCE & THEME")
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                color = Color(0xFF141416),
-                border = BorderStroke(1.dp, Color(0xFF27272A))
-            ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Theme Palette", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                    Text("Subtle ambient accents for surfaces and active tabs", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
+
+                    SettingsModuleRow(
+                        title = "Surface & Dock Optics",
+                        subtitle = "Configure dock blur, refraction & contrast parameters",
+                        icon = Icons.Default.Tune,
+                        onClick = {
+                            soundManager.playBeatTap()
+                            onNavigateTab?.invoke("glass_optics")
+                        }
+                    )
+
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        com.example.ui.common.HyperOSTheme.values().forEach { theme ->
-                            val isSelected = currentTheme == theme
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(38.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(
-                                        if (isSelected) theme.primaryColor.copy(alpha = 0.25f)
-                                        else Color(0xFF1C1C20)
-                                    )
-                                    .border(
-                                        width = if (isSelected) 1.5.dp else 1.dp,
-                                        color = if (isSelected) theme.primaryColor else Color(0xFF2A2A30),
-                                        shape = RoundedCornerShape(8.dp)
-                                    )
-                                    .clickable {
-                                        soundManager.playSnapPop()
-                                        onThemeSelect(theme)
-                                    },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        Text("System Accent Token", color = Color(0xFFF4F4F5), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Restrained system accent for active indicators", color = Color(0xFF71717A), fontSize = 11.5.sp)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            com.example.ui.common.HyperOSTheme.values().forEach { theme ->
+                                val isSelected = currentTheme == theme
+                                Column(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable {
+                                            soundManager.playSnapPop()
+                                            onThemeSelect(theme)
+                                        }
+                                        .padding(vertical = 8.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(7.dp)
+                                                .clip(CircleShape)
+                                                .background(theme.primaryColor)
+                                        )
+                                        Text(
+                                            text = theme.themeName.substringAfter(" "),
+                                            color = if (isSelected) Color.White else Color(0xFF71717A),
+                                            fontSize = 11.sp,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(6.dp))
                                     Box(
                                         modifier = Modifier
-                                            .size(7.dp)
-                                            .clip(CircleShape)
-                                            .background(theme.primaryColor)
-                                    )
-                                    Text(
-                                        text = theme.themeName.replace("Hyper ", ""),
-                                        color = if (isSelected) Color.White else Color(0xFFD4D4D8),
-                                        fontSize = 10.sp,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                            .fillMaxWidth(0.7f)
+                                            .height(1.5.dp)
+                                            .background(if (isSelected) theme.primaryColor else Color.Transparent)
                                     )
                                 }
                             }
@@ -1204,44 +1209,38 @@ fun GlobalSettingsScreenContent(
             }
         }
 
-        // Section 4: Tournament Defaults & Match Rules (Grouped Card)
+        // Section 04: Automation & Compliance Policies
         item {
-            SettingsSectionHeader("TOURNAMENT POLICIES")
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                color = Color(0xFF141416),
-                border = BorderStroke(1.dp, Color(0xFF27272A))
-            ) {
-                Column(modifier = Modifier.padding(vertical = 4.dp)) {
+            SystemClassifiedSection(sectionTitle = "04 · Automation & Compliance Policies") {
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)) {
                     SettingsGroupedToggle(
                         label = "Direct Player Registration",
                         subtitle = "Players can join without prior admin check",
                         initial = true,
                         onSound = { soundManager.playSnapPop() }
                     )
-                    HorizontalDivider(color = Color(0xFF27272A), thickness = 0.5.dp)
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
                     SettingsGroupedToggle(
                         label = "Require ID Verification",
                         subtitle = "Mandatory KYC before cash withdrawals",
                         initial = false,
                         onSound = { soundManager.playSnapPop() }
                     )
-                    HorizontalDivider(color = Color(0xFF27272A), thickness = 0.5.dp)
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
                     SettingsGroupedToggle(
                         label = "Auto-Approve Payouts",
                         subtitle = "Instantly process UPI transfers below ₹1,000",
                         initial = false,
                         onSound = { soundManager.playSnapPop() }
                     )
-                    HorizontalDivider(color = Color(0xFF27272A), thickness = 0.5.dp)
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
                     SettingsGroupedToggle(
                         label = "Match Countdown Alerts",
                         subtitle = "Automated push notification 15m before start",
                         initial = true,
                         onSound = { soundManager.playSnapPop() }
                     )
-                    HorizontalDivider(color = Color(0xFF27272A), thickness = 0.5.dp)
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
                     SettingsGroupedToggle(
                         label = "Support Dispute Notifications",
                         subtitle = "Notify admins on incoming player disputes",
@@ -1252,66 +1251,10 @@ fun GlobalSettingsScreenContent(
             }
         }
 
-        // Section 5: AI & Gemini Engine
+        // Section 05: Security, RLS & Quotas
         item {
-            SettingsSectionHeader("AI MEDIATOR & INTELLIGENCE")
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                color = Color(0xFF141416),
-                border = BorderStroke(1.dp, Color(0xFF27272A))
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(14.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                        Box(
-                            modifier = Modifier
-                                .size(34.dp)
-                                .background(Color(0xFF2E1065).copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                                .border(1.dp, Color(0xFF7C3AED).copy(alpha = 0.5f), RoundedCornerShape(8.dp)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = Color(0xFFA78BFA), modifier = Modifier.size(17.dp))
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text("Gemini AI Mediator", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
-                            Text("Automated disputes & bracket suggestions", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
-                        }
-                    }
-                    Button(
-                        onClick = {
-                            soundManager.playBeatTap()
-                            onOpenApiKeyDialog?.invoke()
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF27272A)),
-                        border = BorderStroke(1.dp, Color(0xFF3F3F46)),
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                    ) {
-                        Icon(Icons.Default.Key, contentDescription = null, tint = Color(0xFFA78BFA), modifier = Modifier.size(13.dp))
-                        Spacer(modifier = Modifier.width(5.dp))
-                        Text("API Key", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
-
-        // Section 6: Administrative Modules
-        item {
-            SettingsSectionHeader("ADMINISTRATIVE TOOLS")
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                color = Color(0xFF141416),
-                border = BorderStroke(1.dp, Color(0xFF27272A))
-            ) {
-                Column(modifier = Modifier.padding(4.dp)) {
+            SystemClassifiedSection(sectionTitle = "05 · Security, RLS & Quotas") {
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)) {
                     SettingsModuleRow(
                         title = "Staff & RBAC Permissions",
                         subtitle = "Manage admin team access and roles",
@@ -1321,37 +1264,7 @@ fun GlobalSettingsScreenContent(
                             onNavigateTab?.invoke("admins")
                         }
                     )
-                    HorizontalDivider(color = Color(0xFF27272A), thickness = 0.5.dp)
-                    SettingsModuleRow(
-                        title = "Rules & Match Specs",
-                        subtitle = "Gun bans, custom character & device limits",
-                        icon = Icons.Default.MilitaryTech,
-                        onClick = {
-                            soundManager.playBeatTap()
-                            onNavigateTab?.invoke("tournament_rules")
-                        }
-                    )
-                    HorizontalDivider(color = Color(0xFF27272A), thickness = 0.5.dp)
-                    SettingsModuleRow(
-                        title = "Check-In PINs & Banners",
-                        subtitle = "Generate match PINs & announcement slides",
-                        icon = Icons.Default.DashboardCustomize,
-                        onClick = {
-                            soundManager.playBeatTap()
-                            onNavigateTab?.invoke("lowcode")
-                        }
-                    )
-                    HorizontalDivider(color = Color(0xFF27272A), thickness = 0.5.dp)
-                    SettingsModuleRow(
-                        title = "Player Leaderboards",
-                        subtitle = "Rankings, points tally & Hall of Fame",
-                        icon = Icons.Default.EmojiEvents,
-                        onClick = {
-                            soundManager.playBeatTap()
-                            onNavigateTab?.invoke("leaderboard")
-                        }
-                    )
-                    HorizontalDivider(color = Color(0xFF27272A), thickness = 0.5.dp)
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
                     SettingsModuleRow(
                         title = "Rate Limiter & Quotas",
                         subtitle = "Inspect flood prevention & token buckets",
@@ -1361,190 +1274,175 @@ fun GlobalSettingsScreenContent(
                             onOpenRateLimiter?.invoke()
                         }
                     )
-                }
-            }
-        }
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
+                    SettingsModuleRow(
+                        title = "Automated Dispute Mediator Key",
+                        subtitle = "Configure engine key for bracket & rule mediation",
+                        icon = Icons.Default.Key,
+                        onClick = {
+                            soundManager.playBeatTap()
+                            onOpenApiKeyDialog?.invoke()
+                        }
+                    )
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
 
-        // Section 7: Firebase & Database Security
-        item {
-            SettingsSectionHeader("FIREBASE RLS & SECURITY")
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                color = Color(0xFF141416),
-                border = BorderStroke(1.dp, Color(0xFF27272A))
-            ) {
-                Column(modifier = Modifier.padding(14.dp)) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 12.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(34.dp)
-                                    .background(Color(0xFF0284C7).copy(alpha = 0.15f), CircleShape)
-                                    .border(1.dp, Color(0xFF0284C7), CircleShape),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(Icons.Default.VpnKey, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(17.dp))
-                            }
-                            Spacer(modifier = Modifier.width(10.dp))
+                            Icon(Icons.Default.VpnKey, contentDescription = null, tint = Color(0xFFA1A1AA), modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(12.dp))
                             Column {
-                                Text("Database RLS Policies", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
-                                Text("Row-Level Security & Super Admin Auth", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
+                                Text("Database RLS Policies", color = Color(0xFFF4F4F5), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                Text("Row-Level Security & Super Admin Auth", color = Color(0xFF71717A), fontSize = 11.sp)
                             }
                         }
-                        Surface(
-                            shape = RoundedCornerShape(4.dp),
-                            color = Color(0xFF0E2E3B),
-                            border = BorderStroke(0.5.dp, Color(0xFF0284C7))
-                        ) {
-                            Text(
-                                "ACTIVE RLS",
-                                color = Color(0xFF7DD3FC),
-                                fontSize = 8.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
+                        Text(
+                            "ACTIVE RLS",
+                            color = Color(0xFF38BDF8),
+                            fontSize = 9.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
                     }
 
                     val feedback = rlsFeedbackMessage
                     if (feedback != null) {
-                        Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             text = feedback,
-                            color = Color(0xFF34D399),
+                            color = Color(0xFFA1A1AA),
                             fontSize = 11.5.sp,
-                            fontWeight = FontWeight.SemiBold
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.padding(bottom = 8.dp)
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
+
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(IntrinsicSize.Min),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Button(
-                            onClick = {
-                                soundManager.playSnapPop()
-                                showRtdbRulesDialog = true
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B)),
-                            border = BorderStroke(1.dp, Color(0xFF334155)),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.weight(1f)
+                        Row(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable {
+                                    soundManager.playSnapPop()
+                                    showRtdbRulesDialog = true
+                                }
+                                .padding(vertical = 12.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Default.Security, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(13.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("RTDB Rules", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        }
-
-                        Button(
-                            onClick = {
-                                soundManager.playSnapPop()
-                                showFirestoreRulesDialog = true
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B)),
-                            border = BorderStroke(1.dp, Color(0xFF334155)),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Default.LocalPolice, contentDescription = null, tint = Color(0xFF34D399), modifier = Modifier.size(13.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Firestore Rules", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Button(
-                        onClick = {
-                            coroutineScope.launch {
-                                soundManager.playBrassHit()
-                                isSyncingRls = true
-                                rlsFeedbackMessage = "Syncing Admin RLS claims across Firebase..."
-                                val target = currentUserEmail ?: "anantisback47@gmail.com"
-                                val ok = repository.syncAdminPermissionsNow(target)
-                                isSyncingRls = false
-                                rlsFeedbackMessage = if (ok) "Super Admin RLS permissions synced for $target" else "Sync completed. Check console if token refresh is needed."
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
-                        shape = RoundedCornerShape(8.dp),
-                        enabled = !isSyncingRls,
-                        modifier = Modifier.fillMaxWidth().height(38.dp)
-                    ) {
-                        if (isSyncingRls) {
-                            CircularProgressIndicator(color = Color.White, modifier = Modifier.size(15.dp), strokeWidth = 2.dp)
-                        } else {
-                            Icon(Icons.Default.Sync, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
+                            Icon(Icons.Default.Security, contentDescription = null, tint = Color(0xFFE4E4E7), modifier = Modifier.size(14.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("1-Tap Sync Admin Permissions", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.5.sp)
+                            Text("RTDB Rules", color = Color(0xFFE4E4E7), fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+                        }
+
+                        VerticalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+
+                        Row(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable {
+                                    soundManager.playSnapPop()
+                                    showFirestoreRulesDialog = true
+                                }
+                                .padding(vertical = 12.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.LocalPolice, contentDescription = null, tint = Color(0xFFE4E4E7), modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Firestore Rules", color = Color(0xFFE4E4E7), fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+                        }
+
+                        VerticalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+
+                        Row(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable(enabled = !isSyncingRls) {
+                                    coroutineScope.launch {
+                                        soundManager.playBrassHit()
+                                        isSyncingRls = true
+                                        rlsFeedbackMessage = "Syncing Admin RLS claims across Firebase..."
+                                        val target = currentUserEmail ?: "anantisback47@gmail.com"
+                                        val ok = repository.syncAdminPermissionsNow(target)
+                                        isSyncingRls = false
+                                        rlsFeedbackMessage = if (ok) "Super Admin RLS permissions synced for $target" else "Sync completed."
+                                    }
+                                }
+                                .padding(vertical = 12.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (isSyncingRls) {
+                                CircularProgressIndicator(color = Color(0xFF38BDF8), modifier = Modifier.size(13.dp), strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Default.Sync, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(14.dp))
+                            }
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Sync RLS", color = Color(0xFF38BDF8), fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
             }
         }
 
-        // Section 8: Session & Maintenance (Danger Zone)
+        // Section 06: Session & Maintenance
         item {
-            SettingsSectionHeader("SESSION & MAINTENANCE", isDanger = true)
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                color = Color(0xFF141416),
-                border = BorderStroke(1.dp, Color(0xFF27272A))
-            ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            SystemClassifiedSection(sectionTitle = "06 · Session & Maintenance") {
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                soundManager.playSnapPop()
+                                showPurgeConfirmationDialog = true
+                            }
+                            .padding(vertical = 12.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("Reset Mock / Demo Data", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                            Text("Clean dummy test records from Firebase", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
+                            Text("Reset Mock / Demo Data", color = Color(0xFFF4F4F5), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Clean dummy test records from Firebase", color = Color(0xFF71717A), fontSize = 11.5.sp)
                         }
-                        OutlinedButton(
-                            onClick = {
-                                soundManager.playSnapPop()
-                                showPurgeConfirmationDialog = true
-                            },
-                            border = BorderStroke(1.dp, Color(0xFFEF4444).copy(alpha = 0.5f)),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFEF4444)),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Icon(Icons.Default.DeleteSweep, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(13.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Clean Data", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.DeleteSweep, contentDescription = null, tint = Color(0xFFFF453A), modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text("Clean Data", color = Color(0xFFFF453A), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
 
-                    HorizontalDivider(color = Color(0xFF27272A), thickness = 0.5.dp)
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
 
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                soundManager.playSnapPop()
+                                showLogoutConfirmationDialog = true
+                            }
+                            .padding(vertical = 12.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("Sign Out Session", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                            Text("Close admin session and return to login", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
+                            Text("Sign Out Session", color = Color(0xFFF4F4F5), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Close admin session and return to login", color = Color(0xFF71717A), fontSize = 11.5.sp)
                         }
-                        Button(
-                            onClick = {
-                                soundManager.playSnapPop()
-                                showLogoutConfirmationDialog = true
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF27272A)),
-                            border = BorderStroke(1.dp, Color(0xFF3F3F46)),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Icon(Icons.Default.ExitToApp, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(13.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Sign Out", color = Color(0xFFEF4444), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.ExitToApp, contentDescription = null, tint = Color(0xFFFF453A), modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text("Sign Out", color = Color(0xFFFF453A), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
@@ -1561,7 +1459,7 @@ fun SettingsSectionHeader(title: String, isDanger: Boolean = false) {
         fontWeight = FontWeight.Bold,
         fontSize = 11.sp,
         letterSpacing = 0.8.sp,
-        modifier = Modifier.padding(start = 4.dp, top = 4.dp, bottom = 2.dp)
+        modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
     )
 }
 
@@ -1575,17 +1473,23 @@ fun SettingsGroupedToggle(
     val context = androidx.compose.ui.platform.LocalContext.current
     val sharedPrefs = remember { context.getSharedPreferences("VelorixAdminSettings", android.content.Context.MODE_PRIVATE) }
     var checked by remember { mutableStateOf(sharedPrefs.getBoolean(label, initial)) }
+    val sanitizedKey = remember(label) { label.lowercase().replace(Regex("[^a-z0-9]+"), "_").trim('_') }
+
+    fun updateToggle(next: Boolean) {
+        checked = next
+        sharedPrefs.edit().putBoolean(label, next).apply()
+        onSound?.invoke()
+        try {
+            com.google.firebase.database.FirebaseDatabase.getInstance()
+                .reference.child("admin_settings").child("policies").child(sanitizedKey).setValue(next)
+        } catch (_: Exception) {}
+    }
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable {
-                val next = !checked
-                checked = next
-                sharedPrefs.edit().putBoolean(label, next).apply()
-                onSound?.invoke()
-            }
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .clickable { updateToggle(!checked) }
+            .padding(vertical = 10.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -1598,15 +1502,11 @@ fun SettingsGroupedToggle(
         }
         Switch(
             checked = checked,
-            onCheckedChange = { next ->
-                checked = next
-                sharedPrefs.edit().putBoolean(label, next).apply()
-                onSound?.invoke()
-            },
+            onCheckedChange = { next -> updateToggle(next) },
             colors = SwitchDefaults.colors(
                 checkedThumbColor = Color.White,
-                checkedTrackColor = Color(0xFF2563EB),
-                uncheckedTrackColor = Color(0xFF27272A)
+                checkedTrackColor = VelorixAccent,
+                uncheckedTrackColor = Color(0xFF18181F)
             )
         )
     }
@@ -1623,18 +1523,10 @@ fun SettingsModuleRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onClick() }
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .padding(vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            modifier = Modifier
-                .size(32.dp)
-                .background(Color(0xFF202024), RoundedCornerShape(8.dp))
-                .border(0.5.dp, Color(0xFF2E2E34), RoundedCornerShape(8.dp)),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
-        }
+        Icon(icon, contentDescription = null, tint = VelorixAccentLight, modifier = Modifier.size(18.dp))
         Spacer(modifier = Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(title, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
@@ -1654,6 +1546,8 @@ fun UsersManagementScreenContent(
     uiState: DashboardState,
     onToggleBan: (UserProfile) -> Unit,
     onAddFunds: (UserProfile, Double) -> Unit,
+    onAddFundsBucket: ((UserProfile, Double, com.example.domain.model.WalletBucket, String) -> Unit)? = null,
+    onRecordMatchWinning: ((UserProfile, String, String, Int, Int, Double, Double) -> Unit)? = null,
     onDeleteUser: (UserProfile) -> Unit,
     onUpdateUser: (UserProfile) -> Unit = {},
     onRefreshUserData: (() -> Unit)? = null,
@@ -1661,11 +1555,12 @@ fun UsersManagementScreenContent(
 ) {
     val successState = uiState as? DashboardState.Success
     val usersList = successState?.users ?: emptyList()
+    val tournamentsList = successState?.tournaments ?: emptyList()
     var searchQuery by remember { mutableStateOf("") }
     var selectedFilter by remember { mutableStateOf("ALL") }
+    var selectedTournamentFilterId by remember { mutableStateOf<String?>(null) }
 
     var selectedUserForFunds by remember { mutableStateOf<UserProfile?>(null) }
-    var fundsAmountInput by remember { mutableStateOf("100") }
 
     var inspectedUser by remember { mutableStateOf<UserProfile?>(null) }
 
@@ -1673,15 +1568,21 @@ fun UsersManagementScreenContent(
     var newUserEmail by remember { mutableStateOf("") }
     var newUsername by remember { mutableStateOf("") }
     var newUserGameId by remember { mutableStateOf("") }
-    var newUserInitialBalance by remember { mutableStateOf("0") }
+    var newUserInitialDeposit by remember { mutableStateOf("0") }
+    var newUserInitialWinning by remember { mutableStateOf("0") }
+    var newUserInitialReferralBonus by remember { mutableStateOf("0") }
 
-    // Keep inspected user fresh if data updates in stream
+    // Keep inspected user and funds dialog user fresh if data updates in stream
     val activeInspectedUser = remember(usersList, inspectedUser) {
         if (inspectedUser == null) null
         else usersList.find { it.id == inspectedUser?.id } ?: inspectedUser
     }
+    val activeSelectedUserForFunds = remember(usersList, selectedUserForFunds) {
+        if (selectedUserForFunds == null) null
+        else usersList.find { it.id == selectedUserForFunds?.id } ?: selectedUserForFunds
+    }
 
-    val filteredUsers = remember(usersList, searchQuery, selectedFilter) {
+    val filteredUsers = remember(usersList, searchQuery, selectedFilter, selectedTournamentFilterId, tournamentsList) {
         usersList.filter { u ->
             val emailLower = u.email.trim().lowercase()
             val isMock = emailLower.contains("@example.com") || emailLower.contains("mock.dummy")
@@ -1697,10 +1598,22 @@ fun UsersManagementScreenContent(
                 "BANNED" -> u.isBanned
                 "ACTIVE" -> !u.isBanned
                 "ADMIN" -> u.role.contains("admin", ignoreCase = true)
+                "JOINED_MATCH" -> u.totalMatchesJoined > 0 || u.matchHistory.isNotEmpty()
+                "NO_MATCH" -> u.totalMatchesJoined == 0 && u.matchHistory.isEmpty()
                 else -> true
             }
 
-            matchesQuery && matchesFilter
+            val matchesTournament = if (selectedTournamentFilterId == null) true else {
+                val targetTourney = tournamentsList.find { it.id == selectedTournamentFilterId }
+                targetTourney?.registrations?.any { r ->
+                    r.userId == u.id || r.playerId == u.id ||
+                    (u.gameId.isNotBlank() && (r.gameId == u.gameId || r.gameAccountId == u.gameId)) ||
+                    (u.ign.isNotBlank() && (r.playerName.equals(u.ign, ignoreCase = true) || r.gameUsername.equals(u.ign, ignoreCase = true))) ||
+                    (u.username.isNotBlank() && (r.playerName.equals(u.username, ignoreCase = true) || r.gameUsername.equals(u.username, ignoreCase = true)))
+                } == true || u.joinedMatchIds.contains(selectedTournamentFilterId)
+            }
+
+            matchesQuery && matchesFilter && matchesTournament
         }
     }
 
@@ -1710,7 +1623,7 @@ fun UsersManagementScreenContent(
             title = { Text("Register / Sync Player Profile", color = Color.White, fontWeight = FontWeight.Bold) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Directly add or sync a player account into /users database path.", color = Color.LightGray, fontSize = 12.sp)
+                    Text("Directly add or sync a player account with structured database sections.", color = Color.LightGray, fontSize = 12.sp)
                     OutlinedTextField(
                         value = newUserEmail,
                         onValueChange = { newUserEmail = it },
@@ -1733,11 +1646,30 @@ fun UsersManagementScreenContent(
                         colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder),
                         modifier = Modifier.fillMaxWidth()
                     )
+                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.1f))
+                    Text("Initial 3-Section Wallet Balances:", color = Color(0xFFA1A1AA), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     OutlinedTextField(
-                        value = newUserInitialBalance,
-                        onValueChange = { newUserInitialBalance = it },
-                        label = { Text("Initial Balance (₹)", color = Color.Gray) },
-                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder),
+                        value = newUserInitialDeposit,
+                        onValueChange = { newUserInitialDeposit = it },
+                        label = { Text("1. Deposited Money (₹) [Non-Withdrawable]", color = Color(0xFF38BDF8), fontSize = 11.sp) },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = Color(0xFF38BDF8), unfocusedBorderColor = CardVerifyBorder),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = newUserInitialWinning,
+                        onValueChange = { newUserInitialWinning = it },
+                        label = { Text("2. Winning Money (₹) [Withdrawable]", color = Color(0xFF34D399), fontSize = 11.sp) },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = Color(0xFF34D399), unfocusedBorderColor = CardVerifyBorder),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = newUserInitialReferralBonus,
+                        onValueChange = { newUserInitialReferralBonus = it },
+                        label = { Text("3. Referral Bonus Money (₹) [Non-Withdrawable]", color = Color(0xFFFBBF24), fontSize = 11.sp) },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = Color(0xFFFBBF24), unfocusedBorderColor = CardVerifyBorder),
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
@@ -1746,26 +1678,42 @@ fun UsersManagementScreenContent(
                 Button(
                     onClick = {
                         if (newUserEmail.isNotBlank()) {
+                            val now = System.currentTimeMillis()
                             val uid = try {
                                 com.google.firebase.database.FirebaseDatabase.getInstance().reference.child("users").push().key
                             } catch (_: Exception) {
                                 null
-                            } ?: "usr_${System.currentTimeMillis()}"
+                            } ?: "usr_$now"
+                            val depAmt = (newUserInitialDeposit.toDoubleOrNull() ?: 0.0).coerceAtLeast(0.0)
+                            val winAmt = (newUserInitialWinning.toDoubleOrNull() ?: 0.0).coerceAtLeast(0.0)
+                            val bonAmt = (newUserInitialReferralBonus.toDoubleOrNull() ?: 0.0).coerceAtLeast(0.0)
+                            val totalAmt = depAmt + winAmt + bonAmt
                             val user = UserProfile(
                                 id = uid,
                                 username = newUsername.ifBlank { newUserEmail.substringBefore("@") },
+                                ign = newUsername.ifBlank { newUserEmail.substringBefore("@") },
                                 email = newUserEmail.trim(),
-                                funds = newUserInitialBalance.toDoubleOrNull() ?: 0.0,
+                                funds = totalAmt,
+                                balance = totalAmt,
+                                depositFunds = depAmt,
+                                winningFunds = winAmt,
+                                bonusFunds = bonAmt,
+                                referralBonusEarned = bonAmt,
+                                totalDeposited = depAmt,
+                                totalEarnings = winAmt,
                                 gameId = newUserGameId.trim(),
-                                createdAt = System.currentTimeMillis(),
-                                lastActive = System.currentTimeMillis()
+                                createdAt = now,
+                                firstAppJoinAt = now,
+                                lastActive = now
                             )
                             onUpdateUser(user)
                             showAddUserDialog = false
                             newUserEmail = ""
                             newUsername = ""
                             newUserGameId = ""
-                            newUserInitialBalance = "0"
+                            newUserInitialDeposit = "0"
+                            newUserInitialWinning = "0"
+                            newUserInitialReferralBonus = "0"
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent)
@@ -1782,49 +1730,17 @@ fun UsersManagementScreenContent(
         )
     }
 
-    if (selectedUserForFunds != null) {
-        AlertDialog(
-            onDismissRequest = { selectedUserForFunds = null },
-            title = { Text("Adjust Wallet Balance", color = Color.White, fontWeight = FontWeight.Bold) },
-            text = {
-                Column {
-                    Text("Adjust VT balance for ${selectedUserForFunds?.username} (${selectedUserForFunds?.email})", color = Color.LightGray, fontSize = 12.sp)
-                    Spacer(modifier = Modifier.height(12.dp))
-                    OutlinedTextField(
-                        value = fundsAmountInput,
-                        onValueChange = { fundsAmountInput = it },
-                        label = { Text("Amount (₹)", color = Color.Gray) },
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
-                            focusedBorderColor = VelorixAccent,
-                            unfocusedBorderColor = CardVerifyBorder
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    )
+    activeSelectedUserForFunds?.let { targetUser ->
+        ThreeSectionPlayerFundsDialog(
+            user = targetUser,
+            onDismiss = { selectedUserForFunds = null },
+            onSendBucketFunds = { u, delta, bucket, reason ->
+                if (onAddFundsBucket != null) {
+                    onAddFundsBucket(u, delta, bucket, reason)
+                } else {
+                    onAddFunds(u, delta)
                 }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val amount = fundsAmountInput.toDoubleOrNull() ?: 0.0
-                        if (amount != 0.0) {
-                            selectedUserForFunds?.let { onAddFunds(it, amount) }
-                        }
-                        selectedUserForFunds = null
-                        fundsAmountInput = "100"
-                    }, 
-                    colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent)
-                ) {
-                    Text("Update Funds", color = Color.Black, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { selectedUserForFunds = null }) {
-                    Text("Cancel", color = Color.Gray)
-                }
-            },
-            containerColor = CardLiveBg
+            }
         )
     }
 
@@ -1833,12 +1749,15 @@ fun UsersManagementScreenContent(
         UserDetailsInspectorDialog(
             user = user,
             allUsers = usersList,
+            tournaments = tournamentsList,
             onDismiss = { inspectedUser = null },
             onToggleBan = { 
                 onToggleBan(it)
                 inspectedUser = it.copy(isBanned = !it.isBanned)
             },
             onAddFunds = { u, amt -> onAddFunds(u, amt) },
+            onAddFundsBucket = onAddFundsBucket,
+            onRecordMatchWinning = onRecordMatchWinning,
             onUpdateUser = { updatedUser ->
                 onUpdateUser(updatedUser)
                 inspectedUser = updatedUser
@@ -1850,132 +1769,129 @@ fun UsersManagementScreenContent(
         )
     }
     
-    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp)) {
-        // Responsive Header
+    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp)) {
+        // Clean Full-Width Header + Flat Hairline Action Strip (Zero Truncation, Zero Boxed Buttons)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+                .padding(top = 8.dp, bottom = 6.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "User Base & Accounts",
-                    color = VelorixTextPrimary,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    if (onUnbanGuestSessions != null) {
-                        val context = LocalContext.current
-                        OutlinedButton(
-                            onClick = {
-                                Toast.makeText(context, "Unbanning all guest & non-logged in sessions...", Toast.LENGTH_SHORT).show()
-                                onUnbanGuestSessions()
-                            },
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF34D399)),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF34D399).copy(alpha = 0.6f)),
-                            contentPadding = PaddingValues(horizontal = 9.dp, vertical = 6.dp),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.bounceClick(scaleDown = 0.95f)
-                        ) {
-                            Icon(Icons.Default.Shield, contentDescription = "Unban Guests", tint = Color(0xFF34D399), modifier = Modifier.size(13.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Unban Guests", color = Color(0xFF34D399), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                    if (onRefreshUserData != null) {
-                        val context = LocalContext.current
-                        val isUserSyncing = (uiState as? DashboardState.Success)?.isSyncing ?: false
-                        OutlinedButton(
-                            onClick = {
-                                Toast.makeText(context, "Extracting live players from Firebase...", Toast.LENGTH_SHORT).show()
-                                onRefreshUserData()
-                            },
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = VelorixAccent),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, VelorixAccent),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.bounceClick(scaleDown = 0.95f)
-                        ) {
-                            if (isUserSyncing) {
-                                CircularProgressIndicator(
-                                    color = VelorixAccent,
-                                    strokeWidth = 2.dp,
-                                    modifier = Modifier.size(12.dp)
-                                )
-                            } else {
-                                Icon(Icons.Default.Refresh, contentDescription = "Sync RTDB", tint = VelorixAccent, modifier = Modifier.size(14.dp))
-                            }
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(if (isUserSyncing) "Extracting..." else "Sync RTDB", color = VelorixAccent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                    Button(
-                        onClick = { showAddUserDialog = true },
-                        colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Icon(Icons.Default.Add, contentDescription = null, tint = Color.Black, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("+ Add Player", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Tap any user to view details & controls",
-                    color = VelorixAccent,
-                    fontSize = 11.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.weight(1f)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Box(
-                    modifier = Modifier
-                        .background(Color(0xFF18181B), RoundedCornerShape(12.dp))
-                        .border(1.dp, Color(0xFF27272A), RoundedCornerShape(12.dp))
-                        .padding(horizontal = 10.dp, vertical = 5.dp)
                 ) {
+                    Icon(
+                        Icons.Default.Group,
+                        contentDescription = null,
+                        tint = VelorixAccent,
+                        modifier = Modifier.size(20.dp)
+                    )
                     Text(
-                        text = "${usersList.count { !it.isGuestSession }} Registered Players",
-                        color = Color(0xFF34D399),
-                        fontSize = 11.sp,
+                        text = "Players",
+                        color = VelorixTextPrimary,
                         fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp,
+                        maxLines = 1
+                    )
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .background(Color(0xFF34D399), CircleShape)
+                    )
+                    Text(
+                        text = "${usersList.count { !it.isGuestSession }}",
+                        color = Color(0xFFA1A1AA),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
                         maxLines = 1
                     )
                 }
+
+                val context = LocalContext.current
+                val isUserSyncing = (uiState as? DashboardState.Success)?.isSyncing ?: false
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(
+                        onClick = { showAddUserDialog = true },
+                        modifier = Modifier
+                            .size(34.dp)
+                            .background(Color.White.copy(alpha = 0.08f), CircleShape)
+                    ) {
+                        Icon(
+                            Icons.Default.PersonAdd,
+                            contentDescription = "Add Player",
+                            tint = Color(0xFFE4E4E7),
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+
+                    if (onRefreshUserData != null) {
+                        IconButton(
+                            onClick = {
+                                Toast.makeText(context, "Syncing live players from Firebase...", Toast.LENGTH_SHORT).show()
+                                onRefreshUserData()
+                            },
+                            modifier = Modifier
+                                .size(34.dp)
+                                .background(Color(0xFF38BDF8).copy(alpha = 0.14f), CircleShape)
+                        ) {
+                            if (isUserSyncing) {
+                                CircularProgressIndicator(
+                                    color = Color(0xFF38BDF8),
+                                    strokeWidth = 1.8.dp,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            } else {
+                                Icon(
+                                    Icons.Default.Sync,
+                                    contentDescription = "Sync RTDB",
+                                    tint = Color(0xFF38BDF8),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    if (onUnbanGuestSessions != null) {
+                        IconButton(
+                            onClick = {
+                                Toast.makeText(context, "Unbanning guest sessions...", Toast.LENGTH_SHORT).show()
+                                onUnbanGuestSessions()
+                            },
+                            modifier = Modifier
+                                .size(34.dp)
+                                .background(Color.White.copy(alpha = 0.06f), CircleShape)
+                        ) {
+                            Icon(
+                                Icons.Default.Shield,
+                                contentDescription = "Unban Guests",
+                                tint = Color(0xFFA1A1AA),
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
             }
+            Spacer(modifier = Modifier.height(8.dp))
+            HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
         }
 
-        // Apple Cupertino-style Search Bar
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(46.dp)
-                .background(Color(0xFF141418), RoundedCornerShape(16.dp))
-                .border(1.dp, Color(0xFF27272A), RoundedCornerShape(16.dp))
-                .padding(horizontal = 12.dp),
-            contentAlignment = Alignment.CenterStart
-        ) {
+        // Flat AMOLED Search Bar with bottom hairline
+        Column(modifier = Modifier.fillMaxWidth().background(Color.Black)) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 10.dp)
             ) {
                 Icon(
                     Icons.Default.Search,
@@ -2015,59 +1931,132 @@ fun UsersManagementScreenContent(
                     )
                 }
             }
+            HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.12f))
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
-        // BitChord Apple-style Segmented Control Bar
+        // Flat Underline Mode Switcher (No Box-in-Box)
         Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(18.dp),
             modifier = Modifier
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState())
-                .padding(bottom = 12.dp)
         ) {
             listOf(
                 Triple("ALL", "All Players", usersList.count { !it.isGuestSession }),
+                Triple("JOINED_MATCH", "Joined Match", usersList.count { !it.isGuestSession && (it.totalMatchesJoined > 0 || it.matchHistory.isNotEmpty()) }),
+                Triple("NO_MATCH", "No Match Yet", usersList.count { !it.isGuestSession && it.totalMatchesJoined == 0 && it.matchHistory.isEmpty() }),
                 Triple("ACTIVE", "Active", usersList.count { !it.isGuestSession && !it.isBanned }),
                 Triple("BANNED", "Banned", usersList.count { !it.isGuestSession && it.isBanned }),
                 Triple("ADMIN", "Staff", usersList.count { !it.isGuestSession && it.role.contains("admin", ignoreCase = true) })
             ).forEach { (key, label, count) ->
                 val isSel = selectedFilter == key
-                val bg = if (isSel) Color(0xFF27272A) else Color(0xFF141418)
-                val border = if (isSel) Color(0xFF52525B) else Color(0xFF27272A)
-                val textColor = if (isSel) Color.White else Color(0xFFA1A1AA)
+                val textColor = if (isSel) Color.White else Color(0xFF71717A)
 
-                Row(
+                Column(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(bg)
-                        .border(1.dp, border, RoundedCornerShape(20.dp))
                         .clickable { selectedFilter = key }
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        .padding(vertical = 6.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = label,
-                        fontSize = 11.5.sp,
+                        text = "$label ($count)",
+                        fontSize = 12.sp,
                         fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
                         color = textColor
                     )
+                    Spacer(modifier = Modifier.height(4.dp))
                     Box(
                         modifier = Modifier
-                            .background(if (isSel) Color(0xFF3F3F46) else Color(0xFF1F1F23), CircleShape)
-                            .padding(horizontal = 5.dp, vertical = 1.dp)
+                            .width(24.dp)
+                            .height(1.5.dp)
+                            .background(if (isSel) VelorixAccent else Color.Transparent)
+                    )
+                }
+            }
+        }
+        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Multi-Tournament Roster Mode Filter (Underline text links, No Box-in-Box)
+        if (tournamentsList.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Default.SportsEsports,
+                    contentDescription = null,
+                    tint = VelorixAccent,
+                    modifier = Modifier.size(13.dp)
+                )
+                Spacer(modifier = Modifier.width(5.dp))
+                Text(
+                    "Filter by Tournament Participation:",
+                    color = Color(0xFFA1A1AA),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 6.dp)
+            ) {
+                item {
+                    val isAll = selectedTournamentFilterId == null
+                    Column(
+                        modifier = Modifier
+                            .clickable { selectedTournamentFilterId = null }
+                            .padding(vertical = 4.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(
-                            text = count.toString(),
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (isSel) Color.White else Color(0xFF71717A)
+                            text = "All Players (${usersList.count { !it.isGuestSession }})",
+                            color = if (isAll) VelorixAccent else Color(0xFF71717A),
+                            fontSize = 11.5.sp,
+                            fontWeight = if (isAll) FontWeight.Bold else FontWeight.Medium
+                        )
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Box(
+                            modifier = Modifier
+                                .width(20.dp)
+                                .height(1.5.dp)
+                                .background(if (isAll) VelorixAccent else Color.Transparent)
+                        )
+                    }
+                }
+                items(tournamentsList) { tourney ->
+                    val isSel = selectedTournamentFilterId == tourney.id
+                    val registeredCount = tourney.registrations.size
+                    Column(
+                        modifier = Modifier
+                            .clickable { selectedTournamentFilterId = if (isSel) null else tourney.id }
+                            .padding(vertical = 4.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "${tourney.title.take(18)} ($registeredCount)",
+                            color = if (isSel) Color(0xFFEAB308) else Color(0xFF94A3B8),
+                            fontSize = 11.5.sp,
+                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium
+                        )
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Box(
+                            modifier = Modifier
+                                .width(20.dp)
+                                .height(1.5.dp)
+                                .background(if (isSel) Color(0xFFEAB308) else Color.Transparent)
                         )
                     }
                 }
             }
+            HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+            Spacer(modifier = Modifier.height(6.dp))
         }
         
         val distinctUsers = remember(filteredUsers) {
@@ -2078,8 +2067,10 @@ fun UsersManagementScreenContent(
             }
         }
 
+        val shortDateFmt = remember { SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault()) }
+
         LazyColumn(
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
             contentPadding = PaddingValues(bottom = 100.dp)
         ) {
             if (distinctUsers.isEmpty()) {
@@ -2095,22 +2086,13 @@ fun UsersManagementScreenContent(
                 }
             }
             items(distinctUsers, key = { "${it.id}_${it.email}_${distinctUsers.indexOf(it)}" }) { user ->
-                val userBorderBrush = if (user.isBanned) {
-                    androidx.compose.ui.graphics.SolidColor(Color.Red.copy(alpha = 0.6f))
-                } else {
-                    GlassTokens.GlassBorderSubtle
-                }
-
                 GlassCard(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(18.dp),
-                    borderBrush = userBorderBrush,
                     onClick = null
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
                             .clickable { inspectedUser = user },
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
@@ -2120,7 +2102,7 @@ fun UsersManagementScreenContent(
                             UserAvatarView(
                                 avatarUrl = user.avatarUrl,
                                 name = user.bestDisplayName,
-                                size = 48.dp,
+                                size = 46.dp,
                                 isBanned = user.isBanned,
                                 isSuspended = user.isSuspended,
                                 role = user.role,
@@ -2142,14 +2124,13 @@ fun UsersManagementScreenContent(
                                     if (user.role.contains("admin", ignoreCase = true)) {
                                         Spacer(modifier = Modifier.width(6.dp))
                                         val roleBadgeColor = if (user.role.contains("super", ignoreCase = true)) Color(0xFFFFB300) else Color(0xFF00E5FF)
-                                        Box(
-                                            modifier = Modifier
-                                                .background(roleBadgeColor.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
-                                                .border(0.5.dp, roleBadgeColor.copy(alpha = 0.6f), RoundedCornerShape(4.dp))
-                                                .padding(horizontal = 6.dp, vertical = 1.dp)
-                                        ) {
-                                            Text(user.role.uppercase(), color = roleBadgeColor, fontSize = 8.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                                        }
+                                        Text(
+                                            text = "• ${user.role.uppercase()}",
+                                            color = roleBadgeColor,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1
+                                        )
                                     }
                                 }
                                 Text(
@@ -2160,7 +2141,7 @@ fun UsersManagementScreenContent(
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
-                                    text = "ID: ${user.id}",
+                                    text = "UID: ${user.id}",
                                     color = Color.Gray,
                                     fontSize = 10.sp,
                                     fontFamily = FontFamily.Monospace,
@@ -2171,146 +2152,137 @@ fun UsersManagementScreenContent(
                         }
 
                         Column(horizontalAlignment = Alignment.End) {
-                            if (user.isBanned) {
-                                Box(modifier = Modifier.background(Color(0xFFFF1744), RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 3.dp)) {
-                                    Text("BANNED", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                }
-                            } else if (user.isSuspended) {
-                                Box(modifier = Modifier.background(Color(0xFFFF9800), RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 3.dp)) {
-                                    Text("SUSPENDED", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                }
-                            } else {
-                                Box(modifier = Modifier.background(Color(0xFF2E7D32), RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 3.dp)) {
-                                    Text("ACTIVE", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                }
+                            val statusLabel = when {
+                                user.isBanned -> "BANNED"
+                                user.isSuspended -> "SUSPENDED"
+                                else -> "ACTIVE"
+                            }
+                            val statusDotColor = when {
+                                user.isBanned -> Color(0xFFFF1744)
+                                user.isSuspended -> Color(0xFFFF9800)
+                                else -> Color(0xFF34D399)
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(modifier = Modifier.size(6.dp).background(statusDotColor, CircleShape))
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text(statusLabel, color = statusDotColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                             }
                             Spacer(modifier = Modifier.height(4.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("Inspect", color = Color(0xFFA1A1AA), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                                Text("DB Sections", color = Color(0xFFA1A1AA), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
                                 Icon(Icons.Default.ChevronRight, contentDescription = null, tint = Color(0xFFA1A1AA), modifier = Modifier.size(14.dp))
                             }
                         }
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))
+                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+                    Spacer(modifier = Modifier.height(8.dp))
 
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(Color(0xFF121215), RoundedCornerShape(10.dp))
-                            .border(1.dp, Color(0xFF27272A), RoundedCornerShape(10.dp))
-                            .padding(horizontal = 10.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column {
-                            Text("Free Fire IGN", color = VelorixTextSecondary, fontSize = 9.sp)
-                            Text(user.effectiveIgn.ifEmpty { "N/A" }, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                        Column {
-                            Text("Wallet Balance", color = VelorixTextSecondary, fontSize = 9.sp)
-                            Text("₹${user.totalWalletBalance.toInt()}", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                        }
-                        Column {
-                            Text("Wins / Kills", color = VelorixTextSecondary, fontSize = 9.sp)
-                            Text("${user.wins}W / ${user.kills}K", color = Color.LightGray, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                        }
-                        Column {
-                            Text("Total Won", color = VelorixTextSecondary, fontSize = 9.sp)
-                            Text("₹${user.totalEarnings.toInt()}", color = Color(0xFF81C784), fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                        }
-                    }
-
-                    // User Panel Extra Highlights: UID, Tokens, Streak
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 6.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        if (user.gameId.isNotBlank()) {
-                            Box(
-                                modifier = Modifier
-                                    .background(Color(0xFF1E2330), RoundedCornerShape(6.dp))
-                                    .border(0.5.dp, Color(0xFF2D3748), RoundedCornerShape(6.dp))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                            ) {
-                                Text("FF ID: ${user.gameId}", color = Color(0xFF90CAF9), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                        if (user.tokens > 0) {
-                            Box(
-                                modifier = Modifier
-                                    .background(Color(0xFF2E2415), RoundedCornerShape(6.dp))
-                                    .border(0.5.dp, Color(0xFFFFB300).copy(alpha = 0.4f), RoundedCornerShape(6.dp))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                            ) {
-                                Text("🪙 ${user.tokens} Tokens", color = Color(0xFFFFD54F), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                        if (user.loginStreak > 0) {
-                            Box(
-                                modifier = Modifier
-                                    .background(Color(0xFF2D1616), RoundedCornerShape(6.dp))
-                                    .border(0.5.dp, Color(0xFFFF5722).copy(alpha = 0.4f), RoundedCornerShape(6.dp))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                            ) {
-                                Text("${user.loginStreak}d Active Streak", color = Color(0xFFFF8A65), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
+                    // Row 1: 3-Bucket Wallet Breakdown (Deposited vs Winning vs Bonus vs Stats)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Button(
-                            onClick = { inspectedUser = user },
-                            modifier = Modifier.weight(1f).height(42.dp).bounceClick(scaleDown = 0.96f),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F1F23)),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF3F3F46)),
-                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Deposited", color = Color(0xFF38BDF8), fontSize = 9.5.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+                            Text("₹${user.depositFunds.toInt()}", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, maxLines = 1, softWrap = false)
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Winning", color = Color(0xFF34D399), fontSize = 9.5.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+                            Text("₹${user.winningFunds.toInt()}", color = Color(0xFF34D399), fontSize = 13.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, maxLines = 1, softWrap = false)
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Bonus", color = Color(0xFFFBBF24), fontSize = 9.5.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+                            Text("₹${maxOf(user.bonusFunds, user.referralBonusEarned).toInt()}", color = Color(0xFFFBBF24), fontSize = 13.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, maxLines = 1, softWrap = false)
+                        }
+                        Column(modifier = Modifier.weight(1.1f), horizontalAlignment = Alignment.End) {
+                            Text("Record", color = VelorixTextSecondary, fontSize = 9.5.sp, maxLines = 1, softWrap = false)
+                            Text("${user.totalMatchesJoined}M • ${user.wins}W • ${user.kills}K", color = Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+                    // Row 2: App Join Time, First Match Join Time & Cases Summary
+                    val appJoinStr = if (user.effectiveFirstAppJoinAt > 0L) shortDateFmt.format(Date(user.effectiveFirstAppJoinAt)) else "N/A"
+                    val firstMatchStr = if (user.firstMatchJoinedAt > 0L) shortDateFmt.format(Date(user.firstMatchJoinedAt)) else "No Match Joined"
+                    Text(
+                        text = "App Join: $appJoinStr  •  1st Match: $firstMatchStr  •  Cases: ${user.supportCasesCount}",
+                        color = Color(0xFFA1A1AA),
+                        fontSize = 10.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(top = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(10.dp))
+                                .border(0.75.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(10.dp))
+                                .clickable { inspectedUser = user }
+                                .padding(horizontal = 11.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
-                            Icon(Icons.Default.Tune, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Manage", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1)
+                            Icon(Icons.Default.Tune, contentDescription = "Inspect Player DB", tint = Color.White, modifier = Modifier.size(14.dp))
+                            Text("Inspect", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                         }
 
-                        Button(
-                            onClick = { selectedUserForFunds = user },
-                            modifier = Modifier.weight(1f).height(42.dp).bounceClick(scaleDown = 0.96f),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0x2200E676)),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF00E676).copy(alpha = 0.5f)),
-                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                        Row(
+                            modifier = Modifier
+                                .background(Color(0xFF34D399).copy(alpha = 0.14f), RoundedCornerShape(10.dp))
+                                .border(0.75.dp, Color(0xFF34D399).copy(alpha = 0.48f), RoundedCornerShape(10.dp))
+                                .clickable { selectedUserForFunds = user }
+                                .padding(horizontal = 11.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
-                            Icon(Icons.Default.AddCard, contentDescription = null, tint = Color(0xFF00E676), modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Funds", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF00E676), maxLines = 1)
+                            Icon(Icons.Default.AccountBalanceWallet, contentDescription = "Send Funds", tint = Color(0xFF34D399), modifier = Modifier.size(14.dp))
+                            Text("Wallet", color = Color(0xFF34D399), fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                         }
 
                         val ctx = LocalContext.current
-                        Button(
-                            onClick = { 
-                                if (user.isGuestSession) {
-                                    Toast.makeText(ctx, "Guest sessions cannot be banned globally.", Toast.LENGTH_SHORT).show()
-                                } else {
-                                    onToggleBan(user)
+                        val actionColor = if (user.isBanned) Color(0xFF34D399) else Color(0xFFF87171)
+                        Row(
+                            modifier = Modifier
+                                .background(actionColor.copy(alpha = 0.14f), RoundedCornerShape(10.dp))
+                                .border(0.75.dp, actionColor.copy(alpha = 0.48f), RoundedCornerShape(10.dp))
+                                .clickable {
+                                    if (user.isGuestSession) {
+                                        Toast.makeText(ctx, "Guest sessions cannot be banned globally.", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        onToggleBan(user)
+                                    }
                                 }
-                            },
-                            modifier = Modifier.weight(1f).height(42.dp).bounceClick(scaleDown = 0.96f),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = if (user.isBanned) Color(0xFF1B5E20) else Color(0xFFB71C1C)),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, if (user.isBanned) Color(0xFF4CAF50) else Color(0xFFEF5350)),
-                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                                .padding(horizontal = 11.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
-                            Icon(if (user.isBanned) Icons.Default.CheckCircle else Icons.Default.Block, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(if (user.isBanned) "Unban" else "Ban", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1)
+                            Icon(
+                                if (user.isBanned) Icons.Default.CheckCircle else Icons.Default.Block,
+                                contentDescription = if (user.isBanned) "Unban Player" else "Ban Player",
+                                tint = actionColor,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = if (user.isBanned) "Unban" else "Ban",
+                                color = actionColor,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false
+                            )
                         }
                     }
                 }
@@ -2323,15 +2295,72 @@ fun UsersManagementScreenContent(
 fun UserDetailsInspectorDialog(
     user: UserProfile,
     allUsers: List<UserProfile> = emptyList(),
+    tournaments: List<Tournament> = emptyList(),
     onDismiss: () -> Unit,
     onToggleBan: (UserProfile) -> Unit,
     onAddFunds: (UserProfile, Double) -> Unit,
+    onAddFundsBucket: ((UserProfile, Double, com.example.domain.model.WalletBucket, String) -> Unit)? = null,
+    onRecordMatchWinning: ((UserProfile, String, String, Int, Int, Double, Double) -> Unit)? = null,
     onUpdateUser: (UserProfile) -> Unit,
-    onDeleteUser: (UserProfile) -> Unit
+    onDeleteUser: (UserProfile) -> Unit,
+    onNavigateToTournament: ((String) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     var selectedTab by remember { mutableIntStateOf(0) }
+
+    val joinedTournaments = remember(tournaments, user) {
+        tournaments.filter { t ->
+            user.joinedMatchIds.contains(t.id) ||
+            t.registrations.any { r ->
+                r.userId == user.id ||
+                r.playerId == user.id ||
+                (user.gameId.isNotBlank() && (r.gameId == user.gameId || r.gameAccountId == user.gameId)) ||
+                (user.ign.isNotBlank() && (r.playerName.equals(user.ign, ignoreCase = true) || r.gameUsername.equals(user.ign, ignoreCase = true))) ||
+                (user.username.isNotBlank() && (r.playerName.equals(user.username, ignoreCase = true) || r.gameUsername.equals(user.username, ignoreCase = true)))
+            }
+        }
+    }
+
+    val unifiedMatchRecords = remember(joinedTournaments, user) {
+        val fromLiveTournaments = joinedTournaments.map { t ->
+            val reg = t.registrations.find { r ->
+                r.userId == user.id ||
+                r.playerId == user.id ||
+                (user.gameId.isNotBlank() && (r.gameId == user.gameId || r.gameAccountId == user.gameId)) ||
+                (user.ign.isNotBlank() && (r.playerName.equals(user.ign, ignoreCase = true) || r.gameUsername.equals(user.ign, ignoreCase = true))) ||
+                (user.username.isNotBlank() && (r.playerName.equals(user.username, ignoreCase = true) || r.gameUsername.equals(user.username, ignoreCase = true)))
+            }
+            val existingHist = user.matchHistory.find { it.tournamentId == t.id }
+            val feePaid = existingHist?.entryFeePaid?.takeIf { it > 0.0 }
+                ?: reg?.entryFeePaid?.takeIf { it > 0.0 }
+                ?: t.entryFee.toDouble()
+            com.example.domain.model.PlayerMatchRecord(
+                tournamentId = t.id,
+                tournamentTitle = t.title,
+                game = t.game,
+                category = t.category,
+                format = t.format,
+                map = t.map,
+                joinedAt = existingHist?.joinedAt?.takeIf { it > 0L }
+                    ?: reg?.joinedAt?.takeIf { it > 0L }
+                    ?: (t.parsedStartsAtMillis ?: 0L),
+                entryFeePaid = feePaid,
+                paidFromDeposit = existingHist?.paidFromDeposit?.takeIf { it > 0.0 }
+                    ?: reg?.paidFromDeposit?.takeIf { it > 0.0 }
+                    ?: feePaid,
+                paidFromWinning = existingHist?.paidFromWinning ?: reg?.paidFromWinning ?: 0.0,
+                paidFromBonus = existingHist?.paidFromBonus ?: reg?.paidFromBonus ?: 0.0,
+                kills = maxOf(existingHist?.kills ?: 0, reg?.kills ?: 0),
+                rank = existingHist?.rank?.takeIf { it > 0 } ?: reg?.rank ?: 0,
+                winningAmount = maxOf(existingHist?.winningAmount ?: 0.0, reg?.winningAmount ?: 0.0),
+                status = t.status
+            )
+        }
+        (fromLiveTournaments + user.matchHistory)
+            .distinctBy { it.tournamentId }
+            .sortedByDescending { it.joinedAt }
+    }
 
     val referredPlayers = remember(allUsers, user) {
         allUsers.filter { other ->
@@ -2355,7 +2384,20 @@ fun UserDetailsInspectorDialog(
     var editKills by remember(user) { mutableStateOf(user.kills.toString()) }
     var editActivityPoints by remember(user) { mutableStateOf(user.activityPoints.toString()) }
     var editEarnings by remember(user) { mutableStateOf(user.totalEarnings.toString()) }
-    var editBalanceInput by remember(user) { mutableStateOf(user.funds.toString()) }
+
+    // 3-Bucket Wallet Control state in Tab 2
+    var selectedControlBucket by remember { mutableStateOf(com.example.domain.model.WalletBucket.WINNING) }
+    var bucketAmountInput by remember { mutableStateOf("100") }
+    var bucketReasonInput by remember { mutableStateOf("Admin wallet bucket adjustment") }
+
+    // Per-Match Winning & Kills Recording Dialog State
+    var showRecordMatchDialog by remember { mutableStateOf(false) }
+    var recordTourneyId by remember { mutableStateOf(tournaments.firstOrNull()?.id ?: "") }
+    var recordTourneyTitle by remember { mutableStateOf(tournaments.firstOrNull()?.title ?: "Custom Match") }
+    var recordEntryFeeInput by remember { mutableStateOf("50") }
+    var recordKillsInput by remember { mutableStateOf("0") }
+    var recordRankInput by remember { mutableStateOf("1") }
+    var recordWinningInput by remember { mutableStateOf("100") }
 
     // Individual Toggles for each ID separately
     var isBannedState by remember(user.id, user.isBanned) { mutableStateOf(user.isBanned) }
@@ -2372,6 +2414,14 @@ fun UserDetailsInspectorDialog(
     var minVersionInput by remember(user.id, user.minVersionRequired) { mutableStateOf(user.minVersionRequired) }
 
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
+
+    fun triggerBucketAdjustment(delta: Double, bucket: com.example.domain.model.WalletBucket, reason: String) {
+        if (onAddFundsBucket != null) {
+            onAddFundsBucket(user, delta, bucket, reason)
+        } else {
+            onAddFunds(user, delta)
+        }
+    }
 
     fun buildUpdatedUser(): UserProfile {
         val suspendUntilTime = if (isSuspendedState) {
@@ -2403,9 +2453,17 @@ fun UserDetailsInspectorDialog(
         )
     }
 
-    val dateFormat = remember { SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()) }
-    val createdStr = remember(user.createdAt) {
-        if (user.createdAt > 0) dateFormat.format(Date(user.createdAt)) else "N/A (Early Account)"
+    val dateFormat = remember { SimpleDateFormat("dd MMM yyyy, hh:mm:ss a", Locale.getDefault()) }
+    val firstAppJoinStr = remember(user.effectiveFirstAppJoinAt) {
+        if (user.effectiveFirstAppJoinAt > 0L) dateFormat.format(Date(user.effectiveFirstAppJoinAt)) else "N/A (Early Account)"
+    }
+    val firstMatchJoinStr = remember(user.firstMatchJoinedAt, unifiedMatchRecords) {
+        val earliest = unifiedMatchRecords.map { it.joinedAt }.filter { it > 0L }.minOrNull() ?: user.firstMatchJoinedAt
+        if (earliest > 0L) dateFormat.format(Date(earliest)) else "Never Joined Any Match"
+    }
+    val lastMatchJoinStr = remember(user.lastMatchJoinedAt, unifiedMatchRecords) {
+        val latest = unifiedMatchRecords.map { it.joinedAt }.filter { it > 0L }.maxOrNull() ?: user.lastMatchJoinedAt
+        if (latest > 0L) dateFormat.format(Date(latest)) else "Never Joined Any Match"
     }
     val lastActiveStr = remember(user.lastActive) {
         if (user.lastActive > 0) {
@@ -2420,6 +2478,116 @@ fun UserDetailsInspectorDialog(
             }
             "$formatted ($relative)"
         } else "N/A"
+    }
+
+    if (showRecordMatchDialog) {
+        AlertDialog(
+            onDismissRequest = { showRecordMatchDialog = false },
+            title = { Text("Record Match Participation & Winning", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Record match entry fee, kills & winning money for ${user.bestDisplayName}. Winning money is credited directly to their WITHDRAWABLE Winning Wallet.",
+                        color = Color.LightGray,
+                        fontSize = 11.5.sp
+                    )
+                    if (tournaments.isNotEmpty()) {
+                        Text("Quick Select Tournament:", color = Color(0xFFA1A1AA), fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(tournaments) { t ->
+                                val isSel = recordTourneyId == t.id
+                                TextButton(
+                                    onClick = {
+                                        recordTourneyId = t.id
+                                        recordTourneyTitle = t.title
+                                        recordEntryFeeInput = t.entryFee.toInt().toString()
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = t.title.take(18),
+                                        color = if (isSel) VelorixAccent else Color.Gray,
+                                        fontSize = 11.sp,
+                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    OutlinedTextField(
+                        value = recordTourneyTitle,
+                        onValueChange = { recordTourneyTitle = it },
+                        label = { Text("Match / Tournament Title", color = Color.Gray, fontSize = 11.sp) },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = recordEntryFeeInput,
+                            onValueChange = { recordEntryFeeInput = it },
+                            label = { Text("Entry Fee Paid (₹)", color = Color.Gray, fontSize = 10.sp) },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder),
+                            modifier = Modifier.weight(1f)
+                        )
+                        OutlinedTextField(
+                            value = recordKillsInput,
+                            onValueChange = { recordKillsInput = it },
+                            label = { Text("Match Kills", color = Color.Gray, fontSize = 10.sp) },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder),
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = recordRankInput,
+                            onValueChange = { recordRankInput = it },
+                            label = { Text("Match Rank (#)", color = Color.Gray, fontSize = 10.sp) },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder),
+                            modifier = Modifier.weight(1f)
+                        )
+                        OutlinedTextField(
+                            value = recordWinningInput,
+                            onValueChange = { recordWinningInput = it },
+                            label = { Text("Winning Money (₹)", color = Color(0xFF34D399), fontSize = 10.sp) },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = Color(0xFF34D399), unfocusedBorderColor = CardVerifyBorder),
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val tId = recordTourneyId.ifBlank { "match_${System.currentTimeMillis()}" }
+                        val tTitle = recordTourneyTitle.ifBlank { "Tournament Match" }
+                        val fee = (recordEntryFeeInput.toDoubleOrNull() ?: 0.0).coerceAtLeast(0.0)
+                        val kills = (recordKillsInput.toIntOrNull() ?: 0).coerceAtLeast(0)
+                        val rank = (recordRankInput.toIntOrNull() ?: 0).coerceAtLeast(0)
+                        val winAmt = (recordWinningInput.toDoubleOrNull() ?: 0.0).coerceAtLeast(0.0)
+                        if (onRecordMatchWinning != null) {
+                            onRecordMatchWinning(user, tId, tTitle, kills, rank, winAmt, fee)
+                        } else {
+                            triggerBucketAdjustment(winAmt, com.example.domain.model.WalletBucket.WINNING, "Match winning: $tTitle")
+                        }
+                        showRecordMatchDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF34D399))
+                ) {
+                    Text("Save Match & Credit Winning", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRecordMatchDialog = false }) {
+                    Text("Cancel", color = Color.Gray)
+                }
+            },
+            containerColor = CardLiveBg
+        )
     }
 
     if (showDeleteConfirmDialog) {
@@ -2449,7 +2617,7 @@ fun UserDetailsInspectorDialog(
                     Text("Cancel", color = Color.Gray)
                 }
             },
-            containerColor = CardLiveBg
+            containerColor = Color.Black
         )
     }
 
@@ -2457,21 +2625,21 @@ fun UserDetailsInspectorDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
-        Card(
+        Surface(
             modifier = Modifier
                 .fillMaxWidth(0.95f)
                 .fillMaxHeight(0.92f)
                 .padding(vertical = 12.dp),
-            shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF14171E)),
-            border = androidx.compose.foundation.BorderStroke(1.dp, CardVerifyBorder)
+            shape = RoundedCornerShape(16.dp),
+            color = Color.Black,
+            border = androidx.compose.foundation.BorderStroke(0.5.dp, Color.White.copy(alpha = 0.14f))
         ) {
-            Column(modifier = Modifier.fillMaxSize()) {
+            Column(modifier = Modifier.fillMaxSize().background(Color.Black)) {
                 // Header Bar
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(Color(0xFF1A1F29))
+                        .background(Color.Black)
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
@@ -2481,7 +2649,7 @@ fun UserDetailsInspectorDialog(
                         UserAvatarView(
                             avatarUrl = user.avatarUrl,
                             name = user.bestDisplayName,
-                            size = 54.dp,
+                            size = 50.dp,
                             isBanned = isBannedState,
                             isSuspended = isSuspendedState,
                             role = editRole,
@@ -2497,30 +2665,24 @@ fun UserDetailsInspectorDialog(
                                     fontSize = 16.sp,
                                     fontWeight = FontWeight.Bold
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .background(
-                                            when {
-                                                isBannedState -> Color(0xFFFF1744)
-                                                isSuspendedState -> Color(0xFFFF9800)
-                                                else -> Color(0xFF2E7D32)
-                                            },
-                                            RoundedCornerShape(4.dp)
-                                        )
-                                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                                ) {
-                                    Text(
-                                        text = when {
-                                            isBannedState -> "BANNED"
-                                            isSuspendedState -> "SUSPENDED"
-                                            else -> "ACTIVE"
-                                        },
-                                        color = Color.White,
-                                        fontSize = 9.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                val statusDot = when {
+                                    isBannedState -> Color(0xFFFF1744)
+                                    isSuspendedState -> Color(0xFFFF9800)
+                                    else -> Color(0xFF34D399)
                                 }
+                                Box(modifier = Modifier.size(6.dp).background(statusDot, CircleShape))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = when {
+                                        isBannedState -> "BANNED"
+                                        isSuspendedState -> "SUSPENDED"
+                                        else -> "ACTIVE"
+                                    },
+                                    color = statusDot,
+                                    fontSize = 9.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
                             }
                             Text(
                                 text = user.bestEmailOrPhone,
@@ -2534,12 +2696,13 @@ fun UserDetailsInspectorDialog(
                         Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.LightGray)
                     }
                 }
+                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
 
                 // Copy UID Bar
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(Color(0xFF0F1218))
+                        .background(Color.Black)
                         .padding(horizontal = 16.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
@@ -2566,38 +2729,157 @@ fun UserDetailsInspectorDialog(
                         Text("Copy ID", color = VelorixAccent, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
                 }
+                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
 
-                // Tabs: 0 -> Minor Details, 1 -> Admin Controls, 2 -> Raw DB Attributes
+                // Quick Admin Actions Strip: Distinct Bordered Pills
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color.Black)
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .background(Color(0xFFF87171).copy(alpha = 0.14f), RoundedCornerShape(10.dp))
+                            .border(0.75.dp, Color(0xFFF87171).copy(alpha = 0.48f), RoundedCornerShape(10.dp))
+                            .clickable {
+                                val resetUser = user.copy(
+                                    avatarUrl = "avatar_1",
+                                    version = user.version + 1,
+                                    updatedAt = System.currentTimeMillis()
+                                )
+                                onUpdateUser(resetUser)
+                                Toast.makeText(context, "Avatar reset to avatar_1 (v${resetUser.version})!", Toast.LENGTH_SHORT).show()
+                            }
+                            .padding(horizontal = 11.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.AccountCircle,
+                            contentDescription = "Reset Avatar",
+                            tint = Color(0xFFF87171),
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = "Reset Avatar",
+                            color = Color(0xFFF87171),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
+                    Row(
+                        modifier = Modifier
+                            .background(Color(0xFFFBBF24).copy(alpha = 0.14f), RoundedCornerShape(10.dp))
+                            .border(0.75.dp, Color(0xFFFBBF24).copy(alpha = 0.48f), RoundedCornerShape(10.dp))
+                            .clickable {
+                                val tokenUser = user.copy(
+                                    tokens = user.tokens + 50,
+                                    version = user.version + 1,
+                                    updatedAt = System.currentTimeMillis()
+                                )
+                                onUpdateUser(tokenUser)
+                                Toast.makeText(context, "+50 Tokens credited -> ${tokenUser.tokens} Tokens", Toast.LENGTH_SHORT).show()
+                            }
+                            .padding(horizontal = 11.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Stars,
+                            contentDescription = "Grant +50 Tokens",
+                            tint = Color(0xFFFBBF24),
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = "+50 (${user.tokens})",
+                            color = Color(0xFFFBBF24),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
+                    Row(
+                        modifier = Modifier
+                            .background(Color(0xFF38BDF8).copy(alpha = 0.14f), RoundedCornerShape(10.dp))
+                            .border(0.75.dp, Color(0xFF38BDF8).copy(alpha = 0.48f), RoundedCornerShape(10.dp))
+                            .clickable {
+                                val dpdpJson = """{"userId":"${user.id}","username":"${user.username}","email":"${user.email}","inGameName":"${user.effectiveIgn}","freeFireId":"${user.gameId}","depositBalance":${user.depositFunds},"winningsBalance":${user.winningFunds},"bonusBalance":${user.bonusFunds},"balance":${user.totalWalletBalance},"tokens":${user.tokens},"joinedMatchesCount":${unifiedMatchRecords.size},"version":${user.version},"exportedAt":${System.currentTimeMillis()}}"""
+                                clipboard.setText(AnnotatedString(dpdpJson))
+                                Toast.makeText(context, "DPDP JSON snapshot copied!", Toast.LENGTH_SHORT).show()
+                            }
+                            .padding(horizontal = 11.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Code,
+                            contentDescription = "Copy DPDP JSON",
+                            tint = Color(0xFF38BDF8),
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = "Export JSON",
+                            color = Color(0xFF38BDF8),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
+                }
+                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+
+                // Icon Tabs: 0 -> Overview, 1 -> Matches, 2 -> Wallet, 3 -> Raw Data
                 TabRow(
                     selectedTabIndex = selectedTab,
-                    containerColor = Color(0xFF161B24),
+                    containerColor = Color.Black,
                     contentColor = VelorixAccent,
+                    divider = { HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f)) },
                     indicator = { tabPositions ->
-                        TabRowDefaults.SecondaryIndicator(
-                            Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
-                            color = VelorixAccent
-                        )
+                        if (selectedTab < tabPositions.size) {
+                            TabRowDefaults.SecondaryIndicator(
+                                Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
+                                color = VelorixAccent
+                            )
+                        }
                     }
                 ) {
                     Tab(
                         selected = selectedTab == 0,
                         onClick = { selectedTab = 0 },
-                        text = { Text("Details & Logins", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+                        icon = { Icon(Icons.Default.Person, contentDescription = "Overview", modifier = Modifier.size(18.dp)) }
                     )
                     Tab(
                         selected = selectedTab == 1,
                         onClick = { selectedTab = 1 },
-                        text = { Text("Toggles & Controls", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+                        icon = {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Icon(Icons.Default.EmojiEvents, contentDescription = "Matches", modifier = Modifier.size(17.dp))
+                                Text("${unifiedMatchRecords.size}", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
                     )
                     Tab(
                         selected = selectedTab == 2,
                         onClick = { selectedTab = 2 },
-                        text = { Text("Raw DB Data", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+                        icon = { Icon(Icons.Default.AccountBalanceWallet, contentDescription = "Wallet & Access", modifier = Modifier.size(18.dp)) }
+                    )
+                    Tab(
+                        selected = selectedTab == 3,
+                        onClick = { selectedTab = 3 },
+                        icon = { Icon(Icons.Default.DataObject, contentDescription = "Raw Data", modifier = Modifier.size(18.dp)) }
                     )
                 }
 
                 // Tab Contents
-                Box(modifier = Modifier.weight(1f).fillMaxWidth().padding(14.dp)) {
+                Box(modifier = Modifier.weight(1f).fillMaxWidth().background(Color.Black).padding(14.dp)) {
                     AnimatedContent(
                         targetState = selectedTab,
                         transitionSpec = {
@@ -2615,37 +2897,95 @@ fun UserDetailsInspectorDialog(
                     ) { currentTab ->
                         when (currentTab) {
                         0 -> {
-                            // Minor Details & Account Metadata
+                            // Structured Database Sections & Account Metadata
+                            val totalMatchesCount = maxOf(user.totalMatchesJoined, unifiedMatchRecords.size, user.joinedMatchIds.size)
+                            val hasJoinedMatches = totalMatchesCount > 0
                             Column(
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .verticalScroll(rememberScrollState()),
                                 verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                // Free Fire Esports & Gaming Profile
-                                DetailSectionCard(title = "FREE FIRE ESPORTS & GAMING PROFILE", icon = Icons.Default.SportsEsports) {
+                                // Section 01: Account Lifecycle & Match Join Timestamps (DB: accountLifecycle)
+                                DetailSectionCard(title = "01 · DB SECTION: ACCOUNT LIFECYCLE & JOIN TIMESTAMPS", icon = Icons.Default.Schedule) {
+                                    DetailItemRow(label = "First Joined App At", value = firstAppJoinStr, isHighlight = true)
+                                    DetailItemRow(label = "First Match Joined At", value = firstMatchJoinStr, isHighlight = hasJoinedMatches)
+                                    DetailItemRow(label = "Latest Match Joined At", value = lastMatchJoinStr, isHighlight = hasJoinedMatches)
+                                    DetailItemRow(
+                                        label = "Has Joined Any Match?",
+                                        value = if (hasJoinedMatches) "YES ($totalMatchesCount Matches Joined)" else "NO (Has Not Joined Any Match)",
+                                        isHighlight = hasJoinedMatches
+                                    )
+                                    DetailItemRow(label = "Last Active / Session", value = lastActiveStr)
+                                    DetailItemRow(label = "Support Cases / Tickets Filed", value = "${user.supportCasesCount} Cases", isHighlight = user.supportCasesCount > 0)
+                                }
+
+                                // Section 02: 3-Bucket Wallet & Withdrawal Rules (DB: walletAndFinanceSummary)
+                                DetailSectionCard(title = "02 · DB SECTION: 3-BUCKET WALLET & WITHDRAWAL RULES", icon = Icons.Default.AccountBalanceWallet) {
+                                    DetailItemRow(
+                                        label = "Winning Money (Withdrawable)",
+                                        value = "₹${"%.2f".format(user.winningFunds)} [WITHDRAWABLE]",
+                                        isHighlight = user.winningFunds > 0
+                                    )
+                                    DetailItemRow(
+                                        label = "Deposited Money (Entry Only)",
+                                        value = "₹${"%.2f".format(user.depositFunds)} [NON-WITHDRAWABLE]",
+                                        isHighlight = false
+                                    )
+                                    DetailItemRow(
+                                        label = "Bonus Money (Promotional)",
+                                        value = "₹${"%.2f".format(user.bonusFunds)} [NON-WITHDRAWABLE]",
+                                        isHighlight = false
+                                    )
+                                    DetailItemRow(
+                                        label = "Total Combined Wallet",
+                                        value = "₹${"%.2f".format(user.totalWalletBalance)}",
+                                        isHighlight = true
+                                    )
+                                    DetailItemRow(
+                                        label = "Withdrawal Request Status",
+                                        value = if (user.canRequestWithdrawal) "ALLOWED (Up to ₹${"%.0f".format(user.winningFunds)} Winning)" else "LOCKED (₹0 Winning • Deposit Cannot Be Withdrawn)",
+                                        isHighlight = user.canRequestWithdrawal
+                                    )
+                                    DetailItemRow(
+                                        label = "Total Lifetime Deposited",
+                                        value = "₹${"%.2f".format(maxOf(user.totalDeposited, user.depositFunds))}"
+                                    )
+                                    DetailItemRow(
+                                        label = "Total Entry Fees Paid",
+                                        value = "₹${"%.2f".format(maxOf(user.totalEntryFeesPaid, unifiedMatchRecords.sumOf { it.entryFeePaid }))}"
+                                    )
+                                    DetailItemRow(
+                                        label = "Total Lifetime Winning Earned",
+                                        value = "₹${"%.2f".format(maxOf(user.totalEarnings, user.winningFunds, unifiedMatchRecords.sumOf { it.winningAmount }))}",
+                                        isHighlight = user.totalEarnings > 0 || user.winningFunds > 0
+                                    )
+                                    DetailItemRow(
+                                        label = "Total Lifetime Withdrawn",
+                                        value = "₹${"%.2f".format(user.totalWithdrawn)}"
+                                    )
+                                    DetailItemRow(label = "VT Loyalty Tokens", value = "${user.tokens} Tokens", isHighlight = user.tokens > 0)
+                                }
+
+                                // Section 03: Combat, Cases & Match Participation Summary (DB: combatAndMatchSummary)
+                                DetailSectionCard(title = "03 · DB SECTION: COMBAT, CASES & MATCH SUMMARY", icon = Icons.Default.SportsEsports) {
                                     DetailItemRow(label = "Free Fire IGN", value = user.effectiveIgn, isHighlight = user.effectiveIgn != "Player")
                                     DetailItemRow(label = "Free Fire Game UID", value = user.gameId.ifBlank { "Not Linked" }, isHighlight = user.gameId.isNotBlank())
+                                    DetailItemRow(label = "Total Matches Joined", value = "$totalMatchesCount Matches", isHighlight = totalMatchesCount > 0)
                                     DetailItemRow(label = "Matches Won", value = "${user.wins} Wins", isHighlight = user.wins > 0)
                                     DetailItemRow(label = "Total Kills Recorded", value = "${user.kills} Kills", isHighlight = user.kills > 0)
+                                    DetailItemRow(label = "Support Cases / Disputes", value = "${user.supportCasesCount} Cases", isHighlight = user.supportCasesCount > 0)
                                     DetailItemRow(label = "Activity Reward Points", value = "${user.activityPoints} pts")
-                                    val winRatio = if (user.wins + user.kills > 0) "${((user.wins.toDouble() / (user.wins + 5).coerceAtLeast(1)) * 100).toInt()}% est." else "No matches yet"
-                                    DetailItemRow(label = "Estimated Win Ratio", value = winRatio)
-                                    DetailItemRow(label = "Player Status", value = if (user.wins + user.kills > 0) "Active Competitor" else "Casual / New Player")
+                                    val joinedNames = if (unifiedMatchRecords.isNotEmpty()) {
+                                        unifiedMatchRecords.joinToString(", ") { it.tournamentTitle.ifBlank { it.tournamentId } }
+                                    } else if (user.joinedMatchIds.isNotEmpty()) {
+                                        user.joinedMatchIds.joinToString(", ")
+                                    } else "None"
+                                    DetailItemRow(label = "Joined Matches List", value = joinedNames, isHighlight = hasJoinedMatches)
                                 }
 
-                                // Wallet, Balances & VT Tokens
-                                DetailSectionCard(title = "WALLET, BALANCES & VT TOKENS", icon = Icons.Default.AccountBalanceWallet) {
-                                    DetailItemRow(label = "Total Wallet Balance", value = "₹${user.totalWalletBalance}", isHighlight = true)
-                                    DetailItemRow(label = "Deposit Balance", value = "₹${user.depositFunds}")
-                                    DetailItemRow(label = "Winning Balance", value = "₹${user.winningFunds}", isHighlight = user.winningFunds > 0)
-                                    DetailItemRow(label = "Bonus Balance", value = "₹${user.bonusFunds}")
-                                    DetailItemRow(label = "VT Loyalty Tokens", value = "${user.tokens} Tokens", isHighlight = user.tokens > 0)
-                                    DetailItemRow(label = "Total Lifetime Prize Won", value = "₹${user.totalEarnings}", isHighlight = user.totalEarnings > 0)
-                                }
-
-                                // Daily Streak, Missions & Referrals (User Panel Feature)
-                                DetailSectionCard(title = "DAILY STREAK, MISSIONS & REFERRALS", icon = Icons.Default.MilitaryTech) {
+                                // Daily Streak, Missions & Referrals
+                                DetailSectionCard(title = "04 · DAILY STREAK, MISSIONS & REFERRALS", icon = Icons.Default.MilitaryTech) {
                                     DetailItemRow(
                                         label = "Daily Login Streak",
                                         value = if (user.loginStreak > 0) "${user.loginStreak} Days Active Streak" else "No active streak",
@@ -2680,118 +3020,84 @@ fun UserDetailsInspectorDialog(
                                     )
                                 }
 
-                                // Itemized List of Referred Players (Requested by user)
+                                // Itemized List of Referred Players (Flat Hairline Rows, No Nested Boxes)
                                 DetailSectionCard(
                                     title = "REFERRED PLAYERS NETWORK (${referredPlayers.size} VERIFIED)",
                                     icon = Icons.Default.Group
                                 ) {
                                     if (referredPlayers.isEmpty()) {
-                                        Surface(
-                                            color = Color(0xFF10131A),
-                                            shape = RoundedCornerShape(8.dp),
-                                            border = BorderStroke(1.dp, Color(0xFF1E2330)),
-                                            modifier = Modifier.fillMaxWidth()
-                                        ) {
-                                            Column(modifier = Modifier.padding(12.dp)) {
-                                                Text(
-                                                    "No players have registered via referral code ${user.referralCode.ifBlank { "N/A" }} yet.",
-                                                    fontSize = 11.5.sp,
-                                                    color = VelorixTextSecondary
-                                                )
-                                                Spacer(modifier = Modifier.height(2.dp))
-                                                Text(
-                                                    "When players input this player's code during signup, their details, Free Fire UID, and match activity will be listed here automatically.",
-                                                    fontSize = 10.5.sp,
-                                                    color = Color(0xFF6B7280)
-                                                )
-                                            }
-                                        }
+                                        Text(
+                                            "No players have registered via referral code ${user.referralCode.ifBlank { "N/A" }} yet.",
+                                            fontSize = 11.5.sp,
+                                            color = VelorixTextSecondary,
+                                            modifier = Modifier.padding(vertical = 6.dp)
+                                        )
                                     } else {
-                                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Column {
                                             referredPlayers.forEachIndexed { idx, refUser ->
-                                                Surface(
-                                                    color = Color(0xFF10131A),
-                                                    shape = RoundedCornerShape(10.dp),
-                                                    border = BorderStroke(1.dp, Color(0xFF22283A)),
-                                                    modifier = Modifier.fillMaxWidth()
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(vertical = 8.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.SpaceBetween
                                                 ) {
-                                                    Row(
-                                                        modifier = Modifier
-                                                            .fillMaxWidth()
-                                                            .padding(10.dp),
-                                                        verticalAlignment = Alignment.CenterVertically,
-                                                        horizontalArrangement = Arrangement.SpaceBetween
-                                                    ) {
-                                                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                                                            Box(
-                                                                modifier = Modifier
-                                                                    .size(30.dp)
-                                                                    .background(VelorixAccent.copy(alpha = 0.2f), CircleShape)
-                                                                    .border(1.dp, VelorixAccent.copy(alpha = 0.5f), CircleShape),
-                                                                contentAlignment = Alignment.Center
-                                                            ) {
-                                                                Text(
-                                                                    text = "${idx + 1}",
-                                                                    color = VelorixAccent,
-                                                                    fontSize = 11.sp,
-                                                                    fontWeight = FontWeight.Bold
-                                                                )
-                                                            }
-                                                            Spacer(modifier = Modifier.width(10.dp))
-                                                            Column {
-                                                                Text(
-                                                                    text = refUser.bestDisplayName,
-                                                                    color = Color.White,
-                                                                    fontSize = 12.sp,
-                                                                    fontWeight = FontWeight.Bold
-                                                                )
-                                                                Text(
-                                                                    text = "IGN: ${refUser.effectiveIgn} • FF UID: ${refUser.gameId.ifBlank { "Unlinked" }}",
-                                                                    color = VelorixTextSecondary,
-                                                                    fontSize = 10.sp
-                                                                )
-                                                                if (refUser.createdAt > 0) {
-                                                                    val refDateStr = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(refUser.createdAt))
-                                                                    Text(
-                                                                        text = "Registered: $refDateStr",
-                                                                        color = Color(0xFF6B7280),
-                                                                        fontSize = 9.sp
-                                                                    )
-                                                                }
-                                                            }
-                                                        }
-
-                                                        Column(horizontalAlignment = Alignment.End) {
-                                                            Surface(
-                                                                shape = RoundedCornerShape(4.dp),
-                                                                color = Color(0xFF10B981).copy(alpha = 0.2f),
-                                                                border = BorderStroke(0.5.dp, Color(0xFF10B981))
-                                                            ) {
-                                                                Text(
-                                                                    text = "ACTIVE",
-                                                                    color = Color(0xFF34D399),
-                                                                    fontSize = 8.5.sp,
-                                                                    fontWeight = FontWeight.Bold,
-                                                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                                                                )
-                                                            }
-                                                            Spacer(modifier = Modifier.height(2.dp))
+                                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                                        Text(
+                                                            text = "#${idx + 1}",
+                                                            color = VelorixAccent,
+                                                            fontSize = 11.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            fontFamily = FontFamily.Monospace
+                                                        )
+                                                        Spacer(modifier = Modifier.width(10.dp))
+                                                        Column {
                                                             Text(
-                                                                text = "${refUser.wins}W • ${refUser.kills}K",
-                                                                color = Color.LightGray,
-                                                                fontSize = 9.sp,
-                                                                fontWeight = FontWeight.SemiBold
+                                                                text = refUser.bestDisplayName,
+                                                                color = Color.White,
+                                                                fontSize = 12.sp,
+                                                                fontWeight = FontWeight.Bold
                                                             )
+                                                            Text(
+                                                                text = "IGN: ${refUser.effectiveIgn} • FF UID: ${refUser.gameId.ifBlank { "Unlinked" }}",
+                                                                color = VelorixTextSecondary,
+                                                                fontSize = 10.sp
+                                                            )
+                                                            if (refUser.createdAt > 0) {
+                                                                val refDateStr = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(refUser.createdAt))
+                                                                Text(
+                                                                    text = "Registered: $refDateStr",
+                                                                    color = Color(0xFF6B7280),
+                                                                    fontSize = 9.sp
+                                                                )
+                                                            }
                                                         }
                                                     }
+
+                                                    Column(horizontalAlignment = Alignment.End) {
+                                                        Text(
+                                                            text = "ACTIVE",
+                                                            color = Color(0xFF34D399),
+                                                            fontSize = 9.sp,
+                                                            fontWeight = FontWeight.Bold
+                                                        )
+                                                        Spacer(modifier = Modifier.height(2.dp))
+                                                        Text(
+                                                            text = "${refUser.wins}W • ${refUser.kills}K",
+                                                            color = Color.LightGray,
+                                                            fontSize = 9.sp,
+                                                            fontWeight = FontWeight.SemiBold
+                                                        )
+                                                    }
                                                 }
+                                                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.06f))
                                             }
                                         }
                                     }
                                 }
 
-                                // Age, KYC & Cash Tournament Compliance (User Panel Feature)
-                                DetailSectionCard(title = "AGE, KYC & CASH MATCH ELIGIBILITY", icon = Icons.Default.VerifiedUser) {
+                                // Age, KYC & Cash Tournament Compliance
+                                DetailSectionCard(title = "05 · AGE, KYC & CASH MATCH ELIGIBILITY", icon = Icons.Default.VerifiedUser) {
                                     DetailItemRow(
                                         label = "Date of Birth",
                                         value = user.dateOfBirth.ifBlank { "Not submitted" }
@@ -2817,7 +3123,7 @@ fun UserDetailsInspectorDialog(
                                 }
 
                                 // Identity & Contact Details
-                                DetailSectionCard(title = "IDENTITY & DEVICE METADATA", icon = Icons.Default.Person) {
+                                DetailSectionCard(title = "06 · IDENTITY & DEVICE METADATA", icon = Icons.Default.Person) {
                                     DetailItemRow(label = "Display Name", value = user.bestDisplayName, isHighlight = true)
                                     DetailItemRow(label = "Free Fire IGN", value = user.effectiveIgn, isHighlight = user.effectiveIgn != "Player")
                                     DetailItemRow(label = "Email Address", value = user.email.ifBlank { if (user.bestEmailOrPhone.contains("@")) user.bestEmailOrPhone else "Not linked" })
@@ -2833,7 +3139,7 @@ fun UserDetailsInspectorDialog(
                                 }
 
                                 // Active Security & Restriction Badges Card
-                                DetailSectionCard(title = "SECURITY & RESTRICTION STATUS", icon = Icons.Default.Shield) {
+                                DetailSectionCard(title = "07 · SECURITY & RESTRICTION STATUS", icon = Icons.Default.Shield) {
                                     DetailItemRow(
                                         label = "Account Ban Status",
                                         value = if (isBannedState) "BANNED: ${banReasonInput}" else "CLEAN (Active)",
@@ -2860,30 +3166,277 @@ fun UserDetailsInspectorDialog(
                                         isHighlight = isMaintenanceBypassState
                                     )
                                 }
-
-                                // Account Timestamps Card
-                                DetailSectionCard(title = "ACCOUNT TIMESTAMPS & LOGINS", icon = Icons.Default.Schedule) {
-                                    DetailItemRow(label = "Account Created", value = createdStr, isHighlight = user.createdAt > 0)
-                                    DetailItemRow(label = "Last Active / Logged In", value = lastActiveStr, isHighlight = true)
-                                    DetailItemRow(label = "Account Role", value = user.role.uppercase())
-                                }
                             }
                         }
                         1 -> {
-                            // Admin Controls & Individual Toggles
+                            // Joined Tournaments, Timestamps, Entry Fees Paid & Per-Match Winnings (DB: joinedMatches)
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .verticalScroll(rememberScrollState()),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "PER-MATCH PARTICIPATION & WINNING LEDGER",
+                                            color = VelorixAccent,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            letterSpacing = 0.8.sp
+                                        )
+                                        Text(
+                                            text = "${unifiedMatchRecords.size} Matches Joined • First App Join: $firstAppJoinStr",
+                                            color = Color.LightGray,
+                                            fontSize = 11.sp
+                                        )
+                                    }
+                                    TextButton(
+                                        onClick = { showRecordMatchDialog = true },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                    ) {
+                                        Icon(Icons.Default.Add, contentDescription = null, tint = Color(0xFF34D399), modifier = Modifier.size(14.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Record Match / Win", color = Color(0xFF34D399), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+
+                                // Summary KPI Strip for Matches
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column {
+                                        Text("1ST MATCH JOIN", color = Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            text = if (user.firstMatchJoinedAt > 0L) SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault()).format(Date(user.firstMatchJoinedAt)) else "Never",
+                                            color = Color.White,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    Column {
+                                        Text("FEES PAID", color = Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            text = "₹${"%.0f".format(maxOf(user.totalEntryFeesPaid, unifiedMatchRecords.sumOf { it.entryFeePaid }))}",
+                                            color = Color(0xFF38BDF8),
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                    }
+                                    Column {
+                                        Text("MATCH KILLS", color = Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            text = "${maxOf(user.kills, unifiedMatchRecords.sumOf { it.kills })} Kills",
+                                            color = Color.White,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    Column(horizontalAlignment = Alignment.End) {
+                                        Text("TOTAL WON", color = Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            text = "₹${"%.0f".format(maxOf(user.totalEarnings, unifiedMatchRecords.sumOf { it.winningAmount }))}",
+                                            color = Color(0xFF34D399),
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                    }
+                                }
+                                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+
+                                if (unifiedMatchRecords.isEmpty()) {
+                                    Column(
+                                        modifier = Modifier.fillMaxWidth().padding(24.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.SportsEsports,
+                                            contentDescription = null,
+                                            tint = Color.Gray,
+                                            modifier = Modifier.size(36.dp)
+                                        )
+                                        Text(
+                                            "No Matches Joined Yet (hasJoinedAnyMatch = false)",
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 13.5.sp
+                                        )
+                                        Text(
+                                            "This player has not joined any match yet. Tap '+ Record Match / Win' above to log match participation or award winning balance.",
+                                            color = Color.Gray,
+                                            fontSize = 11.5.sp,
+                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                        )
+                                    }
+                                } else {
+                                    unifiedMatchRecords.forEach { record ->
+                                        val tourney = tournaments.find { it.id == record.tournamentId }
+                                        val isLive = record.status.equals("live", ignoreCase = true)
+                                        val isUpcoming = record.status.equals("upcoming", ignoreCase = true)
+                                        val joinTimeFormatted = if (record.joinedAt > 0L) dateFormat.format(Date(record.joinedAt)) else "Recorded in DB"
+
+                                        Column(
+                                            modifier = Modifier.fillMaxWidth().background(Color(0xFF0B0F17)).padding(vertical = 8.dp),
+                                            verticalArrangement = Arrangement.spacedBy(5.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(8.dp)
+                                                            .background(
+                                                                if (isLive) Color(0xFF34D399) else if (isUpcoming) VelorixAccent else Color.Gray,
+                                                                CircleShape
+                                                            )
+                                                    )
+                                                    Spacer(modifier = Modifier.width(6.dp))
+                                                    Text(
+                                                        text = record.tournamentTitle.ifBlank { "Match #${record.tournamentId}" },
+                                                        color = Color.White,
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 13.sp,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                }
+                                                Text(
+                                                    text = record.status.uppercase(),
+                                                    color = if (isLive) Color(0xFF34D399) else Color.LightGray,
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+
+                                            Text(
+                                                text = "Match ID: ${record.tournamentId}  •  ${record.format} / ${record.map}",
+                                                color = Color(0xFF94A3B8),
+                                                fontSize = 10.5.sp,
+                                                fontFamily = FontFamily.Monospace
+                                            )
+
+                                            Column(modifier = Modifier.padding(top = 2.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                                    Text("Exact Join Timestamp:", color = Color.Gray, fontSize = 10.5.sp)
+                                                    Text(joinTimeFormatted, color = Color.White, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold)
+                                                }
+                                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                                    Text("Entry Fee / Deposit Used:", color = Color.Gray, fontSize = 10.5.sp)
+                                                    Text(
+                                                        "₹${"%.0f".format(record.entryFeePaid)} (Dep: ₹${"%.0f".format(record.paidFromDeposit)} • Win: ₹${"%.0f".format(record.paidFromWinning)} • Bon: ₹${"%.0f".format(record.paidFromBonus)})",
+                                                        color = Color(0xFF38BDF8),
+                                                        fontSize = 10.5.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+                                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                                    Text("Kills & Rank in Match:", color = Color.Gray, fontSize = 10.5.sp)
+                                                    Text(
+                                                        "${record.kills} Kills  •  Rank: ${if (record.rank > 0) "#${record.rank}" else "Unranked"}",
+                                                        color = Color.White,
+                                                        fontSize = 10.5.sp,
+                                                        fontWeight = FontWeight.SemiBold
+                                                    )
+                                                }
+                                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                                    Text("Winning Money in Match:", color = Color.Gray, fontSize = 10.5.sp)
+                                                    Text(
+                                                        "₹${"%.2f".format(record.winningAmount)} (Withdrawable)",
+                                                        color = if (record.winningAmount > 0) Color(0xFF34D399) else Color.LightGray,
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+                                                val room = tourney?.roomDetails
+                                                if (room != null && room.roomId.isNotBlank()) {
+                                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                                        Text("Room ID & Pass:", color = Color.Gray, fontSize = 10.5.sp)
+                                                        Text(
+                                                            "${room.roomId} / ${room.roomPassword.ifBlank { "N/A" }}",
+                                                            color = Color(0xFF34D399),
+                                                            fontSize = 10.5.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            fontFamily = FontFamily.Monospace
+                                                        )
+                                                    }
+                                                }
+                                            }
+
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                TextButton(
+                                                    onClick = {
+                                                        recordTourneyId = record.tournamentId
+                                                        recordTourneyTitle = record.tournamentTitle
+                                                        recordEntryFeeInput = record.entryFeePaid.toInt().toString()
+                                                        recordKillsInput = record.kills.toString()
+                                                        recordRankInput = (if (record.rank > 0) record.rank else 1).toString()
+                                                        recordWinningInput = record.winningAmount.toInt().toString()
+                                                        showRecordMatchDialog = true
+                                                    },
+                                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                                                ) {
+                                                    Icon(Icons.Default.EmojiEvents, contentDescription = null, tint = Color(0xFF34D399), modifier = Modifier.size(13.dp))
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Text("Update Winning / Kills", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF34D399))
+                                                }
+
+                                                if (onNavigateToTournament != null && tourney != null) {
+                                                    TextButton(
+                                                        onClick = {
+                                                            onDismiss()
+                                                            onNavigateToTournament(tourney.id)
+                                                        },
+                                                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                                                    ) {
+                                                        Icon(Icons.Default.AccountTree, contentDescription = null, tint = VelorixAccent, modifier = Modifier.size(13.dp))
+                                                        Spacer(modifier = Modifier.width(4.dp))
+                                                        Text("Inspect Bracket", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = VelorixAccent)
+                                                    }
+                                                }
+                                            }
+                                            HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        2 -> {
+                            // Admin Controls, 3-Bucket Wallet Addition & Individual Toggles
                             Column(
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .verticalScroll(rememberScrollState()),
                                 verticalArrangement = Arrangement.spacedBy(14.dp)
                             ) {
-                                Text(
-                                    text = "INDIVIDUAL SECURITY & ACCESS TOGGLES",
-                                    color = VelorixAccent,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    letterSpacing = 1.sp
-                                )
+                                // 1. 3-Section Wallet Transfer Control (1. Deposited Money, 2. Winning Money, 3. Referral Bonus)
+                                DetailSectionCard(title = "SEND MONEY — 3 WALLET SECTIONS (DEPOSITED / WINNING / REFERRAL BONUS)", icon = Icons.Default.Payments) {
+                                    ThreeSectionWalletControlPanel(
+                                        user = user,
+                                        onSendBucketFunds = { delta, bucket, reason ->
+                                            triggerBucketAdjustment(
+                                                delta = delta,
+                                                bucket = bucket,
+                                                reason = reason
+                                            )
+                                        }
+                                    )
+                                }
 
                                 // Section: Granular Restriction Toggles
                                 DetailSectionCard(title = "ACCESS & COMPLIANCE TOGGLES", icon = Icons.Default.Tune) {
@@ -2923,7 +3476,7 @@ fun UserDetailsInspectorDialog(
                                         )
                                     }
 
-                                    HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = Color(0xFF232936))
+                                    HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
 
                                     // 2. Temporary Suspension Toggle
                                     Row(
@@ -2954,22 +3507,25 @@ fun UserDetailsInspectorDialog(
                                         )
                                         Spacer(modifier = Modifier.height(6.dp))
                                         Text("Duration:", color = Color.LightGray, fontSize = 11.sp)
-                                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                             listOf(24 to "24h", 72 to "3d", 168 to "7d", 720 to "30d").forEach { (hours, label) ->
                                                 val isSelected = selectedSuspensionHours == hours
-                                                Button(
+                                                TextButton(
                                                     onClick = { selectedSuspensionHours = hours },
-                                                    modifier = Modifier.weight(1f).height(30.dp),
-                                                    colors = ButtonDefaults.buttonColors(containerColor = if (isSelected) Color(0xFFFF9800) else Color(0xFF232936)),
-                                                    contentPadding = PaddingValues(0.dp)
+                                                    modifier = Modifier.weight(1f)
                                                 ) {
-                                                    Text(label, color = if (isSelected) Color.Black else Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                                    Text(
+                                                        label,
+                                                        color = if (isSelected) Color(0xFFFF9800) else Color.Gray,
+                                                        fontSize = 11.sp,
+                                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                                    )
                                                 }
                                             }
                                         }
                                     }
 
-                                    HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = Color(0xFF232936))
+                                    HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
 
                                     // 3. VPN / Proxy Block Toggle
                                     Row(
@@ -2988,7 +3544,7 @@ fun UserDetailsInspectorDialog(
                                         )
                                     }
 
-                                    HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = Color(0xFF232936))
+                                    HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
 
                                     // 4. Force Update App Toggle
                                     Row(
@@ -3007,7 +3563,7 @@ fun UserDetailsInspectorDialog(
                                         )
                                     }
 
-                                    HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = Color(0xFF232936))
+                                    HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
 
                                     // 5. Maintenance Bypass Toggle
                                     Row(
@@ -3117,75 +3673,19 @@ fun UserDetailsInspectorDialog(
                                     }
                                 }
 
-                                // 3. Adjust Wallet Balance
-                                DetailSectionCard(title = "WALLET BALANCE CONTROL", icon = Icons.Default.Payments) {
-                                    Text("Current Balance: ₹${user.funds}", color = Color.LightGray, fontSize = 12.sp)
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    
-                                    // Quick +/- buttons
-                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        listOf(50.0, 100.0, 500.0, -100.0).forEach { delta ->
-                                            Button(
-                                                onClick = {
-                                                    onAddFunds(user, delta)
-                                                    Toast.makeText(context, "Balance adjusted by ₹$delta", Toast.LENGTH_SHORT).show()
-                                                },
-                                                modifier = Modifier.weight(1f).height(32.dp),
-                                                colors = ButtonDefaults.buttonColors(containerColor = if (delta > 0) Color(0xFF1B5E20) else Color(0xFFB71C1C)),
-                                                contentPadding = PaddingValues(0.dp)
-                                            ) {
-                                                Text(if (delta > 0) "+₹${delta.toInt()}" else "-₹${(-delta).toInt()}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                                            }
-                                        }
-                                    }
-
-                                    Spacer(modifier = Modifier.height(10.dp))
-                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                        OutlinedTextField(
-                                            value = editBalanceInput,
-                                            onValueChange = { editBalanceInput = it },
-                                            label = { Text("Set Exact Balance (₹)", color = Color.Gray, fontSize = 11.sp) },
-                                            singleLine = true,
-                                            modifier = Modifier.weight(1f),
-                                            colors = OutlinedTextFieldDefaults.colors(
-                                                focusedTextColor = Color.White,
-                                                unfocusedTextColor = Color.White,
-                                                focusedBorderColor = VelorixAccent,
-                                                unfocusedBorderColor = CardVerifyBorder
-                                            )
-                                        )
-                                        Button(
-                                            onClick = {
-                                                val newBal = editBalanceInput.toDoubleOrNull()
-                                                if (newBal != null) {
-                                                    val diff = newBal - user.funds
-                                                    onAddFunds(user, diff)
-                                                    Toast.makeText(context, "Balance set to ₹$newBal", Toast.LENGTH_SHORT).show()
-                                                }
-                                            },
-                                            colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent),
-                                            modifier = Modifier.height(50.dp)
-                                        ) {
-                                            Text("Set", color = Color.Black, fontWeight = FontWeight.Bold)
-                                        }
-                                    }
-                                }
-
-                                // 4. Role & Permissions
+                                // 4. Role & Permissions (Flat Underline Mode Selector)
                                 DetailSectionCard(title = "ASSIGN USER ROLE", icon = Icons.Default.Security) {
                                     Text("Current Role: ${user.role}", color = Color.LightGray, fontSize = 12.sp)
                                     Spacer(modifier = Modifier.height(8.dp))
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
                                         listOf("player", "tournament_admin", "support_admin", "super_admin").forEach { roleOption ->
                                             val isSelected = editRole.equals(roleOption, ignoreCase = true)
-                                            Box(
+                                            Column(
                                                 modifier = Modifier
                                                     .weight(1f)
-                                                    .background(if (isSelected) VelorixAccent else Color(0xFF232936), RoundedCornerShape(8.dp))
-                                                    .border(1.dp, if (isSelected) VelorixAccent else CardVerifyBorder, RoundedCornerShape(8.dp))
                                                     .clickable {
                                                         editRole = roleOption
                                                         val updated = buildUpdatedUser()
@@ -3193,13 +3693,20 @@ fun UserDetailsInspectorDialog(
                                                         Toast.makeText(context, "Role updated to $roleOption", Toast.LENGTH_SHORT).show()
                                                     }
                                                     .padding(vertical = 8.dp),
-                                                contentAlignment = Alignment.Center
+                                                horizontalAlignment = Alignment.CenterHorizontally
                                             ) {
                                                 Text(
                                                     text = roleOption.replace("_", " ").take(10).uppercase(),
-                                                    color = if (isSelected) Color.Black else Color.LightGray,
-                                                    fontSize = 9.sp,
+                                                    color = if (isSelected) VelorixAccent else Color.LightGray,
+                                                    fontSize = 9.5.sp,
                                                     fontWeight = FontWeight.Bold
+                                                )
+                                                Spacer(modifier = Modifier.height(4.dp))
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth(0.7f)
+                                                        .height(1.5.dp)
+                                                        .background(if (isSelected) VelorixAccent else Color.Transparent)
                                                 )
                                             }
                                         }
@@ -3222,9 +3729,7 @@ fun UserDetailsInspectorDialog(
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .background(if (isLockedOut) Color(0x33F44336) else Color(0x224CAF50), RoundedCornerShape(8.dp))
-                                            .border(1.dp, if (isLockedOut) Color(0xFFF44336) else Color(0xFF4CAF50), RoundedCornerShape(8.dp))
-                                            .padding(10.dp),
+                                            .padding(vertical = 6.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Icon(
@@ -3317,59 +3822,77 @@ fun UserDetailsInspectorDialog(
                                     }
                                 }
 
-                                // 6. Delete Account (Danger Zone)
+                                // 6. Delete Account (Danger Zone — Flat Hairline Action, No OutlinedButton Box)
                                 DetailSectionCard(title = "DANGER ZONE", icon = Icons.Default.Warning) {
                                     Text("Permanently erase this account and all associated profile nodes from Firebase database.", color = Color.LightGray, fontSize = 11.sp)
                                     Spacer(modifier = Modifier.height(8.dp))
-                                    Button(
-                                        onClick = { showDeleteConfirmDialog = true },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.25f)),
-                                        border = androidx.compose.foundation.BorderStroke(1.dp, Color.Red),
-                                        modifier = Modifier.fillMaxWidth().height(38.dp)
+                                    HorizontalDivider(thickness = 0.5.dp, color = Color.Red.copy(alpha = 0.25f))
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { showDeleteConfirmDialog = true }
+                                            .padding(vertical = 10.dp),
+                                        horizontalArrangement = Arrangement.Center,
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Icon(Icons.Default.Delete, contentDescription = null, tint = Color.Red, modifier = Modifier.size(16.dp))
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Text("Permanently Delete User", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                     }
+                                    HorizontalDivider(thickness = 0.5.dp, color = Color.Red.copy(alpha = 0.25f))
                                 }
                             }
                         }
-                        2 -> {
-                            // Raw Node Data (Every Minor Detail)
+                        3 -> {
+                            // Structured Database Tree & Raw Attributes
                             Column(
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .verticalScroll(rememberScrollState()),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
                             ) {
                                 Text(
-                                    text = "RAW DATABASE ATTRIBUTES",
+                                    text = "STRUCTURED DATABASE RECORD & RAW ATTRIBUTES",
                                     color = VelorixAccent,
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     letterSpacing = 1.sp
                                 )
                                 Text(
-                                    text = "Every minor attribute found in the database for this record:",
+                                    text = "Live Firebase structure at /users/${user.id}, /player_database_records/${user.id} & /wallet_accounts/${user.id}:",
                                     color = Color.LightGray,
-                                    fontSize = 12.sp
+                                    fontSize = 11.5.sp
                                 )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
 
-                                val combinedRaw = remember(user) {
-                                    val map = mutableMapOf<String, String>()
-                                    map["id"] = user.id
-                                    map["username"] = user.username
-                                    map["email"] = user.email
-                                    map["gameId"] = user.gameId
-                                    map["role"] = user.role
-                                    map["funds"] = user.funds.toString()
-                                    map["wins"] = user.wins.toString()
-                                    map["kills"] = user.kills.toString()
-                                    map["activityPoints"] = user.activityPoints.toString()
-                                    map["totalEarnings"] = user.totalEarnings.toString()
-                                    map["isBanned"] = user.isBanned.toString()
-                                    map["createdAt"] = user.createdAt.toString()
-                                    map["lastActive"] = user.lastActive.toString()
+                                val combinedRaw = remember(user, unifiedMatchRecords) {
+                                    val map = linkedMapOf<String, String>()
+                                    map["accountLifecycle.firstAppJoinAt"] = "${user.effectiveFirstAppJoinAt} ($firstAppJoinStr)"
+                                    map["accountLifecycle.firstMatchJoinedAt"] = "${user.firstMatchJoinedAt} ($firstMatchJoinStr)"
+                                    map["accountLifecycle.lastMatchJoinedAt"] = "${user.lastMatchJoinedAt} ($lastMatchJoinStr)"
+                                    map["accountLifecycle.hasJoinedAnyMatch"] = (unifiedMatchRecords.isNotEmpty() || user.totalMatchesJoined > 0).toString()
+                                    map["combatAndMatchSummary.totalMatchesJoined"] = maxOf(user.totalMatchesJoined, unifiedMatchRecords.size).toString()
+                                    map["combatAndMatchSummary.joinedMatchIds"] = unifiedMatchRecords.map { it.tournamentId }.ifEmpty { user.joinedMatchIds }.joinToString(", ").ifBlank { "[]" }
+                                    map["combatAndMatchSummary.totalKills"] = user.kills.toString()
+                                    map["combatAndMatchSummary.totalWins"] = user.wins.toString()
+                                    map["combatAndMatchSummary.supportCasesCount"] = user.supportCasesCount.toString()
+                                    map["walletAndFinanceSummary.winningMoney.balance"] = "₹${user.winningFunds} (withdrawable=true)"
+                                    map["walletAndFinanceSummary.depositedMoney.balance"] = "₹${user.depositFunds} (withdrawable=false)"
+                                    map["walletAndFinanceSummary.bonusMoney.balance"] = "₹${user.bonusFunds} (withdrawable=false)"
+                                    map["walletAndFinanceSummary.withdrawableBalance"] = "₹${user.withdrawableBalance}"
+                                    map["walletAndFinanceSummary.nonWithdrawableBalance"] = "₹${user.nonWithdrawableBalance}"
+                                    map["walletAndFinanceSummary.canSendWithdrawalRequest"] = user.canRequestWithdrawal.toString()
+                                    map["walletAndFinanceSummary.totalLifetimeDeposited"] = "₹${user.totalDeposited}"
+                                    map["walletAndFinanceSummary.totalEntryFeesPaid"] = "₹${user.totalEntryFeesPaid}"
+                                    map["walletAndFinanceSummary.totalLifetimeWinningEarned"] = "₹${user.totalEarnings}"
+                                    map["walletAndFinanceSummary.totalLifetimeWithdrawn"] = "₹${user.totalWithdrawn}"
+                                    unifiedMatchRecords.forEach { m ->
+                                        map["joinedMatches.${m.tournamentId}.title"] = m.tournamentTitle
+                                        map["joinedMatches.${m.tournamentId}.joinedAt"] = "${m.joinedAt}"
+                                        map["joinedMatches.${m.tournamentId}.entryFeePaid"] = "₹${m.entryFeePaid} (Dep: ₹${m.paidFromDeposit}, Win: ₹${m.paidFromWinning})"
+                                        map["joinedMatches.${m.tournamentId}.killsAndWinning"] = "${m.kills} Kills • Rank #${m.rank} • Won ₹${m.winningAmount}"
+                                    }
                                     user.rawAttributes.forEach { (k, v) ->
                                         map[k] = v
                                     }
@@ -3380,28 +3903,28 @@ fun UserDetailsInspectorDialog(
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .background(Color(0xFF1E2430), RoundedCornerShape(8.dp))
-                                            .border(0.5.dp, CardVerifyBorder, RoundedCornerShape(8.dp))
-                                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                                            .background(Color(0xFF0B0F17))
+                                            .padding(vertical = 8.dp),
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Text(
                                             text = k,
                                             color = VelorixAccent,
-                                            fontSize = 11.sp,
+                                            fontSize = 10.5.sp,
                                             fontWeight = FontWeight.Bold,
                                             fontFamily = FontFamily.Monospace,
-                                            modifier = Modifier.weight(0.4f)
+                                            modifier = Modifier.weight(0.46f)
                                         )
                                         Text(
                                             text = v,
                                             color = Color.White,
-                                            fontSize = 11.sp,
+                                            fontSize = 10.5.sp,
                                             fontFamily = FontFamily.Monospace,
-                                            modifier = Modifier.weight(0.6f)
+                                            modifier = Modifier.weight(0.54f)
                                         )
                                     }
+                                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.06f))
                                 }
                             }
                         }
@@ -3420,87 +3943,60 @@ fun DetailSectionCard(
     content: @Composable ColumnScope.() -> Unit
 ) {
     val sectionAccentColor = when {
-        title.contains("ESPORTS", ignoreCase = true) || title.contains("GAMING", ignoreCase = true) -> Color(0xFF00E5FF)
+        title.contains("ESPORTS", ignoreCase = true) || title.contains("COMBAT", ignoreCase = true) -> Color(0xFF00E5FF)
         title.contains("WALLET", ignoreCase = true) || title.contains("FINANCIAL", ignoreCase = true) -> Color(0xFF00E676)
         title.contains("STREAK", ignoreCase = true) || title.contains("FIRE", ignoreCase = true) -> Color(0xFFFF6D00)
         title.contains("KYC", ignoreCase = true) || title.contains("ELIGIBILITY", ignoreCase = true) -> Color(0xFFB388FF)
         title.contains("SECURITY", ignoreCase = true) || title.contains("RESTRICTION", ignoreCase = true) -> Color(0xFFFF1744)
-        title.contains("TIMESTAMPS", ignoreCase = true) -> Color(0xFFFFD54F)
+        title.contains("LIFECYCLE", ignoreCase = true) || title.contains("TIMESTAMPS", ignoreCase = true) -> Color(0xFFFFD54F)
         else -> VelorixAccent
     }
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color(0xFF161B24), RoundedCornerShape(14.dp))
-            .border(
-                1.dp,
-                Brush.linearGradient(
-                    listOf(
-                        sectionAccentColor.copy(alpha = 0.45f),
-                        Color(0xFF272F3D).copy(alpha = 0.2f)
-                    )
-                ),
-                RoundedCornerShape(14.dp)
-            )
-            .padding(14.dp)
+            .background(Color(0xFF0B0F17))
+            .padding(vertical = 8.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                modifier = Modifier
-                    .size(28.dp)
-                    .background(sectionAccentColor.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
-                    .border(0.8.dp, sectionAccentColor.copy(alpha = 0.5f), RoundedCornerShape(8.dp)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(icon, contentDescription = null, tint = sectionAccentColor, modifier = Modifier.size(16.dp))
-            }
-            Spacer(modifier = Modifier.width(10.dp))
+            Icon(icon, contentDescription = null, tint = sectionAccentColor, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(8.dp))
             Text(
                 text = title,
                 color = Color.White,
-                fontSize = 12.sp,
+                fontSize = 11.5.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 0.5.sp
             )
         }
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(8.dp))
+        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.12f))
+        Spacer(modifier = Modifier.height(6.dp))
         content()
     }
 }
 
 @Composable
 fun DetailItemRow(label: String, value: String, isHighlight: Boolean = false) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 5.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(text = label, color = Color(0xFFA1A1AA), fontSize = 12.sp)
-        if (isHighlight) {
-            Box(
-                modifier = Modifier
-                    .background(VelorixAccent.copy(alpha = 0.12f), RoundedCornerShape(6.dp))
-                    .border(0.5.dp, VelorixAccent.copy(alpha = 0.4f), RoundedCornerShape(6.dp))
-                    .padding(horizontal = 8.dp, vertical = 2.dp)
-            ) {
-                Text(
-                    text = value,
-                    color = VelorixAccent,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-        } else {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 7.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(text = label, color = Color(0xFFA1A1AA), fontSize = 12.sp, modifier = Modifier.weight(0.45f))
             Text(
                 text = value,
-                color = Color(0xFFEEEEEE),
+                color = if (isHighlight) VelorixAccent else Color(0xFFEEEEEE),
                 fontSize = 12.sp,
-                fontWeight = FontWeight.Medium
+                fontWeight = if (isHighlight) FontWeight.Bold else FontWeight.Medium,
+                textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                modifier = Modifier.weight(0.55f)
             )
         }
+        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.05f))
     }
 }
 
@@ -3510,7 +4006,9 @@ fun PayoutsManagementScreenContent(
     onApprovePayout: (com.example.domain.model.PayoutRequest) -> Unit = {},
     onRejectPayout: (com.example.domain.model.PayoutRequest, String) -> Unit = { _, _ -> }
 ) {
-    val payouts = (uiState as? DashboardState.Success)?.payoutRequests ?: emptyList()
+    val successState = uiState as? DashboardState.Success
+    val payouts = successState?.payoutRequests ?: emptyList()
+    val usersList = successState?.users ?: emptyList()
     var selectedFilter by remember { mutableStateOf("pending") }
     var showRejectDialog by remember { mutableStateOf<com.example.domain.model.PayoutRequest?>(null) }
     var rejectionReasonInput by remember { mutableStateOf("Invalid UPI Details / Account Holder Name Mismatch") }
@@ -3531,7 +4029,7 @@ fun PayoutsManagementScreenContent(
             text = {
                 Column {
                     Text("Reject ₹${req.vtAmount} cashout for ${req.username} (${req.email})?", color = Color.LightGray, fontSize = 12.sp)
-                    Text("The ₹${req.vtAmount} VT balance will be refunded automatically to their wallet.", color = VelorixAccent, fontSize = 11.sp)
+                    Text("The ₹${req.vtAmount} amount will be refunded directly back to their Withdrawable Winning Balance.", color = VelorixAccent, fontSize = 11.sp)
                     Spacer(modifier = Modifier.height(12.dp))
                     OutlinedTextField(
                         value = rejectionReasonInput,
@@ -3555,7 +4053,7 @@ fun PayoutsManagementScreenContent(
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
                 ) {
-                    Text("Confirm Reject & Refund", color = Color.White, fontWeight = FontWeight.Bold)
+                    Text("Confirm Reject & Refund Winning", color = Color.White, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -3563,11 +4061,11 @@ fun PayoutsManagementScreenContent(
                     Text("Cancel", color = Color.Gray)
                 }
             },
-            containerColor = CardLiveBg
+            containerColor = Color.Black
         )
     }
 
-    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+    Column(modifier = Modifier.fillMaxSize().background(Color(0xFF0B0F17)).padding(horizontal = 16.dp)) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -3577,7 +4075,7 @@ fun PayoutsManagementScreenContent(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "Payout Approvals",
+                    text = "Winning Payout Approvals",
                     color = VelorixTextPrimary,
                     fontWeight = FontWeight.Bold,
                     fontSize = 18.sp,
@@ -3585,7 +4083,7 @@ fun PayoutsManagementScreenContent(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = "Manage cashouts at /payout_requests",
+                    text = "Only Winning Money is withdrawable • Deposited Money is locked",
                     color = Color.Gray,
                     fontSize = 11.sp,
                     maxLines = 1,
@@ -3593,44 +4091,50 @@ fun PayoutsManagementScreenContent(
                 )
             }
             Spacer(modifier = Modifier.width(8.dp))
-            Box(
-                modifier = Modifier
-                    .background(VelorixAccent.copy(alpha = 0.18f), RoundedCornerShape(8.dp))
-                    .border(1.dp, VelorixAccent.copy(alpha = 0.35f), RoundedCornerShape(8.dp))
-                    .padding(horizontal = 10.dp, vertical = 6.dp)
-            ) {
-                val pendingSum = payouts.filter { it.status.equals("pending", ignoreCase = true) }.sumOf { it.vtAmount }
-                Text(
-                    text = "₹${pendingSum.toInt()} Pending",
-                    color = VelorixAccent,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1
-                )
-            }
+            val pendingSum = payouts.filter { it.status.equals("pending", ignoreCase = true) }.sumOf { it.vtAmount }
+            Text(
+                text = "₹${pendingSum.toInt()} Pending",
+                color = VelorixAccent,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1
+            )
         }
 
         Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(18.dp),
             modifier = Modifier
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState())
-                .padding(bottom = 12.dp)
         ) {
             listOf("pending", "approved", "rejected", "all").forEach { f ->
                 val isSel = selectedFilter == f
-                Box(
+                Column(
                     modifier = Modifier
-                        .background(if (isSel) VelorixAccent else CardLiveBg, RoundedCornerShape(8.dp))
                         .clickable { selectedFilter = f }
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                        .padding(vertical = 6.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(f.uppercase(), color = if (isSel) Color.Black else Color.LightGray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        f.uppercase(),
+                        color = if (isSel) VelorixAccent else Color(0xFF71717A),
+                        fontSize = 11.5.sp,
+                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Box(
+                        modifier = Modifier
+                            .width(24.dp)
+                            .height(1.5.dp)
+                            .background(if (isSel) VelorixAccent else Color.Transparent)
+                    )
                 }
             }
         }
+        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+        Spacer(modifier = Modifier.height(10.dp))
 
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(bottom = 90.dp)) {
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(bottom = 90.dp)) {
             if (filteredPayouts.isEmpty()) {
                 item {
                     Text("No cashout requests found.", color = VelorixTextSecondary, modifier = Modifier.padding(16.dp))
@@ -3638,18 +4142,21 @@ fun PayoutsManagementScreenContent(
             }
             items(filteredPayouts.size) { i ->
                 val req = filteredPayouts[i]
+                val playerProfile = usersList.find {
+                    (req.userId.isNotBlank() && it.id == req.userId) ||
+                    (req.email.isNotBlank() && it.email.equals(req.email, ignoreCase = true))
+                }
+                val winningBal = playerProfile?.winningFunds ?: req.vtAmount
+                val depositBal = playerProfile?.depositFunds ?: 0.0
+                val isWinningEligible = winningBal >= req.vtAmount || !req.status.equals("pending", ignoreCase = true)
                 val statusColor = when (req.status.lowercase()) {
-                    "approved" -> Color(0xFF2E7D32)
-                    "rejected" -> Color.Red
-                    else -> VelorixAccent
+                    "approved" -> Color(0xFF34D399)
+                    "rejected" -> Color(0xFFEF5350)
+                    else -> VelorixAccentLight
                 }
 
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(CardLiveBg, RoundedCornerShape(16.dp))
-                        .border(1.dp, CardVerifyBorder, RoundedCornerShape(16.dp))
-                        .padding(16.dp)
+                GlassCard(
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -3660,15 +4167,15 @@ fun PayoutsManagementScreenContent(
                             Text(req.username, fontWeight = FontWeight.Bold, color = VelorixTextPrimary, fontSize = 16.sp)
                             Text(req.email, color = VelorixTextSecondary, fontSize = 11.sp)
                         }
-                        Box(
-                            modifier = Modifier
-                                .background(statusColor.copy(alpha = 0.2f), RoundedCornerShape(6.dp))
-                                .padding(horizontal = 10.dp, vertical = 4.dp)
-                        ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(modifier = Modifier.size(6.dp).background(statusColor, CircleShape))
+                            Spacer(modifier = Modifier.width(5.dp))
                             Text(req.status.uppercase(), color = statusColor, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                     }
 
+                    Spacer(modifier = Modifier.height(10.dp))
+                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
                     Spacer(modifier = Modifier.height(10.dp))
 
                     Row(
@@ -3679,30 +4186,76 @@ fun PayoutsManagementScreenContent(
                             Text("Payment Method", color = Color.Gray, fontSize = 10.sp)
                             Text("${req.paymentMethod}: ${req.paymentId}", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium)
                         }
-                        Column {
-                            Text("Cashout Amount", color = Color.Gray, fontSize = 10.sp)
-                            Text("₹${req.vtAmount}", color = VelorixAccent, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("Cashout Request", color = Color.Gray, fontSize = 10.sp)
+                            Text("₹${req.vtAmount}", color = VelorixAccentLight, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                         }
                     }
 
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text("Winning Money (Withdrawable)", color = Color(0xFF34D399), fontSize = 9.5.sp, fontWeight = FontWeight.Bold)
+                            Text("₹${"%.2f".format(winningBal)}", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("Deposited Money (Non-Withdrawable)", color = Color(0xFF38BDF8), fontSize = 9.5.sp, fontWeight = FontWeight.Bold)
+                            Text("₹${"%.2f".format(depositBal)} (Locked)", color = Color.LightGray, fontSize = 12.sp, fontWeight = FontWeight.Medium, fontFamily = FontFamily.Monospace)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = if (isWinningEligible) {
+                            "ELIGIBLE: Covered by player's Winning Balance (₹${"%.0f".format(winningBal)})"
+                        } else {
+                            "BLOCKED: Exceeds Winning Balance (₹${"%.0f".format(winningBal)}). Deposited Money (₹${"%.0f".format(depositBal)}) cannot be withdrawn."
+                        },
+                        color = if (isWinningEligible) Color(0xFF34D399) else Color(0xFFEF5350),
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+
                     if (req.status.equals("pending", ignoreCase = true)) {
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(
-                                onClick = {
-                                    onApprovePayout(req)
-                                },
-                                modifier = Modifier.weight(1f).height(34.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent)
+                        Spacer(modifier = Modifier.height(10.dp))
+                        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .background(Color(0xFF34D399).copy(alpha = 0.14f), RoundedCornerShape(10.dp))
+                                    .border(0.75.dp, Color(0xFF34D399).copy(alpha = 0.48f), RoundedCornerShape(10.dp))
+                                    .clickable { onApprovePayout(req) }
+                                    .padding(vertical = 8.dp, horizontal = 8.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("APPROVE PAYOUT", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF34D399), modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Approve Payout", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF34D399), maxLines = 1, softWrap = false)
                             }
-                            Button(
-                                onClick = { showRejectDialog = req },
-                                modifier = Modifier.weight(1f).height(34.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
+                            Row(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .background(Color(0xFFF87171).copy(alpha = 0.14f), RoundedCornerShape(10.dp))
+                                    .border(0.75.dp, Color(0xFFF87171).copy(alpha = 0.48f), RoundedCornerShape(10.dp))
+                                    .clickable { showRejectDialog = req }
+                                    .padding(vertical = 8.dp, horizontal = 8.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("REJECT & REFUND", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                Icon(Icons.Default.Cancel, contentDescription = null, tint = Color(0xFFF87171), modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Reject & Refund", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFFF87171), maxLines = 1, softWrap = false)
                             }
                         }
                     }
@@ -3714,4 +4267,749 @@ fun PayoutsManagementScreenContent(
 
 // StaffManagementScreenContent is implemented with full editing & inspection dialog parity in StaffManagementScreen.kt
 
+@Composable
+fun ThreeSectionWalletControlPanel(
+    user: UserProfile,
+    onSendBucketFunds: (Double, com.example.domain.model.WalletBucket, String) -> Unit
+) {
+    val context = LocalContext.current
+    var depositAmountInput by remember { mutableStateOf("") }
+    var winningAmountInput by remember { mutableStateOf("") }
+    var referralBonusAmountInput by remember { mutableStateOf("") }
+    var auditReasonInput by remember { mutableStateOf("Admin wallet credit") }
 
+    val effectiveReferralBonus = maxOf(user.bonusFunds, user.referralBonusEarned)
+    val totalWallet = user.depositFunds + user.winningFunds + user.bonusFunds
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        // Live Summary Bar of the 3 Sections
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("1. Deposited", color = Color(0xFF38BDF8), fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+                Text(
+                    "₹${"%.0f".format(user.depositFunds)}",
+                    color = Color.White,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 1,
+                    softWrap = false
+                )
+                Text("Entry Only", color = Color(0xFF71717A), fontSize = 9.sp, maxLines = 1, softWrap = false)
+            }
+            Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("2. Winning", color = Color(0xFF34D399), fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+                Text(
+                    "₹${"%.0f".format(user.winningFunds)}",
+                    color = Color(0xFF34D399),
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 1,
+                    softWrap = false
+                )
+                Text("Withdrawable", color = Color(0xFF34D399).copy(alpha = 0.8f), fontSize = 9.sp, maxLines = 1, softWrap = false)
+            }
+            Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.End) {
+                Text("3. Bonus", color = Color(0xFFFBBF24), fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+                Text(
+                    "₹${"%.0f".format(effectiveReferralBonus)}",
+                    color = Color(0xFFFBBF24),
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 1,
+                    softWrap = false
+                )
+                Text("Referral", color = Color(0xFF71717A), fontSize = 9.sp, maxLines = 1, softWrap = false)
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Total Wallet Balance", color = Color(0xFFA1A1AA), fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            Text(
+                "₹${"%.0f".format(totalWallet)}",
+                color = Color.White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                maxLines = 1,
+                softWrap = false
+            )
+        }
+
+        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.12f))
+
+        // ==================== SECTION 1: DEPOSITED MONEY ====================
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "1. Deposited Money",
+                    color = Color(0xFF38BDF8),
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Entry Only",
+                    color = Color(0xFF71717A),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    softWrap = false
+                )
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                listOf(50.0, 100.0, 500.0, -50.0, -100.0).forEach { delta ->
+                    val chipColor = if (delta > 0) Color(0xFF38BDF8) else Color(0xFFEF5350)
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(chipColor.copy(alpha = 0.12f))
+                            .border(0.5.dp, chipColor.copy(alpha = 0.45f), RoundedCornerShape(8.dp))
+                            .clickable {
+                                onSendBucketFunds(
+                                    delta,
+                                    com.example.domain.model.WalletBucket.DEPOSIT,
+                                    auditReasonInput.ifBlank { "Deposited Money quick adjustment" }
+                                )
+                                Toast.makeText(context, "${if (delta > 0) "+" else ""}₹${delta.toInt()} sent to Deposited Money", Toast.LENGTH_SHORT).show()
+                            }
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = if (delta > 0) "+₹${delta.toInt()}" else "-₹${(-delta).toInt()}",
+                            color = chipColor,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedTextField(
+                    value = depositAmountInput,
+                    onValueChange = { depositAmountInput = it },
+                    label = { Text("Deposited ₹ (e.g. 100)", color = Color.Gray, fontSize = 10.5.sp, maxLines = 1) },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = Color(0xFF38BDF8),
+                        unfocusedBorderColor = CardVerifyBorder
+                    )
+                )
+                Button(
+                    onClick = {
+                        val delta = depositAmountInput.toDoubleOrNull()
+                        if (delta != null && delta != 0.0) {
+                            onSendBucketFunds(
+                                delta,
+                                com.example.domain.model.WalletBucket.DEPOSIT,
+                                auditReasonInput.ifBlank { "Admin Deposited Money transfer" }
+                            )
+                            Toast.makeText(context, "₹${delta.toInt()} sent to ${user.bestDisplayName}'s Deposited Money!", Toast.LENGTH_SHORT).show()
+                            depositAmountInput = ""
+                        } else {
+                            Toast.makeText(context, "Enter an amount for Deposited Money", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF38BDF8)),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+                    modifier = Modifier.height(48.dp)
+                ) {
+                    Text("Send", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp, maxLines = 1, softWrap = false)
+                }
+            }
+        }
+
+        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.12f))
+
+        // ==================== SECTION 2: WINNING MONEY ====================
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "2. Winning Money",
+                    color = Color(0xFF34D399),
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Withdrawable",
+                    color = Color(0xFF34D399),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    softWrap = false
+                )
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                listOf(50.0, 100.0, 500.0, -50.0, -100.0).forEach { delta ->
+                    val chipColor = if (delta > 0) Color(0xFF34D399) else Color(0xFFEF5350)
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(chipColor.copy(alpha = 0.12f))
+                            .border(0.5.dp, chipColor.copy(alpha = 0.45f), RoundedCornerShape(8.dp))
+                            .clickable {
+                                onSendBucketFunds(
+                                    delta,
+                                    com.example.domain.model.WalletBucket.WINNING,
+                                    auditReasonInput.ifBlank { "Winning Money quick adjustment" }
+                                )
+                                Toast.makeText(context, "${if (delta > 0) "+" else ""}₹${delta.toInt()} sent to Winning Money", Toast.LENGTH_SHORT).show()
+                            }
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = if (delta > 0) "+₹${delta.toInt()}" else "-₹${(-delta).toInt()}",
+                            color = chipColor,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedTextField(
+                    value = winningAmountInput,
+                    onValueChange = { winningAmountInput = it },
+                    label = { Text("Winning ₹ (e.g. 200)", color = Color.Gray, fontSize = 10.5.sp, maxLines = 1) },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = Color(0xFF34D399),
+                        unfocusedBorderColor = CardVerifyBorder
+                    )
+                )
+                Button(
+                    onClick = {
+                        val delta = winningAmountInput.toDoubleOrNull()
+                        if (delta != null && delta != 0.0) {
+                            onSendBucketFunds(
+                                delta,
+                                com.example.domain.model.WalletBucket.WINNING,
+                                auditReasonInput.ifBlank { "Admin Winning Money transfer" }
+                            )
+                            Toast.makeText(context, "₹${delta.toInt()} sent to ${user.bestDisplayName}'s Winning Money!", Toast.LENGTH_SHORT).show()
+                            winningAmountInput = ""
+                        } else {
+                            Toast.makeText(context, "Enter an amount for Winning Money", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF34D399)),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+                    modifier = Modifier.height(48.dp)
+                ) {
+                    Text("Send", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp, maxLines = 1, softWrap = false)
+                }
+            }
+        }
+
+        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.12f))
+
+        // ==================== SECTION 3: REFERRAL BONUS MONEY ====================
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "3. Referral Bonus",
+                    color = Color(0xFFFBBF24),
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Bonus Only",
+                    color = Color(0xFFFBBF24).copy(alpha = 0.85f),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    softWrap = false
+                )
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                listOf(25.0, 50.0, 100.0, 250.0, -25.0).forEach { delta ->
+                    val chipColor = if (delta > 0) Color(0xFFFBBF24) else Color(0xFFEF5350)
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(chipColor.copy(alpha = 0.12f))
+                            .border(0.5.dp, chipColor.copy(alpha = 0.45f), RoundedCornerShape(8.dp))
+                            .clickable {
+                                onSendBucketFunds(
+                                    delta,
+                                    com.example.domain.model.WalletBucket.BONUS,
+                                    auditReasonInput.ifBlank { "Referral Bonus quick adjustment" }
+                                )
+                                Toast.makeText(context, "${if (delta > 0) "+" else ""}₹${delta.toInt()} sent to Referral Bonus", Toast.LENGTH_SHORT).show()
+                            }
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = if (delta > 0) "+₹${delta.toInt()}" else "-₹${(-delta).toInt()}",
+                            color = chipColor,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedTextField(
+                    value = referralBonusAmountInput,
+                    onValueChange = { referralBonusAmountInput = it },
+                    label = { Text("Bonus ₹ (e.g. 50)", color = Color.Gray, fontSize = 10.5.sp, maxLines = 1) },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = Color(0xFFFBBF24),
+                        unfocusedBorderColor = CardVerifyBorder
+                    )
+                )
+                Button(
+                    onClick = {
+                        val delta = referralBonusAmountInput.toDoubleOrNull()
+                        if (delta != null && delta != 0.0) {
+                            onSendBucketFunds(
+                                delta,
+                                com.example.domain.model.WalletBucket.BONUS,
+                                auditReasonInput.ifBlank { "Admin Referral Bonus transfer" }
+                            )
+                            Toast.makeText(context, "₹${delta.toInt()} sent to ${user.bestDisplayName}'s Referral Bonus!", Toast.LENGTH_SHORT).show()
+                            referralBonusAmountInput = ""
+                        } else {
+                            Toast.makeText(context, "Enter an amount for Referral Bonus", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFBBF24)),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+                    modifier = Modifier.height(48.dp)
+                ) {
+                    Text("Send", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp, maxLines = 1, softWrap = false)
+                }
+            }
+        }
+
+        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.12f))
+
+        // Audit Note & Send All 3 Sections Button
+        OutlinedTextField(
+            value = auditReasonInput,
+            onValueChange = { auditReasonInput = it },
+            label = { Text("Note / Reason", color = Color.Gray, fontSize = 10.5.sp, maxLines = 1) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White,
+                focusedBorderColor = Color.White,
+                unfocusedBorderColor = CardVerifyBorder
+            )
+        )
+
+        val depVal = depositAmountInput.toDoubleOrNull() ?: 0.0
+        val winVal = winningAmountInput.toDoubleOrNull() ?: 0.0
+        val bonVal = referralBonusAmountInput.toDoubleOrNull() ?: 0.0
+        val hasAnyEntered = depVal != 0.0 || winVal != 0.0 || bonVal != 0.0
+
+        if (hasAnyEntered) {
+            Button(
+                onClick = {
+                    val note = auditReasonInput.ifBlank { "Admin 3-section wallet transfer" }
+                    if (depVal != 0.0) {
+                        onSendBucketFunds(depVal, com.example.domain.model.WalletBucket.DEPOSIT, note)
+                    }
+                    if (winVal != 0.0) {
+                        onSendBucketFunds(winVal, com.example.domain.model.WalletBucket.WINNING, note)
+                    }
+                    if (bonVal != 0.0) {
+                        onSendBucketFunds(bonVal, com.example.domain.model.WalletBucket.BONUS, note)
+                    }
+                    Toast.makeText(context, "Sent all entered sections to ${user.bestDisplayName}!", Toast.LENGTH_SHORT).show()
+                    depositAmountInput = ""
+                    winningAmountInput = ""
+                    referralBonusAmountInput = ""
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+                modifier = Modifier.fillMaxWidth().height(46.dp)
+            ) {
+                Text(
+                    "SEND ALL ENTERED AMOUNTS",
+                    color = Color.Black,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    softWrap = false
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun ThreeSectionPlayerFundsDialog(
+    user: UserProfile,
+    onDismiss: () -> Unit,
+    onSendBucketFunds: (UserProfile, Double, com.example.domain.model.WalletBucket, String) -> Unit
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.95f)
+                .clip(RoundedCornerShape(16.dp))
+                .border(0.5.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(16.dp)),
+            color = Color.Black,
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Send Player Funds",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 17.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            "${user.bestDisplayName} • ${user.bestEmailOrPhone}",
+                            color = Color(0xFFA1A1AA),
+                            fontSize = 11.5.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    TextButton(onClick = onDismiss) {
+                        Text("Done", color = VelorixAccent, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+                    }
+                }
+                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.12f))
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 520.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    ThreeSectionWalletControlPanel(
+                        user = user,
+                        onSendBucketFunds = { delta, bucket, reason ->
+                            onSendBucketFunds(user, delta, bucket, reason)
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun PlayerFundsTransferHubContent(
+    users: List<UserProfile>,
+    onAddFundsBucket: (UserProfile, Double, com.example.domain.model.WalletBucket, String) -> Unit
+) {
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedPlayerId by remember { mutableStateOf<String?>(null) }
+    var dialogPlayerId by remember { mutableStateOf<String?>(null) }
+
+    val realPlayers = remember(users, searchQuery) {
+        users.filter { u ->
+            val emailLower = u.email.trim().lowercase()
+            val isMock = emailLower.contains("@example.com") || emailLower.contains("mock.dummy")
+            if (isMock || u.isGuestSession) return@filter false
+            searchQuery.isBlank() ||
+                u.username.contains(searchQuery, ignoreCase = true) ||
+                u.ign.contains(searchQuery, ignoreCase = true) ||
+                u.email.contains(searchQuery, ignoreCase = true) ||
+                u.gameId.contains(searchQuery, ignoreCase = true) ||
+                u.id.contains(searchQuery, ignoreCase = true)
+        }
+    }
+
+    val activeSelectedPlayer = remember(realPlayers, selectedPlayerId) {
+        realPlayers.find { it.id == selectedPlayerId } ?: realPlayers.firstOrNull()
+    }
+
+    val activeDialogPlayer = remember(users, dialogPlayerId) {
+        if (dialogPlayerId == null) null else users.find { it.id == dialogPlayerId }
+    }
+
+    activeDialogPlayer?.let { target ->
+        ThreeSectionPlayerFundsDialog(
+            user = target,
+            onDismiss = { dialogPlayerId = null },
+            onSendBucketFunds = onAddFundsBucket
+        )
+    }
+
+    val totalDepositedPool = remember(realPlayers) { realPlayers.sumOf { it.depositFunds } }
+    val totalWinningPool = remember(realPlayers) { realPlayers.sumOf { it.winningFunds } }
+    val totalReferralBonusPool = remember(realPlayers) { realPlayers.sumOf { maxOf(it.bonusFunds, it.referralBonusEarned) } }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF0B0F17))
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(top = 12.dp, bottom = 100.dp)
+    ) {
+        item {
+            Text(
+                text = "3-SECTION PLAYER FUNDS DISPATCHER",
+                color = Color.White,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = "Send money directly to any player's 1. Deposited Money, 2. Winning Money, or 3. Referral Bonus",
+                color = Color(0xFFA1A1AA),
+                fontSize = 11.sp
+            )
+        }
+
+        // Global 3-Section Pool Strip
+        item {
+            HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("TOTAL DEPOSITED", color = Color(0xFF38BDF8), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    Text("₹${totalDepositedPool.toInt()}", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                    Text("Locked / Entry Only", color = Color(0xFF71717A), fontSize = 8.5.sp)
+                }
+                Box(modifier = Modifier.width(0.5.dp).height(34.dp).background(Color.White.copy(alpha = 0.08f)))
+                Column(modifier = Modifier.weight(1f).padding(start = 10.dp)) {
+                    Text("TOTAL WINNING", color = Color(0xFF34D399), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    Text("₹${totalWinningPool.toInt()}", color = Color(0xFF34D399), fontSize = 15.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                    Text("Withdrawable", color = Color(0xFF34D399).copy(alpha = 0.8f), fontSize = 8.5.sp)
+                }
+                Box(modifier = Modifier.width(0.5.dp).height(34.dp).background(Color.White.copy(alpha = 0.08f)))
+                Column(modifier = Modifier.weight(1f).padding(start = 10.dp)) {
+                    Text("REFERRAL BONUS", color = Color(0xFFFBBF24), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    Text("₹${totalReferralBonusPool.toInt()}", color = Color(0xFFFBBF24), fontSize = 15.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                    Text("Referral Locked", color = Color(0xFF71717A), fontSize = 8.5.sp)
+                }
+            }
+            HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+        }
+
+        // Search Player Bar
+        item {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                placeholder = { Text("Search player by IGN, username, email, or Free Fire UID...", fontSize = 12.sp) },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(16.dp)) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = Color.White.copy(alpha = 0.3f),
+                    unfocusedBorderColor = Color.White.copy(alpha = 0.12f),
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White
+                )
+            )
+        }
+
+        // Active Player 3-Section Panel
+        if (activeSelectedPlayer != null) {
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "SELECTED PLAYER: ${activeSelectedPlayer.bestDisplayName.uppercase()}",
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                            Text(
+                                text = "FF UID: ${activeSelectedPlayer.gameId.ifBlank { "Unlinked" }} • ${activeSelectedPlayer.bestEmailOrPhone}",
+                                color = Color(0xFFA1A1AA),
+                                fontSize = 10.5.sp
+                            )
+                        }
+                        Text(
+                            text = "ACTIVE TARGET",
+                            color = Color(0xFF34D399),
+                            fontSize = 9.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.12f))
+                    ThreeSectionWalletControlPanel(
+                        user = activeSelectedPlayer,
+                        onSendBucketFunds = { delta, bucket, reason ->
+                            onAddFundsBucket(activeSelectedPlayer, delta, bucket, reason)
+                        }
+                    )
+                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.15f))
+                }
+            }
+        }
+
+        item {
+            Text(
+                text = "ALL PLAYERS — TAP TO SELECT OR OPEN 3-SECTION TRANSFER (${realPlayers.size})",
+                color = Color(0xFFA1A1AA),
+                fontSize = 10.5.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        items(realPlayers.size) { idx ->
+            val p = realPlayers[idx]
+            val isSelected = activeSelectedPlayer?.id == p.id
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { selectedPlayerId = p.id }
+                    .padding(vertical = 8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = p.bestDisplayName,
+                            color = if (isSelected) Color(0xFF34D399) else Color.White,
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Dep: ₹${p.depositFunds.toInt()} • Win: ₹${p.winningFunds.toInt()} • RefBonus: ₹${maxOf(p.bonusFunds, p.referralBonusEarned).toInt()}",
+                            color = Color(0xFFA1A1AA),
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                    IconButton(
+                        onClick = {
+                            selectedPlayerId = p.id
+                            dialogPlayerId = p.id
+                        },
+                        modifier = Modifier
+                            .size(34.dp)
+                            .background(Color(0xFF38BDF8).copy(alpha = 0.14f), CircleShape)
+                    ) {
+                        Icon(
+                            Icons.Default.AccountBalanceWallet,
+                            contentDescription = "Send Funds",
+                            tint = Color(0xFF38BDF8),
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+            }
+        }
+    }
+}

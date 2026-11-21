@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -397,37 +398,96 @@ object UntitledIcons {
 
 /**
  * Untitled UI Card Container
- * Precision container with dark obsidian fill, subtle 1px border, and clean padding.
+ * Elevated obsidian card surface (#09090D) with a subtle 0.5.dp outer hairline border.
+ * Inner elements use flat hairline dividers instead of nested boxes.
  */
 @Composable
 fun UntitledCard(
     modifier: Modifier = Modifier,
     shape: RoundedCornerShape = RoundedCornerShape(14.dp),
-    backgroundColor: Color = Color(0xFF0D0D10),
-    borderColor: Color = Color(0xFF222228),
-    borderWidth: Dp = 1.dp,
+    backgroundColor: Color = Color(0xFF0C0C0E),
+    borderColor: Color = Color.White.copy(alpha = 0.08f),
+    borderWidth: Dp = 0.5.dp,
     padding: Dp = 14.dp,
     onClick: (() -> Unit)? = null,
     content: @Composable BoxScope.() -> Unit
 ) {
     val clickModifier = if (onClick != null) {
-        Modifier.bounceClick(scaleDown = 0.98f) { onClick() }
+        Modifier.bounceClick(scaleDown = 0.99f) { onClick() }
     } else Modifier
 
-    Box(
+    Surface(
         modifier = modifier
-            .then(clickModifier)
             .clip(shape)
-            .background(backgroundColor)
-            .border(borderWidth, borderColor, shape)
-            .padding(padding),
-        content = content
-    )
+            .then(clickModifier),
+        shape = shape,
+        color = backgroundColor,
+        border = BorderStroke(borderWidth, borderColor)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(padding),
+            content = content
+        )
+    }
+}
+
+/**
+ * Apple iOS / Xiaomi HyperOS / Vercel Classified Section Container:
+ * Displays a crisp uppercase classification header outside an inset-grouped #0C0C0E card.
+ */
+@Composable
+fun SystemClassifiedSection(
+    sectionTitle: String,
+    modifier: Modifier = Modifier,
+    trailingActionText: String? = null,
+    onTrailingActionClick: (() -> Unit)? = null,
+    contentPadding: Dp = 0.dp,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = sectionTitle.uppercase(),
+                fontSize = 10.5.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color(0xFF71717A),
+                letterSpacing = 0.9.sp
+            )
+            if (trailingActionText != null && onTrailingActionClick != null) {
+                Text(
+                    text = trailingActionText,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF0A84FF),
+                    modifier = Modifier.clickable { onTrailingActionClick() }
+                )
+            }
+        }
+        UntitledCard(
+            padding = contentPadding,
+            shape = RoundedCornerShape(14.dp),
+            backgroundColor = Color(0xFF0C0C0E),
+            borderColor = Color.White.copy(alpha = 0.08f)
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                content = content
+            )
+        }
+    }
 }
 
 /**
  * Untitled UI Clean Metric Tile
- * Used in 2-column or 4-column metric overviews with micro-icons and trend indicators.
+ * Pure AMOLED black metric section with inline icon and 0.5.dp bottom hairline divider.
  */
 @Composable
 fun UntitledMetricTile(
@@ -444,7 +504,7 @@ fun UntitledMetricTile(
     UntitledCard(
         modifier = modifier,
         onClick = onClick,
-        padding = 12.dp
+        padding = 10.dp
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
             Row(
@@ -456,22 +516,13 @@ fun UntitledMetricTile(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.weight(1f, fill = false)
                 ) {
-                    Surface(
-                        modifier = Modifier.size(26.dp),
-                        shape = RoundedCornerShape(7.dp),
-                        color = iconTint.copy(alpha = 0.12f),
-                        border = BorderStroke(1.dp, iconTint.copy(alpha = 0.25f))
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = icon,
-                                contentDescription = null,
-                                tint = iconTint,
-                                modifier = Modifier.size(14.dp)
-                            )
-                        }
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = iconTint,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = title,
                         color = VelorixTextSecondary,
@@ -491,7 +542,7 @@ fun UntitledMetricTile(
                 }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
             Text(
                 text = value,
@@ -518,8 +569,8 @@ fun UntitledMetricTile(
 }
 
 /**
- * Untitled UI Action Grid Tile
- * Square / Rectangle interactive tool card for tournament operations.
+ * Untitled UI Action Row/Tile
+ * Flat AMOLED black action item with inline icon and 0.5.dp hairline divider.
  */
 @Composable
 fun UntitledActionTile(
@@ -532,15 +583,14 @@ fun UntitledActionTile(
     highlight: Boolean = false,
     onClick: () -> Unit
 ) {
-    val borderColor = if (highlight) iconTint.copy(alpha = 0.45f) else Color(0xFF222228)
-    val bgColor = if (highlight) iconTint.copy(alpha = 0.05f) else Color(0xFF0E0E12)
+    val borderColor = if (highlight) iconTint.copy(alpha = 0.35f) else Color.White.copy(alpha = 0.08f)
 
     UntitledCard(
         modifier = modifier,
-        backgroundColor = bgColor,
+        backgroundColor = Color.Black,
         borderColor = borderColor,
         onClick = onClick,
-        padding = 12.dp
+        padding = 10.dp
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
@@ -551,21 +601,12 @@ fun UntitledActionTile(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Surface(
-                    modifier = Modifier.size(32.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    color = iconTint.copy(alpha = 0.14f),
-                    border = BorderStroke(1.dp, iconTint.copy(alpha = 0.3f))
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = icon,
-                            contentDescription = null,
-                            tint = iconTint,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = iconTint,
+                    modifier = Modifier.size(18.dp)
+                )
 
                 if (counterBadge != null) {
                     UntitledBadge(
@@ -582,13 +623,13 @@ fun UntitledActionTile(
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
             Text(
                 text = title,
                 color = Color.White,
                 fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
+                fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -606,7 +647,7 @@ fun UntitledActionTile(
 }
 
 /**
- * Untitled UI Refined Badge Pill
+ * Untitled UI Refined Inline Status Indicator (No Box Border)
  */
 @Composable
 fun UntitledBadge(
@@ -615,32 +656,25 @@ fun UntitledBadge(
     modifier: Modifier = Modifier,
     hasDot: Boolean = true
 ) {
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(6.dp),
-        color = color.copy(alpha = 0.12f),
-        border = BorderStroke(1.dp, color.copy(alpha = 0.35f))
+    Row(
+        modifier = modifier.padding(horizontal = 2.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.5.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            if (hasDot) {
-                Box(
-                    modifier = Modifier
-                        .size(4.5.dp)
-                        .background(color, CircleShape)
-                )
-            }
-            Text(
-                text = text,
-                color = color,
-                fontSize = 9.5.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                softWrap = false
+        if (hasDot) {
+            Box(
+                modifier = Modifier
+                    .size(5.dp)
+                    .background(color, CircleShape)
             )
         }
+        Text(
+            text = text,
+            color = color,
+            fontSize = 9.5.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            softWrap = false
+        )
     }
 }

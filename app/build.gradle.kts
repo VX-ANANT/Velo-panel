@@ -6,6 +6,7 @@ plugins {
   alias(libs.plugins.secrets)
   alias(libs.plugins.kotlin.serialization)
   id("com.google.gms.google-services")
+  id("com.google.firebase.crashlytics")
 }
 
 android {
@@ -26,9 +27,9 @@ android {
     create("release") {
       val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
       storeFile = file(keystorePath)
-      storePassword = System.getenv("STORE_PASSWORD")
+      storePassword = System.getenv("STORE_PASSWORD") ?: "android"
       keyAlias = "upload"
-      keyPassword = System.getenv("KEY_PASSWORD")
+      keyPassword = System.getenv("KEY_PASSWORD") ?: "android"
     }
     create("debugConfig") {
       storeFile = file("${rootDir}/debug.keystore")
@@ -72,14 +73,17 @@ secrets {
 dependencies {
   implementation(platform(libs.androidx.compose.bom))
   implementation(platform("com.google.firebase:firebase-bom:34.19.0"))
+  implementation("com.google.firebase:firebase-crashlytics")
+  implementation("com.google.firebase:firebase-perf")
+  implementation("com.google.firebase:firebase-analytics")
   implementation("com.google.firebase:firebase-firestore")
   implementation("com.google.firebase:firebase-auth")
   implementation("com.google.firebase:firebase-storage")
   implementation("com.google.firebase:firebase-database")
   implementation("com.google.firebase:firebase-messaging")
   implementation("com.google.firebase:firebase-config")
-  implementation("com.google.firebase:firebase-analytics")
   implementation("com.google.firebase:firebase-ai")
+  implementation("com.google.firebase:firebase-appcheck-playintegrity")
   implementation("com.google.firebase:firebase-appcheck-debug")
   // implementation(libs.accompanist.permissions)
   implementation(libs.androidx.activity.compose)

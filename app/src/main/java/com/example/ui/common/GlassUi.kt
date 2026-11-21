@@ -1,15 +1,25 @@
 package com.example.ui.common
 
+import android.graphics.RenderEffect
+import android.graphics.Shader
+import android.os.Build
+import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -17,10 +27,17 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.alpha
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.AccountBalanceWallet
+import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.SportsEsports
+import androidx.compose.material.icons.outlined.TaskAlt
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -39,11 +56,13 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.R
 import com.kashif_e.backdrop.*
 import com.kashif_e.backdrop.backdrops.*
 import com.kashif_e.backdrop.effects.*
@@ -55,79 +74,72 @@ import com.example.ui.theme.VelorixBg
 import com.example.ui.theme.VelorixTextPrimary
 import com.example.ui.theme.VelorixTextSecondary
 
-// Glass Theme Color Palette
+// Glass Theme Color Palette (Pure AMOLED Black Base & Neutral Surfaces)
 object GlassTokens {
-    // Pitch Black / Zinc Minimalist Base
+    // Pure AMOLED Pitch Black Base
     val DeepCanvas = Color(0xFF000000)
     
-    // Clean solid-feel translucent surfaces (Vercel dark mode aesthetic)
+    // Neutral dark system surfaces (zero blue tint)
     val GlassSurfacePrimary = Brush.linearGradient(
         colors = listOf(
-            Color(0xFF0F0F11),
-            Color(0xFF09090B)
-        ),
-        start = Offset(0f, 0f),
-        end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY)
+            Color(0xFF0A0A0D),
+            Color(0xFF0A0A0D)
+        )
     )
 
     val GlassSurfaceBright = Brush.linearGradient(
         colors = listOf(
-            Color(0xFF18181B),
-            Color(0xFF0F0F11)
+            Color(0xFF121216),
+            Color(0xFF121216)
         )
     )
 
     val GlassSurfaceSubtle = Brush.linearGradient(
         colors = listOf(
-            Color(0xFF0D0D0E),
-            Color(0xFF050506)
+            Color(0xFF060608),
+            Color(0xFF060608)
         )
     )
 
-    // Crisp high-precision Zinc borders
+    // Subtle neutral hairline dividers (8% white, zero blue tint)
     val GlassBorderGradient = Brush.linearGradient(
         colors = listOf(
-            Color(0xFF3F3F46),
-            Color(0xFF27272A),
-            Color(0xFF18181B)
-        ),
-        start = Offset(0f, 0f),
-        end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY)
+            Color.White.copy(alpha = 0.08f),
+            Color.White.copy(alpha = 0.08f)
+        )
     )
 
     val GlassBorderSubtle = Brush.linearGradient(
         colors = listOf(
-            Color(0xFF27272A),
-            Color(0xFF18181B)
+            Color.White.copy(alpha = 0.07f),
+            Color.White.copy(alpha = 0.07f)
         )
     )
 
     val GlassBorderActive = Brush.linearGradient(
         colors = listOf(
-            Color(0xFF8B5CF6),
-            Color(0xFF6D28D9),
-            Color(0xFF3F3F46)
+            Color(0xFF38BDF8),
+            Color.White.copy(alpha = 0.14f)
         )
     )
 
-    // Active Glow Brushes
     val ActivePillGradient = Brush.horizontalGradient(
         colors = listOf(
-            Color(0xFFFFFFFF),
-            Color(0xFFE4E4E7)
+            Color(0xFFE6EDF3),
+            Color(0xFFD4D4D8)
         )
     )
 
     val FloatingOrbGradient = Brush.linearGradient(
         colors = listOf(
-            Color(0xFF18181B),
-            Color(0xFF09090B)
+            Color(0xFF0A0A0D),
+            Color(0xFF0A0A0D)
         )
     )
 }
 
 /**
- * Minimalist Canvas with subtle ambient bloom supporting dynamic animated Light (Xiaomi/Vercel) & Dark transitions.
+ * Pure AMOLED Black (#000000) Canvas in Dark Mode.
  */
 @Composable
 fun GlassBackgroundBox(
@@ -137,11 +149,11 @@ fun GlassBackgroundBox(
 ) {
     val isDark = com.example.ui.theme.LocalIsDarkTheme.current
     val canvasBg by animateColorAsState(
-        targetValue = if (isDark) Color(0xFF000000) else Color(0xFFF8FAFC),
+        targetValue = if (isDark) Color(0xFF000000) else Color(0xFFF4F6F9),
         animationSpec = tween(durationMillis = 350), label = "canvasBg"
     )
     val topBloomColor by animateColorAsState(
-        targetValue = if (isDark) Color(0xFF1E1E24) else Color(0xFFE2E8F0),
+        targetValue = if (isDark) Color(0xFF000000) else Color(0xFFE2E8F0),
         animationSpec = tween(durationMillis = 350), label = "topBloom"
     )
 
@@ -149,10 +161,9 @@ fun GlassBackgroundBox(
         modifier = modifier
             .fillMaxSize()
             .drawBehind {
-                // 1. Dynamic Canvas Background - Pure AMOLED Black (#000000) in dark mode
+                // 1. Pure AMOLED Black (#000000) in dark mode
                 drawRect(if (isDark) Color.Black else canvasBg)
 
-                // 2. Ambient Bloom in Light mode only (Pure AMOLED black #000000 strictly preserved in Dark mode)
                 if (!isDark) {
                     drawCircle(
                         brush = Brush.radialGradient(
@@ -197,58 +208,54 @@ fun GlassBackgroundBox(
 }
 
 /**
- * Premium Minimalist Card with Xiaomi roundedness and crisp Vercel borders.
+ * Major Card Container with subtle neutral dark depth and 0.5.dp perimeter hairline.
  */
 @Composable
 fun GlassCard(
     modifier: Modifier = Modifier,
-    shape: Shape = RoundedCornerShape(20.dp),
+    shape: Shape = RoundedCornerShape(14.dp),
     brush: Brush = GlassTokens.GlassSurfacePrimary,
     borderBrush: Brush = GlassTokens.GlassBorderGradient,
-    borderWidth: Dp = 1.dp,
+    borderWidth: Dp = 0.5.dp,
     elevation: Dp = 0.dp,
     onClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
     val isDark = com.example.ui.theme.LocalIsDarkTheme.current
-    val effectiveBrush = if (brush == GlassTokens.GlassSurfacePrimary) {
-        if (isDark) GlassTokens.GlassSurfacePrimary else Brush.linearGradient(listOf(Color(0xFFFFFFFF), Color(0xFFF8FAFC)))
-    } else brush
-
-    val effectiveBorderBrush = if (borderBrush == GlassTokens.GlassBorderGradient) {
-        if (isDark) GlassTokens.GlassBorderGradient else Brush.linearGradient(listOf(Color(0xFFE2E8F0), Color(0xFFCBD5E1)))
-    } else borderBrush
+    val isActiveHighlight = borderBrush == GlassTokens.GlassBorderActive
+    val strokeColor = if (isDark) {
+        if (isActiveHighlight) Color(0xFF38BDF8).copy(alpha = 0.45f) else Color.White.copy(alpha = 0.08f)
+    } else {
+        Color(0xFFCBD5E1)
+    }
 
     val clickModifier = if (onClick != null) {
-        Modifier.bounceClick(scaleDown = 0.98f, onClick = onClick)
+        Modifier.bounceClick(scaleDown = 0.99f, onClick = onClick)
     } else {
         Modifier
     }
 
     Surface(
         modifier = modifier
-            .border(borderWidth, effectiveBorderBrush, shape)
             .clip(shape)
             .then(clickModifier),
         shape = shape,
-        color = Color.Transparent
+        color = if (isDark) Color(0xFF0A0A0D) else Color.White,
+        border = BorderStroke(borderWidth, strokeColor)
     ) {
-        Box(
-            modifier = Modifier
-                .background(effectiveBrush)
-        ) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                content = content
-            )
-        }
+        Column(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp),
+            content = content
+        )
     }
 }
 
 data class GlassNavItem(
     val id: String,
     val label: String,
-    val icon: ImageVector
+    val outlineResId: Int = 0,
+    val filledResId: Int = 0,
+    val icon: ImageVector? = null
 )
 
 /**
@@ -392,27 +399,64 @@ fun DrawScope.drawCircularGlassSpecularOrb(
 }
 
 /**
- * Draws a luminous background light glow behind the active selected navigation item.
- * Pure light bloom with ONLY background glow — NO selection box, NO borders, and NO dark accents.
+ * Draws crisp optical specular edge glow catch-lights ONLY on the two side edges of the active pill.
+ * The body and center remain transparent frosted glass — strictly NO glow over the whole pill or nav bar.
+ */
+fun DrawScope.drawPillTwoSidedEdgeGlow(
+    cornerRadius: Float,
+    intensity: Float = 1.0f,
+    accentColor: Color = Color.White
+) {
+    val width = size.width
+    val height = size.height
+    if (width <= 0f || height <= 0f) return
+
+    val edgeGlowWidth = (height * 0.40f).coerceAtMost(width * 0.28f)
+
+    // 1. Left Curved Side Edge Glow
+    drawRoundRect(
+        brush = Brush.horizontalGradient(
+            colors = listOf(
+                accentColor.copy(alpha = 0.50f * intensity),
+                accentColor.copy(alpha = 0.18f * intensity),
+                Color.Transparent
+            ),
+            startX = 0f,
+            endX = edgeGlowWidth
+        ),
+        topLeft = Offset(0.8f, 0.8f),
+        size = Size(edgeGlowWidth, height - 1.6f),
+        cornerRadius = CornerRadius(cornerRadius, cornerRadius),
+        style = Stroke(width = 1.6f)
+    )
+
+    // 2. Right Curved Side Edge Glow
+    drawRoundRect(
+        brush = Brush.horizontalGradient(
+            colors = listOf(
+                Color.Transparent,
+                accentColor.copy(alpha = 0.18f * intensity),
+                accentColor.copy(alpha = 0.50f * intensity)
+            ),
+            startX = width - edgeGlowWidth,
+            endX = width
+        ),
+        topLeft = Offset(width - edgeGlowWidth, 0.8f),
+        size = Size(edgeGlowWidth, height - 1.6f),
+        cornerRadius = CornerRadius(cornerRadius, cornerRadius),
+        style = Stroke(width = 1.6f)
+    )
+}
+
+/**
+ * Backward compatibility: Draws optical two-sided edge glow catch-lights on active pill elements.
  */
 fun DrawScope.drawSelectionBackgroundGlow(
     intensity: Float = 1.0f
 ) {
-    val center = Offset(size.width / 2f, size.height / 2f)
-    val glowRadius = (size.width.coerceAtLeast(size.height)) * 0.72f
-
-    // Soft luminous ambient light bloom radiating smoothly behind the selected item
-    drawCircle(
-        brush = Brush.radialGradient(
-            colors = listOf(
-                Color.White.copy(alpha = 0.22f * intensity),
-                Color.White.copy(alpha = 0.11f * intensity),
-                Color.White.copy(alpha = 0.03f * intensity),
-                Color.Transparent
-            ),
-            center = center,
-            radius = glowRadius
-        )
+    drawPillTwoSidedEdgeGlow(
+        cornerRadius = size.height / 2f,
+        intensity = intensity
     )
 }
 
@@ -421,7 +465,7 @@ fun DrawScope.drawSelectionBackgroundGlow(
  * - 100% translucent, see-through frosted glass body without opaque black or dark tint.
  * - Genuine optical glass lens specular reflections, catch-light bevels, and light sheens.
  * - Pure optical clarity: no rainbow or colored tints.
- * - Active tab with convex magnifying glass lens dome.
+ * - Active tab with two-sided specular edge reflections.
  * - Floating circular glass search orb side-by-side with the navigation capsule.
  */
 @Composable
@@ -435,14 +479,42 @@ fun FloatingGlassNavBar(
     blurProgress: Float = 1f,
     modifier: Modifier = Modifier
 ) {
-    if (!optics.glassNavigationBar) return
-
     val navItems = listOf(
-        GlassNavItem("dashboard", "Home", Icons.Default.Home),
-        GlassNavItem("tournaments_list", "Tourneys", Icons.Default.EmojiEvents),
-        GlassNavItem("operations", "Ops", Icons.Default.VerifiedUser),
-        GlassNavItem("payouts", "Finance", Icons.Default.Payments),
-        GlassNavItem("system", "System", Icons.Default.Settings)
+        GlassNavItem(
+            id = "dashboard",
+            label = "Home",
+            outlineResId = R.drawable.ic_iconsax_home_outline,
+            filledResId = R.drawable.ic_iconsax_home_filled,
+            icon = Icons.Outlined.Home
+        ),
+        GlassNavItem(
+            id = "tournaments_list",
+            label = "Tourneys",
+            outlineResId = R.drawable.ic_iconsax_game_outline,
+            filledResId = R.drawable.ic_iconsax_game_filled,
+            icon = Icons.Outlined.SportsEsports
+        ),
+        GlassNavItem(
+            id = "operations",
+            label = "Ops",
+            outlineResId = R.drawable.ic_iconsax_tick_square_outline,
+            filledResId = R.drawable.ic_iconsax_tick_square_filled,
+            icon = Icons.Outlined.TaskAlt
+        ),
+        GlassNavItem(
+            id = "payouts",
+            label = "Finance",
+            outlineResId = R.drawable.ic_iconsax_wallet_outline,
+            filledResId = R.drawable.ic_iconsax_wallet_filled,
+            icon = Icons.Outlined.AccountBalanceWallet
+        ),
+        GlassNavItem(
+            id = "system",
+            label = "Settings",
+            outlineResId = R.drawable.ic_iconsax_settings_outline,
+            filledResId = R.drawable.ic_iconsax_settings_filled,
+            icon = Icons.Outlined.Settings
+        )
     )
 
     // Floating Glass Navigation Dock (NO OPAQUE BLACK BACKGROUND!)
@@ -461,12 +533,12 @@ fun FloatingGlassNavBar(
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .height(64.dp)
-                    .clip(RoundedCornerShape(32.dp))
+                    .height(62.dp)
+                    .clip(RoundedCornerShape(31.dp))
             ) {
-                // Real-Time Optical Backdrop Sampling (2% Gaussian Blur, Lens Refraction & Chromatic Aberration)
-                if (backdrop != null) {
-                    val capsuleShape = remember { RoundedCornerShape(32.dp) }
+                // Real-Time Optical Backdrop Sampling (Reduced Blur + Clear Untinted Lens Refraction, Zero Blue Tint)
+                if (backdrop != null && optics.glassNavigationBar) {
+                    val capsuleShape = remember { RoundedCornerShape(31.dp) }
                     Box(
                         modifier = Modifier
                             .matchParentSize()
@@ -474,18 +546,17 @@ fun FloatingGlassNavBar(
                                 backdrop = backdrop,
                                 shape = { capsuleShape },
                                 effects = {
-                                    blur(radius = (optics.blurRadius * 2.dp.value * blurProgress).coerceAtLeast(0.5f).dp.toPx())
+                                    blur(radius = (optics.blurRadius * 12.dp.value * blurProgress.coerceAtLeast(0.75f)).coerceIn(2f, 9f).dp.toPx())
                                     colorControls(
-                                        brightness = 0.05f * optics.vibrancy,
-                                        contrast = 1.05f,
-                                        saturation = 1.0f + (0.35f * optics.vibrancy)
+                                        brightness = 0.02f,
+                                        contrast = 1.02f,
+                                        saturation = 1.0f
                                     )
-                                    vibrancy()
                                     if (optics.lensRefractionHeight > 0f) {
                                         lens(
-                                            refractionHeight = (optics.lensRefractionHeight * 24.dp.value).dp.toPx(),
-                                            refractionAmount = (optics.lensRefractionAmount * 32.dp.value).dp.toPx(),
-                                            chromaticAberration = optics.chromaticAberration
+                                            refractionHeight = (optics.lensRefractionHeight * 22.dp.value).dp.toPx(),
+                                            refractionAmount = (optics.lensRefractionAmount * 28.dp.value).dp.toPx(),
+                                            chromaticAberration = false
                                         )
                                     }
                                     opacity(alpha = 1.0f)
@@ -498,32 +569,17 @@ fun FloatingGlassNavBar(
                     )
                 }
 
-                // Translucent Clear Glass Substrate with Gaussian blur (NO OPAQUE BLACK OR DARK TINTS!)
-                Box(
-                    modifier = Modifier
-                        .matchParentSize()
-                        .blur(radius = 5.dp)
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    Color.White.copy(alpha = 0.14f),
-                                    Color.White.copy(alpha = 0.06f)
-                                )
-                            )
-                        )
-                )
-
-                // Glass Layer: Optical Specular Reflections & Bevels (Reflecting light from behind)
+                // Glass Layer: Pure Untinted Optical Specular Reflections & Bevels
                 Box(
                     modifier = Modifier
                         .matchParentSize()
                         .drawBehind {
                             drawLiquidGlassOpticReflections(
                                 cornerRadius = size.height / 2f,
-                                intensity = optics.vibrancy
+                                intensity = optics.vibrancy.coerceIn(0.45f, 0.75f)
                             )
                         }
-                        .padding(horizontal = 6.dp, vertical = 4.dp),
+                        .padding(horizontal = 6.dp, vertical = 6.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Row(
@@ -533,58 +589,97 @@ fun FloatingGlassNavBar(
                     ) {
                         navItems.forEach { item ->
                             val isSelected = when (item.id) {
+                                "dashboard" -> selectedTab == "dashboard"
+                                "tournaments_list" -> selectedTab == "tournaments_list"
                                 "operations" -> selectedTab in listOf("operations", "users", "complaints", "verification")
                                 "payouts" -> selectedTab in listOf("payouts")
                                 "system" -> selectedTab in listOf("system", "admins", "lowcode", "settings", "glass_optics", "leaderboard", "tournament_rules")
                                 else -> selectedTab == item.id
                             }
 
-                            val animatedWeight by animateFloatAsState(
-                                targetValue = if (isSelected) 2.4f else 0.85f,
-                                animationSpec = spring(dampingRatio = 0.78f, stiffness = 380f),
-                                label = "navWeight"
+                            // Bouncy expanding weight: sleeker than the old oversized pill, wide enough for full label text
+                            val itemWeight by animateFloatAsState(
+                                targetValue = if (isSelected) 1.75f else 0.85f,
+                                animationSpec = spring(
+                                    dampingRatio = 0.60f,
+                                    stiffness = Spring.StiffnessMediumLow
+                                ),
+                                label = "navItemWeight"
+                            )
+
+                            val pillAlpha by animateFloatAsState(
+                                targetValue = if (isSelected) 1f else 0f,
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioLowBouncy,
+                                    stiffness = Spring.StiffnessMedium
+                                ),
+                                label = "navPillAlpha"
+                            )
+
+                            val pillScaleX by animateFloatAsState(
+                                targetValue = if (isSelected) 1f else 0.82f,
+                                animationSpec = spring(
+                                    dampingRatio = 0.56f,
+                                    stiffness = Spring.StiffnessMedium
+                                ),
+                                label = "navPillScaleX"
+                            )
+
+                            val pillScaleY by animateFloatAsState(
+                                targetValue = if (isSelected) 1f else 0.86f,
+                                animationSpec = spring(
+                                    dampingRatio = 0.56f,
+                                    stiffness = Spring.StiffnessMedium
+                                ),
+                                label = "navPillScaleY"
+                            )
+
+                            val iconScale by animateFloatAsState(
+                                targetValue = if (isSelected) 1.05f else 0.94f,
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                                    stiffness = Spring.StiffnessMedium
+                                ),
+                                label = "navIconScale"
                             )
 
                             Box(
                                 modifier = Modifier
-                                    .weight(animatedWeight)
+                                    .weight(itemWeight)
                                     .fillMaxHeight()
-                                    .padding(vertical = if (isSelected) 10.dp else 7.5.dp, horizontal = 2.5.dp)
-                                    .bounceClick(scaleDown = 0.94f) {
+                                    .padding(vertical = 2.dp, horizontal = 2.dp)
+                                    .bounceClick(scaleDown = 0.88f) {
                                         onNavClick(item.id)
                                     },
                                 contentAlignment = Alignment.Center
                             ) {
-                                // Luminous background light glow & convex illuminated glass pill capsule for active tab
-                                if (isSelected) {
+                                // Pure Untinted Frosted Pill with Bouncy Scale & Two-Sided White Specular Edge Glow
+                                if (pillAlpha > 0.01f) {
                                     Box(
                                         modifier = Modifier
                                             .fillMaxSize()
-                                            .drawBehind {
-                                                drawSelectionBackgroundGlow(intensity = optics.vibrancy * 0.40f)
+                                            .graphicsLayer {
+                                                alpha = pillAlpha
+                                                scaleX = pillScaleX
+                                                scaleY = pillScaleY
                                             }
-                                            .clip(RoundedCornerShape(16.dp))
+                                            .clip(RoundedCornerShape(23.dp))
                                             .background(
                                                 Brush.verticalGradient(
                                                     colors = listOf(
-                                                        Color.White.copy(alpha = 0.12f),
-                                                        accentColor.copy(alpha = 0.08f),
+                                                        Color.White.copy(alpha = 0.14f),
+                                                        Color.White.copy(alpha = 0.08f),
                                                         Color.White.copy(alpha = 0.03f)
                                                     )
                                                 )
                                             )
-                                            .border(
-                                                width = 0.75.dp,
-                                                brush = Brush.verticalGradient(
-                                                    listOf(
-                                                        Color.White.copy(alpha = 0.38f),
-                                                        Color.White.copy(alpha = 0.06f),
-                                                        accentColor.copy(alpha = 0.14f),
-                                                        Color.White.copy(alpha = 0.16f)
-                                                    )
-                                                ),
-                                                shape = RoundedCornerShape(16.dp)
-                                            )
+                                            .drawBehind {
+                                                drawPillTwoSidedEdgeGlow(
+                                                    cornerRadius = size.height / 2f,
+                                                    intensity = optics.vibrancy.coerceIn(0.45f, 0.75f),
+                                                    accentColor = Color.White
+                                                )
+                                            }
                                     )
                                 }
 
@@ -593,26 +688,64 @@ fun FloatingGlassNavBar(
                                     horizontalArrangement = Arrangement.Center,
                                     modifier = Modifier
                                         .fillMaxSize()
-                                        .padding(horizontal = if (isSelected) 10.dp else 2.dp)
+                                        .padding(horizontal = 6.dp)
                                 ) {
-                                    Icon(
-                                        imageVector = item.icon,
-                                        contentDescription = item.label,
-                                        tint = if (isSelected) Color.White else Color.White.copy(alpha = 0.55f),
-                                        modifier = Modifier.size(20.dp)
-                                    )
-
-                                    if (isSelected) {
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text(
-                                            text = item.label,
-                                            fontSize = 11.5.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color.White,
-                                            maxLines = 1,
-                                            softWrap = false,
-                                            overflow = TextOverflow.Ellipsis
+                                    // Iconsax Icon: Filled when selected, Outline when unselected
+                                    val iconRes = if (isSelected) item.filledResId else item.outlineResId
+                                    if (iconRes != 0) {
+                                        Icon(
+                                            painter = painterResource(id = iconRes),
+                                            contentDescription = item.label,
+                                            tint = if (isSelected) Color.White else Color.White.copy(alpha = 0.58f),
+                                            modifier = Modifier
+                                                .size(19.dp)
+                                                .graphicsLayer {
+                                                    scaleX = iconScale
+                                                    scaleY = iconScale
+                                                }
                                         )
+                                    } else if (item.icon != null) {
+                                        Icon(
+                                            imageVector = item.icon,
+                                            contentDescription = item.label,
+                                            tint = if (isSelected) Color.White else Color.White.copy(alpha = 0.58f),
+                                            modifier = Modifier
+                                                .size(19.dp)
+                                                .graphicsLayer {
+                                                    scaleX = iconScale
+                                                    scaleY = iconScale
+                                                }
+                                        )
+                                    }
+
+                                    // Full label visible when selected with bouncy horizontal expansion
+                                    AnimatedVisibility(
+                                        visible = isSelected,
+                                        enter = fadeIn(
+                                            animationSpec = tween(durationMillis = 150, easing = LinearOutSlowInEasing)
+                                        ) + expandHorizontally(
+                                            animationSpec = spring(dampingRatio = 0.68f, stiffness = 380f),
+                                            expandFrom = Alignment.Start
+                                        ),
+                                        exit = fadeOut(
+                                            animationSpec = tween(durationMillis = 90, easing = FastOutLinearInEasing)
+                                        ) + shrinkHorizontally(
+                                            animationSpec = spring(dampingRatio = 0.85f, stiffness = 450f),
+                                            shrinkTowards = Alignment.Start
+                                        )
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Spacer(modifier = Modifier.width(5.dp))
+                                            Text(
+                                                text = item.label,
+                                                fontSize = 11.5.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color.White,
+                                                maxLines = 1,
+                                                softWrap = false,
+                                                overflow = TextOverflow.Visible
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -628,7 +761,7 @@ fun FloatingGlassNavBar(
                         .size(54.dp)
                         .clip(CircleShape)
                 ) {
-                    // Real-Time Optical Backdrop Sampling (Gaussian Blur, Lens Refraction & Chromatic Aberration)
+                    // Real-Time Optical Backdrop Sampling (Reduced Blur + Untinted Lens Refraction)
                     if (backdrop != null) {
                         val orbShape = remember { CircleShape }
                         Box(
@@ -638,18 +771,17 @@ fun FloatingGlassNavBar(
                                     backdrop = backdrop,
                                     shape = { orbShape },
                                     effects = {
-                                        blur(radius = (optics.blurRadius * 32.dp.value * blurProgress).coerceAtLeast(1f).dp.toPx())
+                                        blur(radius = (optics.blurRadius * 12.dp.value * blurProgress.coerceAtLeast(0.75f)).coerceIn(2f, 9f).dp.toPx())
                                         colorControls(
-                                            brightness = 0.05f * optics.vibrancy,
-                                            contrast = 1.05f,
-                                            saturation = 1.0f + (0.35f * optics.vibrancy)
+                                            brightness = 0.02f,
+                                            contrast = 1.02f,
+                                            saturation = 1.0f
                                         )
-                                        vibrancy()
                                         if (optics.lensRefractionHeight > 0f) {
                                             lens(
-                                                refractionHeight = (optics.lensRefractionHeight * 24.dp.value).dp.toPx(),
-                                                refractionAmount = (optics.lensRefractionAmount * 32.dp.value).dp.toPx(),
-                                                chromaticAberration = optics.chromaticAberration
+                                                refractionHeight = (optics.lensRefractionHeight * 22.dp.value).dp.toPx(),
+                                                refractionAmount = (optics.lensRefractionAmount * 28.dp.value).dp.toPx(),
+                                                chromaticAberration = false
                                             )
                                         }
                                         opacity(alpha = 1.0f)
@@ -661,21 +793,6 @@ fun FloatingGlassNavBar(
                                 )
                         )
                     }
-
-                    // Translucent Clear Glass Substrate with 5.dp Gaussian blur (NO BLACK OR DARK ACCENTS!)
-                    Box(
-                        modifier = Modifier
-                            .matchParentSize()
-                            .blur(radius = 5.dp)
-                            .background(
-                                Brush.radialGradient(
-                                    colors = listOf(
-                                        Color.White.copy(alpha = 0.14f),
-                                        Color.White.copy(alpha = 0.07f)
-                                    )
-                                )
-                            )
-                    )
 
                     // Specular Crescent Light Reflection & Glass Bevel
                     Box(
@@ -741,11 +858,16 @@ fun GlassStatChip(
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null
 ) {
-    GlassCard(
-        modifier = modifier,
-        shape = RoundedCornerShape(18.dp),
-        borderBrush = GlassTokens.GlassBorderSubtle,
-        onClick = onClick
+    val clickModifier = if (onClick != null) {
+        Modifier.bounceClick(scaleDown = 0.99f, onClick = onClick)
+    } else {
+        Modifier
+    }
+    Column(
+        modifier = modifier
+            .background(VelorixBg)
+            .then(clickModifier)
+            .padding(vertical = 10.dp, horizontal = 4.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -757,45 +879,41 @@ fun GlassStatChip(
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
                 color = VelorixTextSecondary,
-                letterSpacing = 1.sp
+                letterSpacing = 0.8.sp
             )
-            Surface(
-                modifier = Modifier.size(28.dp),
-                shape = RoundedCornerShape(8.dp),
-                color = accentColor.copy(alpha = 0.15f),
-                border = BorderStroke(1.dp, accentColor.copy(alpha = 0.35f))
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = title,
-                        tint = accentColor,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-            }
+            Icon(
+                imageVector = icon,
+                contentDescription = title,
+                tint = accentColor,
+                modifier = Modifier.size(15.dp)
+            )
         }
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(6.dp))
         Text(
             text = value,
             fontSize = 18.sp,
-            fontWeight = FontWeight.Black,
-            color = Color.White,
+            fontWeight = FontWeight.Bold,
+            color = VelorixTextPrimary,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
         Text(
             text = subtitle,
             fontSize = 10.sp,
-            color = VelorixTextSecondary.copy(alpha = 0.8f),
+            color = VelorixTextSecondary.copy(alpha = 0.85f),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
+        )
+        Spacer(modifier = Modifier.height(10.dp))
+        HorizontalDivider(
+            thickness = 0.5.dp,
+            color = Color.White.copy(alpha = 0.08f)
         )
     }
 }
 
 /**
- * Vercel / Lovable Minimalist Primary Button (Solid High-Contrast)
+ * Sleek Borderless Primary Action (No harsh inner box border)
  */
 @Composable
 fun GlassButton(
@@ -806,48 +924,42 @@ fun GlassButton(
     gradient: Brush? = null,
     enabled: Boolean = true
 ) {
-    Surface(
+    Box(
         modifier = modifier
-            .clip(RoundedCornerShape(10.dp))
-            .bounceClick(scaleDown = 0.95f) { if (enabled) onClick() },
-        color = Color.White,
-        shape = RoundedCornerShape(10.dp),
-        border = BorderStroke(1.dp, Color(0xFFE4E4E7))
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (enabled) VelorixAccent.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.04f))
+            .bounceClick(scaleDown = 0.96f) { if (enabled) onClick() }
+            .padding(horizontal = 12.dp, vertical = 9.dp),
+        contentAlignment = Alignment.Center
     ) {
-        Box(
-            modifier = Modifier
-                .padding(horizontal = 14.dp, vertical = 10.dp),
-            contentAlignment = Alignment.Center
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
-            ) {
-                if (icon != null) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        tint = Color.Black,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                }
-                Text(
-                    text = text,
-                    color = Color.Black,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 12.5.sp,
-                    letterSpacing = 0.3.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+            if (icon != null) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = if (enabled) VelorixAccent else Color(0xFF64748B),
+                    modifier = Modifier.size(15.dp)
                 )
+                Spacer(modifier = Modifier.width(6.dp))
             }
+            Text(
+                text = text,
+                color = if (enabled) VelorixAccent else Color(0xFF64748B),
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 12.sp,
+                letterSpacing = 0.3.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }
 
 /**
- * Vercel / Lovable Minimalist Secondary Button (Dark Zinc Minimalist)
+ * Sleek Borderless Secondary Action (No nested box border)
  */
 @Composable
 fun GlassOutlinedButton(
@@ -855,50 +967,44 @@ fun GlassOutlinedButton(
     modifier: Modifier = Modifier,
     text: String,
     icon: ImageVector? = null,
-    borderColor: Color = Color(0xFF27272A)
+    borderColor: Color = Color.Transparent
 ) {
-    Surface(
+    Box(
         modifier = modifier
-            .clip(RoundedCornerShape(10.dp))
-            .bounceClick(scaleDown = 0.95f) { onClick() },
-        color = Color(0xFF141416),
-        shape = RoundedCornerShape(10.dp),
-        border = BorderStroke(1.dp, Color(0xFF27272A))
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color(0xFF1A2232))
+            .bounceClick(scaleDown = 0.96f) { onClick() }
+            .padding(horizontal = 12.dp, vertical = 9.dp),
+        contentAlignment = Alignment.Center
     ) {
-        Box(
-            modifier = Modifier
-                .padding(horizontal = 14.dp, vertical = 10.dp),
-            contentAlignment = Alignment.Center
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
-            ) {
-                if (icon != null) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        tint = Color(0xFFE4E4E7),
-                        modifier = Modifier.size(15.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                }
-                Text(
-                    text = text,
-                    color = Color.White,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 12.5.sp,
-                    letterSpacing = 0.3.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+            if (icon != null) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = VelorixTextPrimary,
+                    modifier = Modifier.size(15.dp)
                 )
+                Spacer(modifier = Modifier.width(6.dp))
             }
+            Text(
+                text = text,
+                color = VelorixTextPrimary,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 12.sp,
+                letterSpacing = 0.3.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }
 
 /**
- * Xiaomi HyperOS & Vercel minimal theme toggle with animated rotation and haptic response.
+ * Minimal theme toggle with animated rotation and haptic response.
  */
 @Composable
 fun ThemeToggleSwitch(
@@ -918,8 +1024,8 @@ fun ThemeToggleSwitch(
             .bounceClick(scaleDown = 0.92f) {
                 com.example.ui.theme.ThemeManager.toggleTheme(context)
             },
-        color = if (isDark) Color(0xFF141418) else Color(0xFFF1F5F9),
-        border = BorderStroke(1.dp, if (isDark) Color(0xFF27272A) else Color(0xFFE2E8F0)),
+        color = if (isDark) Color(0xFF131924) else Color(0xFFF1F5F9),
+        border = BorderStroke(1.dp, if (isDark) Color(0xFF222C3C) else Color(0xFFCBD5E1)),
         shape = RoundedCornerShape(20.dp)
     ) {
         Row(
@@ -930,7 +1036,7 @@ fun ThemeToggleSwitch(
             Icon(
                 imageVector = if (isDark) Icons.Default.DarkMode else Icons.Default.LightMode,
                 contentDescription = if (isDark) "Switch to Light Theme" else "Switch to Dark Theme",
-                tint = if (isDark) Color(0xFFA78BFA) else Color(0xFFF59E0B),
+                tint = if (isDark) Color(0xFF818CF8) else Color(0xFFF59E0B),
                 modifier = Modifier
                     .size(15.dp)
                     .graphicsLayer(rotationZ = rotation)
@@ -939,7 +1045,7 @@ fun ThemeToggleSwitch(
                 text = if (isDark) "Dark" else "Light",
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
-                color = if (isDark) Color(0xFFEDEDED) else Color(0xFF0F172A)
+                color = if (isDark) VelorixTextPrimary else Color(0xFF0F172A)
             )
         }
     }

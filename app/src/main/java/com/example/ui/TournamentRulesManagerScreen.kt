@@ -105,14 +105,14 @@ fun TournamentRulesManagerScreen(
                         is ImageUploadResult.Success -> {
                             bannerUrl = result.url
                             isUploadingBanner = false
-                            bannerStatusMessage = "Uploaded via ${result.provider} ✓"
+                            bannerStatusMessage = "Uploaded via ${result.provider}"
                             Toast.makeText(context, "Tournament banner updated!", Toast.LENGTH_SHORT).show()
                         }
                         is ImageUploadResult.Failure -> {
                             if (result.fallbackBase64 != null) {
                                 bannerUrl = result.fallbackBase64
                                 isUploadingBanner = false
-                                bannerStatusMessage = "Banner attached ✓"
+                                bannerStatusMessage = "Banner attached"
                                 Toast.makeText(context, "Banner image attached", Toast.LENGTH_SHORT).show()
                             } else {
                                 isUploadingBanner = false
@@ -148,14 +148,14 @@ fun TournamentRulesManagerScreen(
                         is ImageUploadResult.Success -> {
                             bannerUrl = result.url
                             isUploadingBanner = false
-                            bannerStatusMessage = "Uploaded via ${result.provider} ✓"
+                            bannerStatusMessage = "Uploaded via ${result.provider}"
                             Toast.makeText(context, "Photo uploaded successfully!", Toast.LENGTH_SHORT).show()
                         }
                         is ImageUploadResult.Failure -> {
                             if (result.fallbackBase64 != null) {
                                 bannerUrl = result.fallbackBase64
                                 isUploadingBanner = false
-                                bannerStatusMessage = "Photo attached ✓"
+                                bannerStatusMessage = "Photo attached"
                                 Toast.makeText(context, "Photo attached as banner", Toast.LENGTH_SHORT).show()
                             } else {
                                 isUploadingBanner = false
@@ -327,17 +327,14 @@ fun TournamentRulesManagerScreen(
                 )
             },
             bottomBar = {
-                // Persistent Floating Save Bar
+                // Persistent Save Bar
                 if (currentTournament != null) {
-                    Surface(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(16.dp),
-                        shape = RoundedCornerShape(20.dp),
-                        color = Color(0xDD1B1430),
-                        border = BorderStroke(1.5.dp, GlassTokens.GlassBorderActive),
-                        shadowElevation = 16.dp
+                            .background(Color.Black)
                     ) {
+                        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.12f))
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -865,7 +862,7 @@ fun TournamentRulesManagerScreen(
                             }
                         }
 
-                        Divider(color = Color.White.copy(alpha = 0.1f), modifier = Modifier.padding(vertical = 4.dp))
+                        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f), modifier = Modifier.padding(vertical = 4.dp))
 
                         // Gun Skin Attributes Switch
                         RuleToggleRow(
@@ -911,7 +908,7 @@ fun TournamentRulesManagerScreen(
                             exit = fadeOut() + shrinkVertically()
                         ) {
                             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                Divider(color = Color.White.copy(alpha = 0.1f))
+                                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
 
                                 // Allowed Skills
                                 Text(
@@ -1080,7 +1077,7 @@ fun TournamentRulesManagerScreen(
                             badgeColor = if (headshotOnly) Color(0xFFEF4444) else Color(0xFF10B981)
                         )
 
-                        Divider(color = Color.White.copy(alpha = 0.1f), modifier = Modifier.padding(vertical = 4.dp))
+                        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f), modifier = Modifier.padding(vertical = 4.dp))
 
                         // Safe Zone Speed
                         Text(
@@ -1090,27 +1087,28 @@ fun TournamentRulesManagerScreen(
                             color = VelorixTextSecondary
                         )
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            modifier = Modifier.fillMaxWidth()
                         ) {
                             val speeds = listOf("Normal", "Fast", "Hardcore Blitz")
                             speeds.forEach { speed ->
                                 val isSelected = safeZoneShrinkSpeed.equals(speed, ignoreCase = true)
-                                Surface(
+                                Column(
                                     modifier = Modifier
                                         .weight(1f)
-                                        .clickable { safeZoneShrinkSpeed = speed },
-                                    shape = RoundedCornerShape(10.dp),
-                                    color = if (isSelected) VelorixAccent else Color(0xFF18181B),
-                                    border = BorderStroke(1.dp, if (isSelected) VelorixAccentLight else Color.White.copy(alpha = 0.15f))
+                                        .clickable { safeZoneShrinkSpeed = speed }
+                                        .padding(top = 8.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
                                     Text(
                                         text = speed,
                                         fontSize = 11.sp,
                                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                        color = Color.White,
-                                        modifier = Modifier.padding(vertical = 8.dp),
-                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                        color = if (isSelected) VelorixAccentLight else Color(0xFF94A3B8)
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    HorizontalDivider(
+                                        thickness = if (isSelected) 2.dp else 0.5.dp,
+                                        color = if (isSelected) VelorixAccent else Color.White.copy(alpha = 0.08f)
                                     )
                                 }
                             }
@@ -1210,168 +1208,156 @@ fun TournamentSelectorCard(
     onToggleDropdown: () -> Unit,
     onSelectTournament: (Tournament) -> Unit
 ) {
-    GlassCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        borderBrush = GlassTokens.GlassBorderGradient
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color.Black)
+            .padding(vertical = 8.dp)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "TARGET TOURNAMENT",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = VelorixAccentLight,
+                    letterSpacing = 1.sp
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = currentTournament?.title ?: "Select Tournament",
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            Row(
+                modifier = Modifier
+                    .clickable { onToggleDropdown() }
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "CHANGE",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = VelorixAccentLight
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Icon(
+                    imageVector = if (showDropdown) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    contentDescription = "Dropdown",
+                    tint = VelorixAccentLight,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+        }
+
+        if (currentTournament != null) {
+            Spacer(modifier = Modifier.height(8.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "TARGET TOURNAMENT",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = VelorixAccentLight,
-                        letterSpacing = 1.sp
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = currentTournament?.title ?: "Select Tournament",
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-
-                Box(
-                    modifier = Modifier
-                        .background(Color(0x337F56D9), RoundedCornerShape(10.dp))
-                        .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(10.dp))
-                        .clickable { onToggleDropdown() }
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = "CHANGE",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = VelorixAccentLight
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Icon(
-                            imageVector = if (showDropdown) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                            contentDescription = "Dropdown",
-                            tint = VelorixAccentLight,
-                            modifier = Modifier.size(16.dp)
-                        )
+                TournamentMiniBadge(label = currentTournament.game, icon = Icons.Default.SportsEsports)
+                TournamentMiniBadge(label = currentTournament.map, icon = Icons.Default.Map)
+                TournamentMiniBadge(label = currentTournament.format, icon = Icons.Default.People)
+                TournamentMiniBadge(
+                    label = currentTournament.status,
+                    icon = Icons.Default.Circle,
+                    color = when (currentTournament.status.uppercase()) {
+                        "LIVE" -> Color(0xFFFF5252)
+                        "COMPLETED" -> Color(0xFF81C784)
+                        else -> VelorixAccent
                     }
-                }
+                )
             }
+        }
 
-            if (currentTournament != null) {
-                Spacer(modifier = Modifier.height(10.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    TournamentMiniBadge(label = currentTournament.game, icon = Icons.Default.SportsEsports)
-                    TournamentMiniBadge(label = currentTournament.map, icon = Icons.Default.Map)
-                    TournamentMiniBadge(label = currentTournament.format, icon = Icons.Default.People)
-                    TournamentMiniBadge(
-                        label = currentTournament.status,
-                        icon = Icons.Default.Circle,
-                        color = when (currentTournament.status.uppercase()) {
-                            "LIVE" -> Color(0xFFFF5252)
-                            "COMPLETED" -> Color(0xFF81C784)
-                            else -> VelorixAccent
-                        }
-                    )
-                }
-            }
-
-            // Dropdown List of all tournaments
-            AnimatedVisibility(
-                visible = showDropdown,
-                enter = fadeIn() + expandVertically(),
-                exit = fadeOut() + shrinkVertically()
+        // Dropdown List of all tournaments
+        AnimatedVisibility(
+            visible = showDropdown,
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 10.dp)
+                    .background(Color.Black)
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 12.dp)
-                        .background(Color(0xFF141418), RoundedCornerShape(14.dp))
-                        .border(1.dp, Color(0xFF27272A), RoundedCornerShape(14.dp))
-                        .padding(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    tournaments.forEach { t ->
-                        val isSelected = t.id == currentTournament?.id
-                        Surface(
+                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.1f))
+                tournaments.forEach { t ->
+                    val isSelected = t.id == currentTournament?.id
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelectTournament(t) }
+                    ) {
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { onSelectTournament(t) },
-                            shape = RoundedCornerShape(10.dp),
-                            color = if (isSelected) Color(0x447F56D9) else Color.Transparent
+                                .padding(horizontal = 4.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = t.title,
-                                        fontSize = 13.sp,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                        color = if (isSelected) Color.White else Color.White.copy(alpha = 0.8f),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Text(
-                                        text = "${t.game} • ${t.map} • ${t.format}",
-                                        fontSize = 10.sp,
-                                        color = VelorixTextSecondary
-                                    )
-                                }
-                                if (isSelected) {
-                                    Icon(
-                                        imageVector = Icons.Default.Check,
-                                        contentDescription = "Selected",
-                                        tint = VelorixAccent,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = t.title,
+                                    fontSize = 13.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isSelected) VelorixAccentLight else Color.White,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "${t.game} • ${t.map} • ${t.format}",
+                                    fontSize = 10.sp,
+                                    color = VelorixTextSecondary
+                                )
+                            }
+                            if (isSelected) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = "Selected",
+                                    tint = VelorixAccent,
+                                    modifier = Modifier.size(16.dp)
+                                )
                             }
                         }
+                        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.06f))
                     }
                 }
             }
         }
+        Spacer(modifier = Modifier.height(10.dp))
+        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
     }
 }
 
 @Composable
 fun TournamentMiniBadge(label: String, icon: ImageVector, color: Color = Color.White.copy(alpha = 0.85f)) {
-    Box(
-        modifier = Modifier
-            .background(Color(0x22FFFFFF), RoundedCornerShape(6.dp))
-            .border(0.5.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
-            .padding(horizontal = 6.dp, vertical = 3.dp)
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = color,
-                modifier = Modifier.size(10.dp)
-            )
-            Spacer(modifier = Modifier.width(3.dp))
-            Text(
-                text = label,
-                fontSize = 9.5.sp,
-                fontWeight = FontWeight.Bold,
-                color = color
-            )
-        }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = color,
+            modifier = Modifier.size(11.dp)
+        )
+        Spacer(modifier = Modifier.width(4.dp))
+        Text(
+            text = label,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            color = color
+        )
     }
 }
 
@@ -1532,7 +1518,7 @@ fun PresetTemplatesSection(
                 letterSpacing = 1.sp
             )
             Text(
-                text = "Auto-fills all categories",
+                text = "Tap mode to auto-fill rules",
                 fontSize = 10.sp,
                 color = VelorixTextSecondary
             )
@@ -1542,71 +1528,51 @@ fun PresetTemplatesSection(
             modifier = Modifier
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             PRESET_TEMPLATES.forEach { preset ->
                 val isActive = activePreset == preset.name
-                Surface(
+                Column(
                     modifier = Modifier
-                        .width(180.dp)
-                        .clickable { onApplyPreset(preset) },
-                    shape = RoundedCornerShape(16.dp),
-                    color = if (isActive) Color(0x447F56D9) else Color(0x221E1533),
-                    border = BorderStroke(1.2.dp, if (isActive) preset.color else Color.White.copy(alpha = 0.15f))
+                        .width(165.dp)
+                        .clickable { onApplyPreset(preset) }
+                        .padding(vertical = 8.dp)
                 ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(28.dp)
-                                    .background(preset.color.copy(alpha = 0.2f), CircleShape),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = preset.icon,
-                                    contentDescription = null,
-                                    tint = preset.color,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = preset.name,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(6.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = preset.icon,
+                            contentDescription = null,
+                            tint = preset.color,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = preset.description,
-                            fontSize = 9.5.sp,
-                            color = VelorixTextSecondary,
-                            lineHeight = 12.sp,
-                            maxLines = 2,
+                            text = preset.name,
+                            fontSize = 12.sp,
+                            fontWeight = if (isActive) FontWeight.Bold else FontWeight.SemiBold,
+                            color = if (isActive) preset.color else Color.White,
+                            maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(if (isActive) preset.color else Color(0x33FFFFFF), RoundedCornerShape(6.dp))
-                                .padding(vertical = 4.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = if (isActive) "ACTIVE PRESET" else "APPLY PRESET",
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = if (isActive) Color.Black else Color.White
-                            )
-                        }
                     }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = preset.description,
+                        fontSize = 10.sp,
+                        color = VelorixTextSecondary,
+                        lineHeight = 13.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    HorizontalDivider(
+                        thickness = if (isActive) 2.dp else 0.5.dp,
+                        color = if (isActive) preset.color else Color.White.copy(alpha = 0.12f)
+                    )
                 }
             }
         }
+        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
     }
 }
 
@@ -1622,53 +1588,45 @@ fun RuleSectionCard(
     accentColor: Color,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    GlassCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
-        borderBrush = GlassTokens.GlassBorderGradient
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color.Black)
+            .padding(vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .background(accentColor.copy(alpha = 0.2f), RoundedCornerShape(10.dp))
-                        .border(1.dp, accentColor.copy(alpha = 0.4f), RoundedCornerShape(10.dp)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        tint = accentColor,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.width(12.dp))
-                Column {
-                    Text(
-                        text = title,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-                    Text(
-                        text = subtitle,
-                        fontSize = 9.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = VelorixTextSecondary,
-                        letterSpacing = 0.8.sp
-                    )
-                }
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = accentColor,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Column {
+                Text(
+                    text = title,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+                Text(
+                    text = subtitle,
+                    fontSize = 9.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = VelorixTextSecondary,
+                    letterSpacing = 0.8.sp
+                )
             }
-
-            content()
         }
+
+        content()
+
+        Spacer(modifier = Modifier.height(4.dp))
+        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
     }
 }
 
@@ -1681,79 +1639,81 @@ fun RuleToggleRow(
     badgeText: String,
     badgeColor: Color
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onCheckedChange(!checked) }
-            .padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = title,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Box(
-                    modifier = Modifier
-                        .background(badgeColor.copy(alpha = 0.2f), RoundedCornerShape(6.dp))
-                        .border(0.8.dp, badgeColor.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                ) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onCheckedChange(!checked) }
+                .padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = title,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = badgeText,
-                        fontSize = 8.5.sp,
+                        fontSize = 9.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color = badgeColor
                     )
                 }
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = subtitle,
+                    fontSize = 10.5.sp,
+                    color = VelorixTextSecondary,
+                    lineHeight = 13.sp
+                )
             }
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = subtitle,
-                fontSize = 10.5.sp,
-                color = VelorixTextSecondary,
-                lineHeight = 13.sp
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Switch(
+                checked = checked,
+                onCheckedChange = onCheckedChange,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = VelorixAccent,
+                    uncheckedThumbColor = Color.LightGray,
+                    uncheckedTrackColor = Color(0xFF18181B)
+                )
             )
         }
-
-        Spacer(modifier = Modifier.width(12.dp))
-
-        Switch(
-            checked = checked,
-            onCheckedChange = onCheckedChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.White,
-                checkedTrackColor = VelorixAccent,
-                uncheckedThumbColor = Color.LightGray,
-                uncheckedTrackColor = Color(0x331E1533)
-            )
-        )
+        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.06f))
     }
 }
 
 @Composable
 fun RuleQuickChip(
     label: String,
-    chipColor: Color = Color(0x337F56D9),
+    chipColor: Color = VelorixAccent,
     onClick: () -> Unit
 ) {
-    Box(
+    Column(
         modifier = Modifier
-            .background(chipColor, RoundedCornerShape(8.dp))
-            .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
             .clickable { onClick() }
-            .padding(horizontal = 10.dp, vertical = 5.dp)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
             text = label,
-            fontSize = 10.sp,
+            fontSize = 11.sp,
             fontWeight = FontWeight.SemiBold,
             color = Color.White
+        )
+        Spacer(modifier = Modifier.height(3.dp))
+        Box(
+            modifier = Modifier
+                .width(24.dp)
+                .height(1.dp)
+                .background(chipColor.copy(alpha = 0.7f))
         )
     }
 }
@@ -1762,8 +1722,8 @@ fun RuleQuickChip(
 fun customFieldColors() = OutlinedTextFieldDefaults.colors(
     focusedTextColor = Color.White,
     unfocusedTextColor = Color.White,
-    focusedBorderColor = Color.White,
-    unfocusedBorderColor = Color(0xFF27272A),
-    focusedContainerColor = Color(0xFF121215),
-    unfocusedContainerColor = Color(0xFF0F0F12)
+    focusedBorderColor = VelorixAccent,
+    unfocusedBorderColor = Color.White.copy(alpha = 0.14f),
+    focusedContainerColor = Color.Black,
+    unfocusedContainerColor = Color.Black
 )

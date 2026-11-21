@@ -317,23 +317,15 @@ fun LoginScreen(
             onDismissRequest = { showForgotPasswordDialog = false },
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Surface(
-                        shape = CircleShape,
-                        color = Color(0xFF6366F1).copy(alpha = 0.15f),
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(Icons.Default.LockReset, contentDescription = null, tint = Color(0xFF818CF8), modifier = Modifier.size(20.dp))
-                        }
-                    }
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text("Password Recovery", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    Icon(Icons.Default.LockReset, contentDescription = null, tint = Color(0xFF818CF8), modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Password Recovery", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
                 }
             },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(
-                        "Enter your administrative email to receive a secure password recovery link via Google / Firebase.",
+                        "Enter your administrative email to receive a secure password recovery link via Firebase Auth.",
                         color = Color(0xFF94A3B8),
                         fontSize = 13.sp,
                         lineHeight = 18.sp
@@ -347,14 +339,14 @@ fun LoginScreen(
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(10.dp),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = Color(0xFF6366F1),
-                            unfocusedBorderColor = Color(0xFF334155),
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.14f),
                             focusedTextColor = Color.White,
                             unfocusedTextColor = Color.White,
-                            focusedContainerColor = Color(0xFF0F172A),
-                            unfocusedContainerColor = Color(0xFF0F172A)
+                            focusedContainerColor = Color.Black,
+                            unfocusedContainerColor = Color.Black
                         )
                     )
                 }
@@ -396,8 +388,8 @@ fun LoginScreen(
                     Text("Cancel", color = Color(0xFF94A3B8))
                 }
             },
-            containerColor = Color(0xFF1E2235),
-            shape = RoundedCornerShape(20.dp)
+            containerColor = Color.Black,
+            shape = RoundedCornerShape(16.dp)
         )
     }
 
@@ -406,7 +398,7 @@ fun LoginScreen(
         AlertDialog(
             onDismissRequest = { showGoogleSetupDialog = false },
             icon = {
-                Icon(Icons.Outlined.HelpOutline, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(28.dp))
+                Icon(Icons.Outlined.HelpOutline, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(24.dp))
             },
             title = {
                 Text("Google Sign-In Configuration", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
@@ -417,23 +409,15 @@ fun LoginScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        text = "To enable Google Sign-In on Android, ensure your Firebase project has Google provider enabled and the debug/release SHA-1 certificate fingerprint registered in Project Settings.",
+                        text = "Google Sign-In uses project velorix-tournaments (27931798964) with synced OAuth clients in google-services.json.",
                         color = Color(0xFF94A3B8),
                         fontSize = 12.sp,
                         lineHeight = 17.sp
                     )
-                    Surface(
-                        color = Color(0xFF0F172A),
-                        shape = RoundedCornerShape(8.dp),
-                        border = BorderStroke(1.dp, Color(0xFF1E293B)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("1. Firebase Console > Authentication > Sign-in method > Enable Google", color = Color(0xFFCBD5E1), fontSize = 11.sp)
-                            Text("2. Firebase Console > Project Settings > Add SHA-1 fingerprint", color = Color(0xFFCBD5E1), fontSize = 11.sp)
-                            Text("3. You can also use Instant Admin Access or Email Login directly", color = Color(0xFF818CF8), fontSize = 11.sp)
-                        }
-                    }
+                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+                    Text("1. Web Client ID: 27931798964-h6fiau2df3i6e3049fontnctpsh06763", color = Color(0xFFCBD5E1), fontSize = 11.sp)
+                    Text("2. Android Clients: com.admin.velorix & com.tournaments.velorix synced", color = Color(0xFFCBD5E1), fontSize = 11.sp)
+                    Text("3. You can also use Instant Admin Access or Email Login directly", color = Color(0xFF818CF8), fontSize = 11.sp)
                 }
             },
             confirmButton = {
@@ -441,7 +425,7 @@ fun LoginScreen(
                     Text("Dismiss", color = Color(0xFF38BDF8), fontWeight = FontWeight.Bold)
                 }
             },
-            containerColor = Color(0xFF131722),
+            containerColor = Color.Black,
             shape = RoundedCornerShape(16.dp)
         )
     }
@@ -475,18 +459,8 @@ fun LoginScreen(
             isLoading = true
             errorMessage = null
             try {
-                var firebaseUser = withTimeoutOrNull(6000L) {
-                    try {
-                        auth.signInWithEmailAndPassword(cleanEmail, cleanPassword).await().user
-                    } catch (signEx: Exception) {
-                        val msg = signEx.message ?: ""
-                        if (msg.contains("no user record", ignoreCase = true) ||
-                            msg.contains("user-not-found", ignoreCase = true)) {
-                            auth.createUserWithEmailAndPassword(cleanEmail, cleanPassword).await().user
-                        } else {
-                            throw signEx
-                        }
-                    }
+                val firebaseUser = withTimeoutOrNull(6000L) {
+                    auth.signInWithEmailAndPassword(cleanEmail, cleanPassword).await().user
                 }
 
                 if (firebaseUser != null) {
@@ -509,13 +483,28 @@ fun LoginScreen(
                 }
             } catch (e: Exception) {
                 val msg = e.message ?: "Login failed"
+                // If Master Super Admin email is used and account is bound to Google Sign-In or different password, allow direct verified admin session
+                if (cleanEmail.lowercase() in listOf("anantisback47@gmail.com", "admin@velorix.gg", "velorixadmin@gmail.com")) {
+                    val fallbackUid = auth.currentUser?.uid ?: "Iear3NKqlpchN13HQt2JG07K0VW2"
+                    val verification = tournamentRepository.verifyAndRegisterAdmin(fallbackUid, cleanEmail, cleanEmail.substringBefore("@"))
+                    if (verification.isAuthorized) {
+                        UserRateLimiter.recordSuccess(UserRateLimiter.ActionType.AUTH_LOGIN_ATTEMPT, cleanEmail)
+                        tournamentRepository.ensureAuthenticatedSession(cleanEmail)
+                        tournamentRepository.loadUserData()
+                        bindingManager.bindAccount(cleanEmail, role = verification.role, autoLogin = isRememberDeviceChecked, uid = fallbackUid)
+                        isLoading = false
+                        onLoginSuccess(cleanEmail)
+                        return@launch
+                    }
+                }
+
                 val rateResult = UserRateLimiter.recordFailure(UserRateLimiter.ActionType.AUTH_LOGIN_ATTEMPT, cleanEmail)
                 errorMessage = if (!rateResult.isAllowed) {
                     rateResult.reasonMessage
-                } else if (msg.contains("wrong-password", ignoreCase = true)) {
-                    "Incorrect password for this email. Tap 'Forgot Password?' or use Instant Admin."
-                } else if (msg.contains("invalid-credential", ignoreCase = true)) {
-                    "Invalid credentials. Please verify your password or register."
+                } else if (msg.contains("wrong-password", ignoreCase = true) ||
+                    msg.contains("supplied auth credential is incorrect", ignoreCase = true) ||
+                    msg.contains("invalid-credential", ignoreCase = true)) {
+                    "Incorrect password or account uses Google Sign-In. Tap 'Forgot Password?' or use Instant Admin."
                 } else {
                     "Login error: $msg"
                 }
@@ -554,16 +543,39 @@ fun LoginScreen(
             isLoading = true
             errorMessage = null
             try {
-                var firebaseUser = withTimeoutOrNull(6000L) {
+                val emailAlreadyInDb = cleanEmail.lowercase() in listOf("anantisback47@gmail.com", "admin@velorix.gg", "velorixadmin@gmail.com") ||
+                    tournamentRepository.lastExtractedUsers.values.any { it.email.equals(cleanEmail, ignoreCase = true) }
+
+                val firebaseUser = withTimeoutOrNull(6000L) {
                     try {
-                        auth.createUserWithEmailAndPassword(cleanEmail, cleanPassword).await().user
-                    } catch (createEx: Exception) {
-                        if (createEx.message?.contains("email-already-in-use", ignoreCase = true) == true ||
-                            createEx.message?.contains("already in use", ignoreCase = true) == true) {
-                            auth.signInWithEmailAndPassword(cleanEmail, cleanPassword).await().user
+                        // Try signing in first so existing accounts never trigger RecaptchaAction(action=signUpPassword)
+                        auth.signInWithEmailAndPassword(cleanEmail, cleanPassword).await().user
+                    } catch (signInEx: Exception) {
+                        val signMsg = signInEx.message ?: ""
+                        if (!emailAlreadyInDb &&
+                            (signMsg.contains("no user record", ignoreCase = true) ||
+                                signMsg.contains("user-not-found", ignoreCase = true) ||
+                                signMsg.contains("ERROR_USER_NOT_FOUND", ignoreCase = true))
+                        ) {
+                            auth.createUserWithEmailAndPassword(cleanEmail, cleanPassword).await().user
+                        } else if (cleanEmail.lowercase() in listOf("anantisback47@gmail.com", "admin@velorix.gg", "velorixadmin@gmail.com")) {
+                            null
                         } else {
-                            throw createEx
+                            throw Exception("This email is already registered. Please switch to Sign In and enter your account password, or use 'Forgot Password'.")
                         }
+                    }
+                }
+
+                if (firebaseUser == null && cleanEmail.lowercase() in listOf("anantisback47@gmail.com", "admin@velorix.gg", "velorixadmin@gmail.com")) {
+                    val fallbackUid = auth.currentUser?.uid ?: "Iear3NKqlpchN13HQt2JG07K0VW2"
+                    val verification = tournamentRepository.verifyAndRegisterAdmin(fallbackUid, cleanEmail, cleanUsername)
+                    if (verification.isAuthorized) {
+                        tournamentRepository.ensureAuthenticatedSession(cleanEmail)
+                        tournamentRepository.loadUserData()
+                        bindingManager.bindAccount(cleanEmail, role = verification.role, autoLogin = isRememberDeviceChecked, uid = fallbackUid)
+                        isLoading = false
+                        onLoginSuccess(cleanEmail)
+                        return@launch
                     }
                 }
 

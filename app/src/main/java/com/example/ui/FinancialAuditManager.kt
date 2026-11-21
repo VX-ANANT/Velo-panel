@@ -131,17 +131,25 @@ fun FinancialAuditDialog(
         },
         text = {
             Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color.Black)
             ) {
-                // Gross Metrics Grid
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+
+                // Gross Metrics 2x2 Hairline Grid (No nested boxes)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(IntrinsicSize.Min)
+                ) {
                     AuditMetricBox(
                         modifier = Modifier.weight(1f),
                         label = "GROSS COLLECTIONS",
                         value = "₹${totalGrossRevenue.toInt()}",
                         color = VelorixAccent
                     )
+                    VerticalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
                     AuditMetricBox(
                         modifier = Modifier.weight(1f),
                         label = "PRIZE POOLS",
@@ -150,13 +158,20 @@ fun FinancialAuditDialog(
                     )
                 }
 
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(IntrinsicSize.Min)
+                ) {
                     AuditMetricBox(
                         modifier = Modifier.weight(1f),
                         label = "PAID CASHOUTS",
                         value = "₹${totalApprovedPayouts.toInt()}",
                         color = Color(0xFF81C784)
                     )
+                    VerticalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
                     AuditMetricBox(
                         modifier = Modifier.weight(1f),
                         label = "PENDING CASHOUTS",
@@ -165,32 +180,46 @@ fun FinancialAuditDialog(
                     )
                 }
 
-                Surface(
-                    color = Color(0xFF1E1A2C),
-                    shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, Color(0xFF7F56D9).copy(alpha = 0.5f)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text("TREASURY SUMMARY", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFFD0BCFF), letterSpacing = 1.sp)
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Total Player Wallet Liabilities:", fontSize = 11.sp, color = VelorixTextSecondary)
-                            Text("₹${totalUserWallets.toInt()}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        }
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Net Operating Cashflow:", fontSize = 11.sp, color = VelorixTextSecondary)
-                            val net = totalGrossRevenue - totalApprovedPayouts
-                            Text(
-                                "₹${net.toInt()}",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (net >= 0) VelorixAccent else Color(0xFFFF5252)
-                            )
-                        }
+                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+
+                // Flat Treasury Summary Section
+                Column(modifier = Modifier.padding(vertical = 12.dp)) {
+                    Text(
+                        "TREASURY SUMMARY",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF71717A),
+                        letterSpacing = 1.sp
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Total Player Wallet Liabilities", fontSize = 11.5.sp, color = VelorixTextSecondary)
+                        Text("₹${totalUserWallets.toInt()}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.06f))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Net Operating Cashflow", fontSize = 11.5.sp, color = VelorixTextSecondary)
+                        val net = totalGrossRevenue - totalApprovedPayouts
+                        Text(
+                            "₹${net.toInt()}",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (net >= 0) VelorixAccent else Color(0xFFFF5252)
+                        )
                     }
                 }
+
+                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
             }
         },
         confirmButton = {
@@ -199,9 +228,9 @@ fun FinancialAuditDialog(
                     val csv = FinancialAuditExporter.generateFullAuditCsv(tournaments, users, cashouts)
                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     clipboard.setPrimaryClip(ClipData.newPlainText("Velorix Financial Audit CSV", csv))
-                    Toast.makeText(context, "Financial Audit CSV copied to clipboard!", Toast.LENGTH_LONG).show()
+                    Toast.makeText(context, "Financial Audit CSV copied to clipboard", Toast.LENGTH_LONG).show()
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent)
+                colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black)
             ) {
                 Icon(Icons.Default.ContentCopy, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(6.dp))
@@ -213,7 +242,7 @@ fun FinancialAuditDialog(
                 Text("Close", color = VelorixTextSecondary)
             }
         },
-        containerColor = CardVerifyBg
+        containerColor = Color.Black
     )
 }
 
@@ -224,16 +253,13 @@ fun AuditMetricBox(
     value: String,
     color: Color
 ) {
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(10.dp),
-        color = CardVerifyBg,
-        border = BorderStroke(1.dp, CardVerifyBorder)
+    Column(
+        modifier = modifier
+            .background(Color.Black)
+            .padding(horizontal = 10.dp, vertical = 12.dp)
     ) {
-        Column(modifier = Modifier.padding(10.dp)) {
-            Text(label, fontSize = 9.sp, fontWeight = FontWeight.Bold, color = VelorixTextSecondary, letterSpacing = 0.5.sp)
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(value, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = color)
-        }
+        Text(label, fontSize = 9.sp, fontWeight = FontWeight.Bold, color = VelorixTextSecondary, letterSpacing = 0.5.sp)
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(value, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = color)
     }
 }

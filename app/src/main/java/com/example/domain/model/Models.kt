@@ -5,6 +5,58 @@ import kotlinx.serialization.Serializable
 import com.google.firebase.database.IgnoreExtraProperties
 import com.google.firebase.database.PropertyName
 
+@Serializable
+enum class WalletBucket(
+    val key: String,
+    val displayLabel: String,
+    val shortLabel: String,
+    val isWithdrawable: Boolean
+) {
+    DEPOSIT("deposit", "Deposited Money (Non-Withdrawable)", "Deposited Money", false),
+    WINNING("winning", "Winning Money (Withdrawable)", "Winning Money", true),
+    BONUS("bonus", "Referral Bonus (Non-Withdrawable)", "Referral Bonus", false);
+
+    val displayName: String get() = displayLabel
+}
+
+@IgnoreExtraProperties
+@Serializable
+data class PlayerMatchRecord(
+    @get:PropertyName("tournamentId") @set:PropertyName("tournamentId")
+    var tournamentId: String = "",
+    @get:PropertyName("tournamentTitle") @set:PropertyName("tournamentTitle")
+    var tournamentTitle: String = "",
+    @get:PropertyName("game") @set:PropertyName("game")
+    var game: String = "Free Fire",
+    @get:PropertyName("category") @set:PropertyName("category")
+    var category: String = "BR",
+    @get:PropertyName("format") @set:PropertyName("format")
+    var format: String = "SOLO",
+    @get:PropertyName("map") @set:PropertyName("map")
+    var map: String = "Bermuda",
+    @get:PropertyName("joinedAt") @set:PropertyName("joinedAt")
+    var joinedAt: Long = 0L,
+    @get:PropertyName("entryFeePaid") @set:PropertyName("entryFeePaid")
+    var entryFeePaid: Double = 0.0,
+    @get:PropertyName("paidFromDeposit") @set:PropertyName("paidFromDeposit")
+    var paidFromDeposit: Double = 0.0,
+    @get:PropertyName("paidFromWinning") @set:PropertyName("paidFromWinning")
+    var paidFromWinning: Double = 0.0,
+    @get:PropertyName("paidFromBonus") @set:PropertyName("paidFromBonus")
+    var paidFromBonus: Double = 0.0,
+    @get:PropertyName("kills") @set:PropertyName("kills")
+    var kills: Int = 0,
+    @get:PropertyName("rank") @set:PropertyName("rank")
+    var rank: Int = 0,
+    @get:PropertyName("winningAmount") @set:PropertyName("winningAmount")
+    var winningAmount: Double = 0.0,
+    @get:PropertyName("status") @set:PropertyName("status")
+    var status: String = "JOINED" // JOINED, PLAYED, WON, REFUNDED
+) {
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
+    val netProfit: Double get() = winningAmount - entryFeePaid
+}
+
 @IgnoreExtraProperties
 @Serializable
 data class UserProfile(
@@ -40,6 +92,26 @@ data class UserProfile(
     var lastActive: Long = 0L,
     @get:PropertyName("createdAt") @set:PropertyName("createdAt")
     var createdAt: Long = 0L,
+    @get:PropertyName("firstAppJoinAt") @set:PropertyName("firstAppJoinAt")
+    var firstAppJoinAt: Long = 0L,
+    @get:PropertyName("firstMatchJoinedAt") @set:PropertyName("firstMatchJoinedAt")
+    var firstMatchJoinedAt: Long = 0L,
+    @get:PropertyName("lastMatchJoinedAt") @set:PropertyName("lastMatchJoinedAt")
+    var lastMatchJoinedAt: Long = 0L,
+    @get:PropertyName("totalMatchesJoined") @set:PropertyName("totalMatchesJoined")
+    var totalMatchesJoined: Int = 0,
+    @get:PropertyName("totalDeposited") @set:PropertyName("totalDeposited")
+    var totalDeposited: Double = 0.0,
+    @get:PropertyName("totalWithdrawn") @set:PropertyName("totalWithdrawn")
+    var totalWithdrawn: Double = 0.0,
+    @get:PropertyName("totalEntryFeesPaid") @set:PropertyName("totalEntryFeesPaid")
+    var totalEntryFeesPaid: Double = 0.0,
+    @get:PropertyName("supportCasesCount") @set:PropertyName("supportCasesCount")
+    var supportCasesCount: Int = 0,
+    @get:PropertyName("joinedMatchIds") @set:PropertyName("joinedMatchIds")
+    var joinedMatchIds: List<String> = emptyList(),
+    @get:PropertyName("matchHistory") @set:PropertyName("matchHistory")
+    var matchHistory: List<PlayerMatchRecord> = emptyList(),
     @get:PropertyName("gameId") @set:PropertyName("gameId")
     var gameId: String = "",
     @get:PropertyName("ign") @set:PropertyName("ign")
@@ -70,6 +142,8 @@ data class UserProfile(
     var phone: String = "",
     @get:PropertyName("banReason") @set:PropertyName("banReason")
     var banReason: String = "",
+    @get:PropertyName("banType") @set:PropertyName("banType")
+    var banType: String = "",
     @get:PropertyName("banCaseId") @set:PropertyName("banCaseId")
     var banCaseId: String = "",
     @get:PropertyName("bannedAt") @set:PropertyName("bannedAt")
@@ -80,6 +154,10 @@ data class UserProfile(
     var suspendedUntil: Long = 0L,
     @get:PropertyName("suspensionReason") @set:PropertyName("suspensionReason")
     var suspensionReason: String = "",
+    @get:PropertyName("suspendReason") @set:PropertyName("suspendReason")
+    var suspendReason: String = "",
+    @get:PropertyName("status") @set:PropertyName("status")
+    var status: String = "ACTIVE",
     @get:PropertyName("isVpnBlocked") @set:PropertyName("isVpnBlocked")
     var isVpnBlocked: Boolean = false,
     @get:PropertyName("isForceUpdateRequired") @set:PropertyName("isForceUpdateRequired")
@@ -106,40 +184,94 @@ data class UserProfile(
     var isGuest: Boolean = false,
     @get:PropertyName("isAnonymous") @set:PropertyName("isAnonymous")
     var isAnonymous: Boolean = false,
+    @get:PropertyName("bio") @set:PropertyName("bio")
+    var bio: String = "",
+    @get:PropertyName("socialLink") @set:PropertyName("socialLink")
+    var socialLink: String = "",
+    @get:PropertyName("lockedBalance") @set:PropertyName("lockedBalance")
+    var lockedBalance: Double = 0.0,
+    @get:PropertyName("kycVerified") @set:PropertyName("kycVerified")
+    var kycVerified: Boolean = false,
+    @get:PropertyName("dataExported") @set:PropertyName("dataExported")
+    var dataExported: Boolean = false,
+    @get:PropertyName("lastExportedAt") @set:PropertyName("lastExportedAt")
+    var lastExportedAt: Long = 0L,
+    @get:PropertyName("lastExportId") @set:PropertyName("lastExportId")
+    var lastExportId: String = "",
+    @get:PropertyName("accountStatus") @set:PropertyName("accountStatus")
+    var accountStatus: String = "ACTIVE",
+    @get:PropertyName("deletionRequested") @set:PropertyName("deletionRequested")
+    var deletionRequested: Boolean = false,
+    @get:PropertyName("deletionRequestId") @set:PropertyName("deletionRequestId")
+    var deletionRequestId: String = "",
+    @get:PropertyName("deletionReason") @set:PropertyName("deletionReason")
+    var deletionReason: String = "",
+    @get:PropertyName("deletionDetails") @set:PropertyName("deletionDetails")
+    var deletionDetails: String = "",
+    @get:PropertyName("deletionRequestedAt") @set:PropertyName("deletionRequestedAt")
+    var deletionRequestedAt: Long = 0L,
+    @get:PropertyName("isFounder") @set:PropertyName("isFounder")
+    var isFounder: Boolean = false,
+    @get:PropertyName("founderTier") @set:PropertyName("founderTier")
+    var founderTier: String = "",
+    @get:PropertyName("version") @set:PropertyName("version")
+    var version: Int = 1,
+    @get:PropertyName("updatedAt") @set:PropertyName("updatedAt")
+    var updatedAt: Long = 0L,
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
     var rawAttributes: Map<String, String> = emptyMap()
 ) {
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
+    val depositBalance: Double get() = depositFunds
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
+    val winningsBalance: Double get() = winningFunds
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
+    val bonusBalance: Double get() = bonusFunds
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
+    val inGameName: String get() = effectiveIgn
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
+    val freeFireId: String get() = gameId
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
+    val referralEarnings: Double get() = maxOf(referralBonusEarned, bonusFunds)
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
+    val suspensionEndTimeMillis: Long get() = suspendedUntil
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
     val isGuestSession: Boolean get() {
-        if (isGuest || isAnonymous) return true
-        val roleLower = role.trim().lowercase()
-        if (roleLower == "guest" || roleLower == "anonymous") return true
-        val nameLower = username.trim().lowercase()
-        if (nameLower.startsWith("guest") || nameLower.contains("guest session") || nameLower.startsWith("anonymous")) return true
-        val emailLower = email.trim().lowercase()
-        if (emailLower.contains("guest") || emailLower.contains("anonymous") || emailLower.endsWith("@guest.com")) return true
         val idLower = id.trim().lowercase()
-        if (idLower.startsWith("guest") || idLower.startsWith("anon_")) return true
-        val rawProvider = rawAttributes["provider"]?.lowercase() ?: rawAttributes["authProvider"]?.lowercase() ?: rawAttributes["providerId"]?.lowercase() ?: ""
-        if (rawProvider == "anonymous" || rawProvider == "guest") return true
-        if (rawAttributes["isGuest"]?.toBooleanStrictOrNull() == true || rawAttributes["isAnonymous"]?.toBooleanStrictOrNull() == true) return true
-        // If email, phone and gameId are all blank and username is Player or blank, it's an unauthenticated temporary session
-        if (email.isBlank() && phone.isBlank() && gameId.isBlank() && (nameLower.isBlank() || nameLower == "player" || nameLower.startsWith("player ("))) return true
-        return false
+        return idLower.startsWith("mock_guest_") || idLower.startsWith("temp_guest_")
     }
 
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
     val isMinor: Boolean get() = isUnder18 || (age in 1..17)
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
     val canJoinCashTournaments: Boolean get() = !isMinor && eligibleForCashTournaments
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
     val totalWalletBalance: Double get() = when {
-        balance > 0.0 -> balance
         (depositFunds + winningFunds + bonusFunds) > 0.0 -> depositFunds + winningFunds + bonusFunds
+        balance > 0.0 -> balance
         else -> funds
     }
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
     val walletBalance: Double get() = totalWalletBalance
+    /**
+     * Strictly ONLY Winning Money is withdrawable. Deposited Money and Bonus Money cannot be withdrawn.
+     */
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
+    val withdrawableBalance: Double get() = winningFunds.coerceAtLeast(0.0)
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
+    val nonWithdrawableBalance: Double get() = (depositFunds + bonusFunds).coerceAtLeast(0.0)
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
+    val canRequestWithdrawal: Boolean get() = !isBanned && !isSuspended && withdrawableBalance >= 50.0
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
+    val effectiveFirstAppJoinAt: Long get() = if (firstAppJoinAt > 0L) firstAppJoinAt else createdAt
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
     val effectiveIgn: String get() = when {
         ign.isNotBlank() && ign != "Player" -> ign
         username.isNotBlank() && username != "Player" && !username.startsWith("Player (") && !username.contains("@") -> username
         gameId.isNotBlank() -> "FF ID: $gameId"
         else -> ign.ifBlank { username.ifBlank { "Player" } }
     }
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
     val bestDisplayName: String
         get() = when {
             username.isNotBlank() && username != "Player" && !username.startsWith("Player (") && !username.contains("@") -> username
@@ -153,6 +285,7 @@ data class UserProfile(
             id.isNotBlank() && !id.startsWith("usr_") && !id.startsWith("acc_") -> "Player (${id.take(6)})"
             else -> "Player"
         }
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
     val bestEmailOrPhone: String
         get() = when {
             email.isNotBlank() && email.contains("@") -> email
@@ -164,13 +297,21 @@ data class UserProfile(
             id.isNotBlank() -> "UID: ${id.take(10)}"
             else -> "No email/phone linked"
         }
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
     val matchesWon: Int get() = wins
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
     val totalKills: Int get() = kills
-    val matchesPlayed: Int get() = wins + activityPoints
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
+    val matchesPlayed: Int get() = if (totalMatchesJoined > 0) totalMatchesJoined else (wins + activityPoints)
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
     val phoneNumber: String get() = phone.ifBlank { if (!phoneOrEmail.contains("@")) phoneOrEmail else "" }
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
     val gameAccountId: String get() = gameId
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
     val uid: String get() = id
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
     val gameUsername: String get() = bestDisplayName
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
     val freeFireUid: String get() = gameId
 }
 
@@ -181,12 +322,34 @@ data class AppAnnouncementBanner(
     var id: String = "",
     @get:PropertyName("title") @set:PropertyName("title")
     var title: String = "",
+    @get:PropertyName("subtitle") @set:PropertyName("subtitle")
+    var subtitle: String = "",
+    @get:PropertyName("message") @set:PropertyName("message")
+    var message: String = "",
     @get:PropertyName("content") @set:PropertyName("content")
     var content: String = "",
+    @get:PropertyName("imageUrl") @set:PropertyName("imageUrl")
+    var imageUrl: String = "",
+    @get:PropertyName("actionUrl") @set:PropertyName("actionUrl")
+    var actionUrl: String = "",
+    @get:PropertyName("targetUrl") @set:PropertyName("targetUrl")
+    var targetUrl: String = "",
     @get:PropertyName("bannerType") @set:PropertyName("bannerType")
     var bannerType: String = "NEWS", // NEWS, PROMO, ALERT, UPDATE
+    @get:PropertyName("badgeText") @set:PropertyName("badgeText")
+    var badgeText: String = "OFFICIAL",
+    @get:PropertyName("ctaText") @set:PropertyName("ctaText")
+    var ctaText: String = "JOIN NOW",
+    @get:PropertyName("actionType") @set:PropertyName("actionType")
+    var actionType: String = "TOURNAMENT",
+    @get:PropertyName("targetId") @set:PropertyName("targetId")
+    var targetId: String = "",
+    @get:PropertyName("gradientTheme") @set:PropertyName("gradientTheme")
+    var gradientTheme: String = "INDIGO_VIOLET",
     @get:PropertyName("isActive") @set:PropertyName("isActive")
     var isActive: Boolean = true,
+    @get:PropertyName("priority") @set:PropertyName("priority")
+    var priority: Int = 1,
     @get:PropertyName("createdAt") @set:PropertyName("createdAt")
     var createdAt: Long = System.currentTimeMillis()
 )
@@ -234,24 +397,38 @@ data class AdminRecord(
 data class SupportTicket(
     @get:PropertyName("id") @set:PropertyName("id")
     var id: String = "",
+    @get:PropertyName("userId") @set:PropertyName("userId")
+    var rawUserId: String = "",
     @get:PropertyName("userEmail") @set:PropertyName("userEmail")
     var userEmail: String = "",
     @get:PropertyName("username") @set:PropertyName("username")
     var username: String = "",
     @get:PropertyName("gameId") @set:PropertyName("gameId")
     var gameId: String = "",
+    @get:PropertyName("category") @set:PropertyName("category")
+    var category: String = "",
     @get:PropertyName("issueCategory") @set:PropertyName("issueCategory")
-    var issueCategory: String = "General", // "Withdrawal Issue", "Room ID Error", "Cheater Report", "App Error"
+    var issueCategory: String = "General", // PAYMENT_ISSUE, TOURNAMENT_DISPUTE, BUG_REPORT, HACKER_REPORT, GENERAL_SUPPORT
+    @get:PropertyName("subject") @set:PropertyName("subject")
+    var subject: String = "",
     @get:PropertyName("description") @set:PropertyName("description")
     var description: String = "",
+    @get:PropertyName("screenshotUrl") @set:PropertyName("screenshotUrl")
+    var screenshotUrl: String = "",
     @get:PropertyName("status") @set:PropertyName("status")
-    var status: String = "open", // open, in_progress, resolved, closed
+    var status: String = "open", // OPEN, IN_PROGRESS, RESOLVED, CLOSED
     @get:PropertyName("adminNote") @set:PropertyName("adminNote")
     var adminNote: String = "",
+    @get:PropertyName("adminReply") @set:PropertyName("adminReply")
+    var adminReply: String = "",
+    @get:PropertyName("repliedAt") @set:PropertyName("repliedAt")
+    var repliedAt: Long = 0L,
     @get:PropertyName("updatedAt") @set:PropertyName("updatedAt")
     var updatedAt: Long = System.currentTimeMillis(),
     @get:PropertyName("createdAt") @set:PropertyName("createdAt")
     var createdAt: Long = System.currentTimeMillis(),
+    @get:PropertyName("timestamp") @set:PropertyName("timestamp")
+    var timestamp: Long = System.currentTimeMillis(),
     @get:PropertyName("assignedTo") @set:PropertyName("assignedTo")
     var assignedTo: String = "",
     @get:PropertyName("tournamentTitle") @set:PropertyName("tournamentTitle")
@@ -259,7 +436,9 @@ data class SupportTicket(
     @get:PropertyName("isHighPriority") @set:PropertyName("isHighPriority")
     var isHighPriority: Boolean = false
 ) {
-    val userId: String get() = userEmail
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
+    val userId: String get() = rawUserId.ifBlank { userEmail }
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
     val messageText: String get() = description
 }
 
@@ -281,6 +460,7 @@ data class TicketMessage(
     @get:PropertyName("timestamp") @set:PropertyName("timestamp")
     var timestamp: Long = System.currentTimeMillis()
 ) {
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
     val messageText: String get() = message
 }
 
@@ -313,11 +493,17 @@ data class PayoutRequest(
     @get:PropertyName("processedAt") @set:PropertyName("processedAt")
     var processedAt: Long = 0L,
     @get:PropertyName("processedBy") @set:PropertyName("processedBy")
-    var processedBy: String = ""
+    var processedBy: String = "",
+    @get:PropertyName("isDeposit") @set:PropertyName("isDeposit")
+    var isDeposit: Boolean = false
 ) {
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
     val userId: String get() = uid
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
     val amount: Double get() = vtAmount
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
     val upiId: String get() = paymentId
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
     val createdAt: Long get() = requestedAt
 }
 
@@ -326,21 +512,48 @@ data class PayoutRequest(
 data class DepositRequest(
     @get:PropertyName("id") @set:PropertyName("id")
     var id: String = "",
+    @get:PropertyName("requestId") @set:PropertyName("requestId")
+    var requestId: String = "",
+    @get:PropertyName("transactionId") @set:PropertyName("transactionId")
+    var transactionId: String = "",
     @get:PropertyName("uid") @set:PropertyName("uid")
     var uid: String = "",
+    @get:PropertyName("userId") @set:PropertyName("userId")
+    var userId: String = "",
     @get:PropertyName("username") @set:PropertyName("username")
     var username: String = "",
+    @get:PropertyName("userName") @set:PropertyName("userName")
+    var userName: String = "",
+    @get:PropertyName("userEmail") @set:PropertyName("userEmail")
+    var userEmail: String = "",
     @get:PropertyName("amount") @set:PropertyName("amount")
     var amount: Double = 0.0,
     @get:PropertyName("utrNumber") @set:PropertyName("utrNumber")
     var utrNumber: String = "",
+    @get:PropertyName("paymentMethod") @set:PropertyName("paymentMethod")
+    var paymentMethod: String = "UPI_MANUAL", // UPI_MANUAL | SPACEPAY | RAZORPAY
     @get:PropertyName("paymentScreenshotUrl") @set:PropertyName("paymentScreenshotUrl")
     var paymentScreenshotUrl: String = "",
+    @get:PropertyName("screenshotUrl") @set:PropertyName("screenshotUrl")
+    var screenshotUrl: String = "",
     @get:PropertyName("status") @set:PropertyName("status")
-    var status: String = "PENDING", // PENDING, SUCCESS, REJECTED
+    var status: String = "PENDING", // PENDING, APPROVED, REJECTED
+    @get:PropertyName("adminNote") @set:PropertyName("adminNote")
+    var adminNote: String = "",
+    @get:PropertyName("requestedAt") @set:PropertyName("requestedAt")
+    var requestedAt: Long = System.currentTimeMillis(),
+    @get:PropertyName("processedAt") @set:PropertyName("processedAt")
+    var processedAt: Long = 0L,
+    @get:PropertyName("processedBy") @set:PropertyName("processedBy")
+    var processedBy: String = "",
     @get:PropertyName("timestamp") @set:PropertyName("timestamp")
     var timestamp: Long = System.currentTimeMillis()
-)
+) {
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
+    val effectiveUserId: String get() = userId.ifBlank { uid }
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
+    val createdAt: Long get() = if (requestedAt > 0L) requestedAt else timestamp
+}
 
 @IgnoreExtraProperties
 @Serializable
@@ -371,6 +584,7 @@ data class RoomDetails(
     @get:PropertyName("updatedAt") @set:PropertyName("updatedAt")
     var updatedAt: Long = System.currentTimeMillis()
 ) {
+    @get:com.google.firebase.database.Exclude
     @get:com.google.firebase.firestore.Exclude
     val password: String get() = roomPassword
 }
@@ -380,6 +594,8 @@ data class RoomDetails(
 data class Tournament(
     @get:PropertyName("id") @set:PropertyName("id")
     var id: String = "",
+    @get:PropertyName("displayTournamentId") @set:PropertyName("displayTournamentId")
+    var displayTournamentId: String = "",
     @get:PropertyName("title") @set:PropertyName("title")
     var title: String = "",
     @get:PropertyName("bannerUrl") @set:PropertyName("bannerUrl")
@@ -388,6 +604,14 @@ data class Tournament(
     var game: String = "Free Fire",
     @get:PropertyName("category") @set:PropertyName("category")
     var category: String = "BR", // BR (Battle Royale / Full Map), CS (Clash Squad), LONE_WOLF (Lone Wolf), SCRIMS (Training / Practice)
+    @get:PropertyName("matchCategory") @set:PropertyName("matchCategory")
+    var matchCategory: String = "BATTLE_ROYALE", // BATTLE_ROYALE, CLASH_SQUAD, LONE_WOLF, CUSTOM_ROOM
+    @get:PropertyName("matchMode") @set:PropertyName("matchMode")
+    var matchMode: String = "PER_KILL", // PER_KILL, SURVIVAL, HEADSHOT_ONLY, BODY_DAMAGE_ON, SNIPER_ONLY, LIMITED_AMMO, UNLIMITED_AMMO, PISTOL_ONLY
+    @get:PropertyName("customRuleBadge") @set:PropertyName("customRuleBadge")
+    var customRuleBadge: String = "STANDARD RULES",
+    @get:PropertyName("perspective") @set:PropertyName("perspective")
+    var perspective: String = "TPP", // TPP, FPP
     @get:PropertyName("map") @set:PropertyName("map")
     var map: String = "Bermuda", // Bermuda, Purgatory, Kalahari, Alpine, NexTerra
     @get:PropertyName("entryFee") @set:PropertyName("entryFee")
@@ -478,12 +702,38 @@ data class Tournament(
     @get:PropertyName("roomDetails") @set:PropertyName("roomDetails")
     var roomDetails: RoomDetails? = null,
 
+    @get:PropertyName("isCompleted") @set:PropertyName("isCompleted")
+    var isCompleted: Boolean = false,
+    @get:PropertyName("payoutStatus") @set:PropertyName("payoutStatus")
+    var payoutStatus: String = "UNPAID",
+    @get:PropertyName("completedAt") @set:PropertyName("completedAt")
+    var completedAt: Long = 0L,
+    @get:PropertyName("totalPrizeDisbursed") @set:PropertyName("totalPrizeDisbursed")
+    var totalPrizeDisbursed: Double = 0.0,
+    @get:PropertyName("winnerUid") @set:PropertyName("winnerUid")
+    var winnerUid: String = "",
+    @get:PropertyName("winnerName") @set:PropertyName("winnerName")
+    var winnerName: String = "",
+    @get:PropertyName("winnerPrize") @set:PropertyName("winnerPrize")
+    var winnerPrize: Double = 0.0,
+    @get:PropertyName("finalLeaderboard") @set:PropertyName("finalLeaderboard")
+    var finalLeaderboard: List<TournamentStandingEntry> = emptyList(),
+    @get:PropertyName("standings") @set:PropertyName("standings")
+    var standings: List<TournamentStandingEntry> = emptyList(),
+
     @get:PropertyName("registrations") @set:PropertyName("registrations")
     var registrations: List<PlayerRegistration> = emptyList()
 ) {
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
+    val perKillReward: Float get() = perKillPrize
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
+    val participants: List<PlayerRegistration> get() = registrations
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
     val isCashTournament: Boolean get() = entryFee > 0f || prizePool > 0f
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
     val isTrainingMatch: Boolean get() = entryFee == 0f || title.contains("Training", ignoreCase = true) || title.contains("Scrim", ignoreCase = true) || title.contains("Practice", ignoreCase = true) || description.contains("training", ignoreCase = true)
 
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
     val canonicalCategory: String get() {
         val cat = category.trim().uppercase()
         return when {
@@ -494,6 +744,7 @@ data class Tournament(
         }
     }
 
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
     val categoryDisplayName: String get() = when (canonicalCategory) {
         "BR" -> "Battle Royale (Full Map)"
         "CS" -> "Clash Squad (CS)"
@@ -502,6 +753,7 @@ data class Tournament(
         else -> "Battle Royale"
     }
 
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
     val categoryShortBadge: String get() = when (canonicalCategory) {
         "BR" -> "BR FULL MAP"
         "CS" -> "CLASH SQUAD"
@@ -510,11 +762,16 @@ data class Tournament(
         else -> "BATTLE ROYALE"
     }
 
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
     val isBattleRoyale: Boolean get() = canonicalCategory == "BR"
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
     val isClashSquad: Boolean get() = canonicalCategory == "CS"
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
     val isLoneWolf: Boolean get() = canonicalCategory == "LONE_WOLF"
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
     val isScrim: Boolean get() = canonicalCategory == "SCRIMS"
 
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
     val parsedStartsAtMillis: Long?
         get() {
             val raw = startsAt?.trim() ?: return null
@@ -725,11 +982,32 @@ data class PlayerRegistration(
     var region: String? = null,
     @get:PropertyName("age") @set:PropertyName("age")
     var age: Int? = null,
+    @get:PropertyName("entryFeePaid") @set:PropertyName("entryFeePaid")
+    var entryFeePaid: Double = 0.0,
+    @get:PropertyName("paidFromDeposit") @set:PropertyName("paidFromDeposit")
+    var paidFromDeposit: Double = 0.0,
+    @get:PropertyName("paidFromWinning") @set:PropertyName("paidFromWinning")
+    var paidFromWinning: Double = 0.0,
+    @get:PropertyName("paidFromBonus") @set:PropertyName("paidFromBonus")
+    var paidFromBonus: Double = 0.0,
+    @get:PropertyName("kills") @set:PropertyName("kills")
+    var kills: Int = 0,
+    @get:PropertyName("rank") @set:PropertyName("rank")
+    var rank: Int = 0,
+    @get:PropertyName("winningAmount") @set:PropertyName("winningAmount")
+    var winningAmount: Double = 0.0,
     @get:PropertyName("profile") @set:PropertyName("profile")
     var profile: UserProfile? = null,
     @get:PropertyName("tournament") @set:PropertyName("tournament")
     var tournament: Tournament? = null 
-)
+) {
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
+    val joinedAt: Long get() = registeredAt
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
+    val freeFireUid: String get() = gameId.ifBlank { gameAccountId ?: "" }
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
+    val inGameName: String get() = gameUsername.ifBlank { playerName }
+}
 
 @IgnoreExtraProperties
 @Serializable
@@ -924,5 +1202,459 @@ data class BackendExtractionResult(
     val timestamp: Long = System.currentTimeMillis()
 )
 
+@Serializable
+enum class AdminChannelType(
+    val key: String,
+    val channelLabel: String,
+    val displayTitle: String,
+    val description: String = displayTitle,
+    val isOperationalLog: Boolean = false
+) {
+    // 6 User Support Channels (Master Prompt Section 4)
+    PAYMENT_DEPOSIT("payment_deposit", "#payment-deposit", "Payment & Deposit", "UPI / UTR Deposit & Add Cash issues"),
+    PAYMENT_WITHDRAW("payment_withdraw", "#payment-withdraw", "Withdrawal & Payout", "Withdrawal delays & bank/UPI payout issues"),
+    ROOM_CREDENTIALS("room_credentials", "#room-credentials", "Room ID & Password", "Custom Room ID, Password & Slot issues"),
+    CHEATER_HACKER("cheater_hacker", "#cheater-hacker", "Cheater / Hacker Report", "Report Aimbot, Wallhack, Teaming or Emulator"),
+    ACCOUNT_ISSUE("account_issue", "#account-issue", "Account & Profile", "Free Fire UID change, login or ban appeal"),
+    VERIFICATION("verification", "#verification", "Verification & Founder", "Founder Pass, KYC or Tournament Host request"),
 
+    // Operational Dispatch Logs (Master Prompt Section 4)
+    SLOT_CONFIRMATIONS("slot_confirmations", "#slot-confirmations", "Slot Confirmations", "Automated slot confirmation dispatches", true),
+    ROOM_CREDENTIAL_REQUESTS("room_credential_requests", "#room-cred-requests", "Room Credential Requests", "Player room credential requests", true),
+    MATCH_REMINDERS("match_reminders", "#match-reminders", "Match Reminders", "Automated match countdown reminders", true),
+    REFUND_DISPATCHES("refund_dispatches", "#refund-dispatches", "Refund Dispatches", "Automated tournament cancellation refunds", true),
+    TOURNAMENT_OPENINGS("tournament_openings", "#tournament-openings", "Tournament Openings", "New tournament lobby open dispatches", true),
+    ENGAGEMENT_PULSES("engagement_pulses", "#engagement-pulses", "Engagement Pulses", "Attracting esports & festival alert pulses", true),
+    OTA_LIVE_PATCHES("ota_live_patches", "#ota-live-patches", "OTA Live Patches", "Play-Store-free OTA configuration patches", true),
+
+    // Additional Core Admin Queues
+    ACCOUNT_DELETIONS("account_deletion_requests", "#account-deletions", "Account Deletions", "DPDP Act 2023 account erasure & restore requests"),
+    DATA_EXPORTS("data_export_requests", "#data-exports", "Data Exports (DPDP)", "User portable JSON data archives & audit snapshots"),
+    DEPOSITS("deposit_requests", "#deposits", "Deposit Verifications", "Manual UPI UTR, SpacePay & Razorpay deposit verification queue"),
+    WITHDRAWALS("withdrawal_requests", "#withdrawals", "Withdrawal Payouts", "Winning balance cashout & UPI payout queue"),
+    SUPPORT_TICKETS("support_tickets", "#support-tickets", "Support Tickets", "Live player support tickets & issue threads"),
+    PLAYER_REPORTS("player_reports", "#player-reports", "Player / Cheat Reports", "Anti-cheat reports, emulator/hack flags & evidence"),
+    KYC_VERIFICATIONS("kyc_requests", "#kyc-verifications", "KYC 18+ Verifications", "Identity & age verification submissions"),
+    MATCH_DISPUTES("tournament_disputes", "#match-disputes", "Match Disputes", "Scoreboard, room & prize distribution disputes"),
+    TOKEN_LEDGER("token_conversions", "#token-ledger", "Token Ledger (10:1 VT)", "Reward token to VT conversions & mission grants"),
+    SITUATION_TESTER("admin_situation_tests", "#situation-tester", "Situation Tester", "Live dual-DB pipeline diagnostic probes");
+
+    val channelKey: String get() = key
+    val hashtag: String get() = channelLabel
+    val title: String get() = displayTitle
+
+    companion object {
+        val ACCOUNT_DELETION = ACCOUNT_DELETIONS
+        val DATA_EXPORT = DATA_EXPORTS
+        val DEPOSIT_REQUESTS = DEPOSITS
+        val TOKEN_CONVERSIONS = TOKEN_LEDGER
+        val ADMIN_SITUATION_TESTS = SITUATION_TESTER
+    }
+}
+
+@IgnoreExtraProperties
+@Serializable
+data class AdminChannelItem(
+    @get:PropertyName("id") @set:PropertyName("id")
+    var id: String = "",
+    @get:PropertyName("channelType") @set:PropertyName("channelType")
+    var channelType: String = "",
+    @get:PropertyName("adminChannel") @set:PropertyName("adminChannel")
+    var adminChannel: String = "",
+    @get:PropertyName("channelLabel") @set:PropertyName("channelLabel")
+    var channelLabel: String = "",
+    @get:PropertyName("userId") @set:PropertyName("userId")
+    var userId: String = "",
+    @get:PropertyName("username") @set:PropertyName("username")
+    var username: String = "",
+    @get:PropertyName("userEmail") @set:PropertyName("userEmail")
+    var userEmail: String = "",
+    @get:PropertyName("freeFireId") @set:PropertyName("freeFireId")
+    var freeFireId: String = "",
+    @get:PropertyName("title") @set:PropertyName("title")
+    var title: String = "",
+    @get:PropertyName("subtitle") @set:PropertyName("subtitle")
+    var subtitle: String = "",
+    @get:PropertyName("message") @set:PropertyName("message")
+    var message: String = "",
+    @get:PropertyName("senderUid") @set:PropertyName("senderUid")
+    var senderUid: String = "",
+    @get:PropertyName("senderName") @set:PropertyName("senderName")
+    var senderName: String = "",
+    @get:PropertyName("status") @set:PropertyName("status")
+    var status: String = "PENDING",
+    @get:PropertyName("amount") @set:PropertyName("amount")
+    var amount: Double = 0.0,
+    @get:PropertyName("utrNumber") @set:PropertyName("utrNumber")
+    var utrNumber: String = "",
+    @get:PropertyName("paymentMethod") @set:PropertyName("paymentMethod")
+    var paymentMethod: String = "",
+    @get:PropertyName("upiId") @set:PropertyName("upiId")
+    var upiId: String = "",
+    @get:PropertyName("screenshotUrl") @set:PropertyName("screenshotUrl")
+    var screenshotUrl: String = "",
+    @get:PropertyName("exportedJson") @set:PropertyName("exportedJson")
+    var exportedJson: String = "",
+    @get:PropertyName("reason") @set:PropertyName("reason")
+    var reason: String = "",
+    @get:PropertyName("details") @set:PropertyName("details")
+    var details: String = "",
+    @get:PropertyName("adminReply") @set:PropertyName("adminReply")
+    var adminReply: String = "",
+    @get:PropertyName("rawPayload") @set:PropertyName("rawPayload")
+    var rawPayload: Map<String, String> = emptyMap(),
+    @get:PropertyName("createdAt") @set:PropertyName("createdAt")
+    var createdAt: Long = System.currentTimeMillis(),
+    @get:PropertyName("timestamp") @set:PropertyName("timestamp")
+    var timestamp: Long = System.currentTimeMillis()
+)
+
+@IgnoreExtraProperties
+@Serializable
+data class AccountDeletionRequest(
+    @get:PropertyName("id") @set:PropertyName("id")
+    var id: String = "",
+    @get:PropertyName("requestId") @set:PropertyName("requestId")
+    var requestId: String = "",
+    @get:PropertyName("userId") @set:PropertyName("userId")
+    var userId: String = "",
+    @get:PropertyName("username") @set:PropertyName("username")
+    var username: String = "",
+    @get:PropertyName("email") @set:PropertyName("email")
+    var email: String = "",
+    @get:PropertyName("phone") @set:PropertyName("phone")
+    var phone: String = "",
+    @get:PropertyName("phoneOrEmail") @set:PropertyName("phoneOrEmail")
+    var phoneOrEmail: String = "",
+    @get:PropertyName("inGameName") @set:PropertyName("inGameName")
+    var inGameName: String = "",
+    @get:PropertyName("freeFireId") @set:PropertyName("freeFireId")
+    var freeFireId: String = "",
+    @get:PropertyName("balance") @set:PropertyName("balance")
+    var balance: Double = 0.0,
+    @get:PropertyName("balanceAtRequest") @set:PropertyName("balanceAtRequest")
+    var balanceAtRequest: Double = 0.0,
+    @get:PropertyName("depositBalance") @set:PropertyName("depositBalance")
+    var depositBalance: Double = 0.0,
+    @get:PropertyName("winningsBalance") @set:PropertyName("winningsBalance")
+    var winningsBalance: Double = 0.0,
+    @get:PropertyName("bonusBalance") @set:PropertyName("bonusBalance")
+    var bonusBalance: Double = 0.0,
+    @get:PropertyName("tokens") @set:PropertyName("tokens")
+    var tokens: Int = 0,
+    @get:PropertyName("dataExportedBeforeDelete") @set:PropertyName("dataExportedBeforeDelete")
+    var dataExportedBeforeDelete: Boolean = false,
+    @get:PropertyName("reason") @set:PropertyName("reason")
+    var reason: String = "",
+    @get:PropertyName("details") @set:PropertyName("details")
+    var details: String = "",
+    @get:PropertyName("channelNode") @set:PropertyName("channelNode")
+    var channelNode: String = "account_deletion_requests",
+    @get:PropertyName("adminChannel") @set:PropertyName("adminChannel")
+    var adminChannel: String = "admin_channels/account_deletion_requests",
+    @get:PropertyName("channelLabel") @set:PropertyName("channelLabel")
+    var channelLabel: String = "#account-deletions",
+    @get:PropertyName("status") @set:PropertyName("status")
+    var status: String = "PENDING_DELETION", // PENDING_DELETION, COMPLETED, RESTORED
+    @get:PropertyName("requestedAt") @set:PropertyName("requestedAt")
+    var requestedAt: Long = System.currentTimeMillis(),
+    @get:PropertyName("processedAt") @set:PropertyName("processedAt")
+    var processedAt: Long = 0L,
+    @get:PropertyName("processedBy") @set:PropertyName("processedBy")
+    var processedBy: String = "",
+    @get:PropertyName("timestamp") @set:PropertyName("timestamp")
+    var timestamp: Long = System.currentTimeMillis()
+) {
+    val dataExported: Boolean get() = dataExportedBeforeDelete
+}
+
+@IgnoreExtraProperties
+@Serializable
+data class DataExportRequest(
+    @get:PropertyName("id") @set:PropertyName("id")
+    var id: String = "",
+    @get:PropertyName("exportId") @set:PropertyName("exportId")
+    var exportId: String = "",
+    @get:PropertyName("userId") @set:PropertyName("userId")
+    var userId: String = "",
+    @get:PropertyName("username") @set:PropertyName("username")
+    var username: String = "",
+    @get:PropertyName("email") @set:PropertyName("email")
+    var email: String = "",
+    @get:PropertyName("phone") @set:PropertyName("phone")
+    var phone: String = "",
+    @get:PropertyName("phoneOrEmail") @set:PropertyName("phoneOrEmail")
+    var phoneOrEmail: String = "",
+    @get:PropertyName("freeFireId") @set:PropertyName("freeFireId")
+    var freeFireId: String = "",
+    @get:PropertyName("balance") @set:PropertyName("balance")
+    var balance: Double = 0.0,
+    @get:PropertyName("tokens") @set:PropertyName("tokens")
+    var tokens: Int = 0,
+    @get:PropertyName("transactionCount") @set:PropertyName("transactionCount")
+    var transactionCount: Int = 0,
+    @get:PropertyName("joinedTournamentCount") @set:PropertyName("joinedTournamentCount")
+    var joinedTournamentCount: Int = 0,
+    @get:PropertyName("exportedJson") @set:PropertyName("exportedJson")
+    var exportedJson: String = "",
+    @get:PropertyName("status") @set:PropertyName("status")
+    var status: String = "EXPORTED",
+    @get:PropertyName("requestedAt") @set:PropertyName("requestedAt")
+    var requestedAt: Long = System.currentTimeMillis(),
+    @get:PropertyName("timestamp") @set:PropertyName("timestamp")
+    var timestamp: Long = System.currentTimeMillis()
+)
+
+@IgnoreExtraProperties
+@Serializable
+data class TokenConversionRecord(
+    @get:PropertyName("id") @set:PropertyName("id")
+    var id: String = "",
+    @get:PropertyName("userId") @set:PropertyName("userId")
+    var userId: String = "",
+    @get:PropertyName("username") @set:PropertyName("username")
+    var username: String = "",
+    @get:PropertyName("tokensConverted") @set:PropertyName("tokensConverted")
+    var tokensConverted: Int = 0,
+    @get:PropertyName("tokensSpent") @set:PropertyName("tokensSpent")
+    var tokensSpent: Int = 0,
+    @get:PropertyName("vtCredited") @set:PropertyName("vtCredited")
+    var vtCredited: Double = 0.0,
+    @get:PropertyName("conversionRate") @set:PropertyName("conversionRate")
+    var conversionRate: Int = 10,
+    @get:PropertyName("status") @set:PropertyName("status")
+    var status: String = "COMPLETED",
+    @get:PropertyName("timestamp") @set:PropertyName("timestamp")
+    var timestamp: Long = System.currentTimeMillis()
+) {
+    val createdAt: Long get() = timestamp
+}
+
+@IgnoreExtraProperties
+@Serializable
+data class MissionItem(
+    @get:PropertyName("id") @set:PropertyName("id")
+    var id: String = "",
+    @get:PropertyName("title") @set:PropertyName("title")
+    var title: String = "",
+    @get:PropertyName("description") @set:PropertyName("description")
+    var description: String = "",
+    @get:PropertyName("rewardTokens") @set:PropertyName("rewardTokens")
+    var rewardTokens: Int = 20,
+    @get:PropertyName("rewardVt") @set:PropertyName("rewardVt")
+    var rewardVt: Double = 0.0,
+    @get:PropertyName("targetCount") @set:PropertyName("targetCount")
+    var targetCount: Int = 1,
+    @get:PropertyName("targetProgress") @set:PropertyName("targetProgress")
+    var targetProgress: Int = 1,
+    @get:PropertyName("missionType") @set:PropertyName("missionType")
+    var missionType: String = "DAILY", // DAILY, WEEKLY, SPECIAL
+    @get:PropertyName("category") @set:PropertyName("category")
+    var category: String = "DAILY",
+    @get:PropertyName("actionType") @set:PropertyName("actionType")
+    var actionType: String = "DAILY",
+    @get:PropertyName("isActive") @set:PropertyName("isActive")
+    var isActive: Boolean = true,
+    @get:PropertyName("updatedAt") @set:PropertyName("updatedAt")
+    var updatedAt: Long = System.currentTimeMillis()
+)
+
+@IgnoreExtraProperties
+@Serializable
+data class TournamentChatMessage(
+    @get:PropertyName("id") @set:PropertyName("id")
+    var id: String = "",
+    @get:PropertyName("tournamentId") @set:PropertyName("tournamentId")
+    var tournamentId: String = "",
+    @get:PropertyName("senderId") @set:PropertyName("senderId")
+    var senderId: String = "admin",
+    @get:PropertyName("senderName") @set:PropertyName("senderName")
+    var senderName: String = "VeloRix Official",
+    @get:PropertyName("senderAvatar") @set:PropertyName("senderAvatar")
+    var senderAvatar: String = "",
+    @get:PropertyName("senderRole") @set:PropertyName("senderRole")
+    var senderRole: String = "ADMIN",
+    @get:PropertyName("message") @set:PropertyName("message")
+    var message: String = "",
+    @get:PropertyName("isAdmin") @set:PropertyName("isAdmin")
+    var isAdmin: Boolean = true,
+    @get:PropertyName("isPinned") @set:PropertyName("isPinned")
+    var isPinned: Boolean = false,
+    @get:PropertyName("timestamp") @set:PropertyName("timestamp")
+    var timestamp: Long = System.currentTimeMillis()
+)
+
+@IgnoreExtraProperties
+@Serializable
+data class SystemConfig(
+    @get:PropertyName("maintenanceMode") @set:PropertyName("maintenanceMode")
+    var maintenanceMode: Boolean = false,
+    @get:PropertyName("maintenanceTitle") @set:PropertyName("maintenanceTitle")
+    var maintenanceTitle: String = "Scheduled Server Maintenance",
+    @get:PropertyName("maintenanceMessage") @set:PropertyName("maintenanceMessage")
+    var maintenanceMessage: String = "Scheduled server upgrade in progress. Back in 30 minutes!",
+    @get:PropertyName("maintenanceEndTimeMillis") @set:PropertyName("maintenanceEndTimeMillis")
+    var maintenanceEndTimeMillis: Long = 0L,
+    @get:PropertyName("forceUpdateRequired") @set:PropertyName("forceUpdateRequired")
+    var forceUpdateRequired: Boolean = false,
+    @get:PropertyName("latestVersionCode") @set:PropertyName("latestVersionCode")
+    var latestVersionCode: Int = 2,
+    @get:PropertyName("latestVersionName") @set:PropertyName("latestVersionName")
+    var latestVersionName: String = "1.1.0",
+    @get:PropertyName("updateDownloadUrl") @set:PropertyName("updateDownloadUrl")
+    var updateDownloadUrl: String = "https://velorix.esports/download/velorix-latest.apk",
+    @get:PropertyName("updateChangelog") @set:PropertyName("updateChangelog")
+    var updateChangelog: String = "• Faster live match updates\n• Enhanced anti-cheat protection",
+    @get:PropertyName("showBanners") @set:PropertyName("showBanners")
+    var showBanners: Boolean = true,
+    @get:PropertyName("showDeveloperModal") @set:PropertyName("showDeveloperModal")
+    var showDeveloperModal: Boolean = false,
+    @get:PropertyName("upiId") @set:PropertyName("upiId")
+    var upiId: String = "velorix.pay@okaxis",
+    @get:PropertyName("upiMerchantName") @set:PropertyName("upiMerchantName")
+    var upiMerchantName: String = "VeloRix Esports",
+    @get:PropertyName("minDepositVt") @set:PropertyName("minDepositVt")
+    var minDepositVt: Double = 10.0,
+    @get:PropertyName("minWithdrawalVt") @set:PropertyName("minWithdrawalVt")
+    var minWithdrawalVt: Double = 50.0,
+    @get:PropertyName("tokenConversionRate") @set:PropertyName("tokenConversionRate")
+    var tokenConversionRate: Int = 10,
+    @get:PropertyName("whatsappSupportUrl") @set:PropertyName("whatsappSupportUrl")
+    var whatsappSupportUrl: String = "https://wa.me/919999999999",
+    @get:PropertyName("telegramChannelUrl") @set:PropertyName("telegramChannelUrl")
+    var telegramChannelUrl: String = "https://t.me/velorixesports",
+    @get:PropertyName("instagramUrl") @set:PropertyName("instagramUrl")
+    var instagramUrl: String = "https://instagram.com/velorixesports",
+    @get:PropertyName("discordUrl") @set:PropertyName("discordUrl")
+    var discordUrl: String = "https://discord.gg/velorix",
+    @get:PropertyName("vpnBlockEnabled") @set:PropertyName("vpnBlockEnabled")
+    var vpnBlockEnabled: Boolean = true,
+    // OTA Live Config, Calendar Festivals & 14 Feature Flags (Play-Store-Free Updates)
+    @get:PropertyName("otaPatchVersion") @set:PropertyName("otaPatchVersion")
+    var otaPatchVersion: Int = 1,
+    @get:PropertyName("otaReleaseNotes") @set:PropertyName("otaReleaseNotes")
+    var otaReleaseNotes: String = "Live OTA Hot-Patch Active — Zero Play Store Update Needed",
+    @get:PropertyName("liveLobbyTicker") @set:PropertyName("liveLobbyTicker")
+    var liveLobbyTicker: String = "",
+    @get:PropertyName("activeFestivalOverride") @set:PropertyName("activeFestivalOverride")
+    var activeFestivalOverride: String = "AUTO",
+    @get:PropertyName("customFestivalTitle") @set:PropertyName("customFestivalTitle")
+    var customFestivalTitle: String = "",
+    @get:PropertyName("customFestivalMessage") @set:PropertyName("customFestivalMessage")
+    var customFestivalMessage: String = "",
+    @get:PropertyName("customAttractingTitle") @set:PropertyName("customAttractingTitle")
+    var customAttractingTitle: String = "",
+    @get:PropertyName("customAttractingMessage") @set:PropertyName("customAttractingMessage")
+    var customAttractingMessage: String = "",
+    @get:PropertyName("attractingAlertWeight") @set:PropertyName("attractingAlertWeight")
+    var attractingAlertWeight: Int = 65,
+    @get:PropertyName("timeContextualWeight") @set:PropertyName("timeContextualWeight")
+    var timeContextualWeight: Int = 20,
+    @get:PropertyName("weeklyCalendarWeight") @set:PropertyName("weeklyCalendarWeight")
+    var weeklyCalendarWeight: Int = 15,
+    @get:PropertyName("featureFlags") @set:PropertyName("featureFlags")
+    var featureFlags: Map<String, Boolean> = defaultFeatureFlags(),
+    @get:PropertyName("updatedAt") @set:PropertyName("updatedAt")
+    var updatedAt: Long = System.currentTimeMillis()
+) {
+    companion object {
+        val ALL_FESTIVAL_OPTIONS = listOf(
+            "AUTO" to "Auto-Detect Real-World Calendar Date",
+            "NEW_YEAR_EVE" to "New Year's Eve (Dec 31)",
+            "NEW_YEAR" to "New Year Kickoff (Jan 1–3)",
+            "HARVEST_FESTIVALS" to "Makar Sankranti / Pongal / Lohri (Jan 13–15)",
+            "REPUBLIC_DAY" to "Republic Day Tricolor Cup (Jan 26)",
+            "VALENTINE_DUO" to "Valentine's Duo Showdown (Feb 14)",
+            "MAHA_SHIVRATRI" to "Maha Shivratri Night Clash",
+            "HOLI" to "Holi Festival of Colors",
+            "EID_UL_FITR" to "Eid-ul-Fitr Mubarak Drop",
+            "GUDI_PADWA_NAVRATRI" to "Gudi Padwa / Ugadi / Chaitra Navratri",
+            "AMBEDKAR_BAISAKHI" to "Baisakhi / Vishu / Puthandu (Apr 13–15)",
+            "EID_UL_ADHA" to "Eid-ul-Adha Champions Arena",
+            "INDEPENDENCE_DAY" to "Independence Day Freedom Cup (Aug 15)",
+            "RAKSHA_BANDHAN" to "Raksha Bandhan Duo Special",
+            "JANMASHTAMI" to "Krishna Janmashtami Midnight Clash",
+            "GANESH_CHATURTHI" to "Ganesh Chaturthi Arena",
+            "GANDHI_JAYANTI" to "Gandhi Jayanti Special (Oct 2)",
+            "NAVRATRI_DUSSEHRA" to "Navratri & Vijayadashami Showdown",
+            "HALLOWEEN" to "Halloween Phantom Drop (Oct 31)",
+            "DIWALI" to "Diwali Grand Dhamaka",
+            "GURU_NANAK_JAYANTI" to "Gurpurab Special Lobby",
+            "CHRISTMAS" to "Winterland & Christmas Drop (Dec 24–26)",
+            "CUSTOM" to "Custom Admin Festival Override"
+        )
+
+        val ALL_FEATURE_FLAG_METADATA = listOf(
+            Triple("token_conversion", "Token → VT Conversion", "10 Tokens = 1 VT in Wallet"),
+            Triple("tournament_join", "Tournament Joining", "Master switch for joining matches"),
+            Triple("room_credentials_delivery", "Room ID Delivery", "Show Room ID & Password to joined players"),
+            Triple("instant_withdrawals", "Instant Withdrawals", "Allow players to submit payout requests"),
+            Triple("daily_login_rewards", "Daily Login Streak", "7-Day Login Streak & Daily Missions"),
+            Triple("founder_pass_hub", "Founder Pass Hub", "VIP Founder Pass tiers & perks"),
+            Triple("community_chat", "Community Lobby Chat", "Live global & match chat"),
+            Triple("ai_sentinel_support", "AI Sentinel Support", "6-Channel Admin Router & AI Help Desk"),
+            Triple("calendar_festival_sync", "Calendar Festival Sync", "Auto-detect Indian & global festivals"),
+            Triple("attracting_esports_alerts", "Attracting Esports Alerts", "High-energy Free Fire squad callouts"),
+            Triple("hyperos_super_island", "HyperOS Super Island", "Dynamic Island pill notifications"),
+            Triple("mj_signature_sfx", "Signature Audio SFX", "Custom notification & action sound effects"),
+            Triple("ota_live_hot_patch", "OTA Live Hot-Patch", "Play-Store-free live config sync"),
+            Triple("auto_upi_utr_listener", "Auto UPI UTR Listener", "Instant UTR verification queue")
+        )
+
+        fun defaultFeatureFlags(): Map<String, Boolean> =
+            ALL_FEATURE_FLAG_METADATA.associate { (key, _, _) -> key to true }
+    }
+}
+
+@IgnoreExtraProperties
+@Serializable
+data class TournamentStandingEntry(
+    @get:PropertyName("rank") @set:PropertyName("rank")
+    var rank: Int = 1,
+    @get:PropertyName("userId") @set:PropertyName("userId")
+    var userId: String = "",
+    @get:PropertyName("username") @set:PropertyName("username")
+    var username: String = "",
+    @get:PropertyName("inGameName") @set:PropertyName("inGameName")
+    var inGameName: String = "",
+    @get:PropertyName("characterId") @set:PropertyName("characterId")
+    var characterId: String = "",
+    @get:PropertyName("teamName") @set:PropertyName("teamName")
+    var teamName: String = "",
+    @get:PropertyName("slotNumber") @set:PropertyName("slotNumber")
+    var slotNumber: Int = 1,
+    @get:PropertyName("kills") @set:PropertyName("kills")
+    var kills: Int = 0,
+    @get:PropertyName("points") @set:PropertyName("points")
+    var points: Int = 0,
+    @get:PropertyName("rankPrize") @set:PropertyName("rankPrize")
+    var rankPrize: Double = 0.0,
+    @get:PropertyName("killPrize") @set:PropertyName("killPrize")
+    var killPrize: Double = 0.0,
+    @get:PropertyName("prizeWon") @set:PropertyName("prizeWon")
+    var prizeWon: Double = 0.0,
+    @get:PropertyName("wonAnything") @set:PropertyName("wonAnything")
+    var wonAnything: Boolean = false,
+    @get:PropertyName("payoutStatus") @set:PropertyName("payoutStatus")
+    var payoutStatus: String = "NO_PRIZE",
+    @get:PropertyName("updatedAt") @set:PropertyName("updatedAt")
+    var updatedAt: Long = System.currentTimeMillis()
+)
+
+@IgnoreExtraProperties
+@Serializable
+data class AdminAuditLogItem(
+    @get:PropertyName("id") @set:PropertyName("id")
+    var id: String = "",
+    @get:PropertyName("action") @set:PropertyName("action")
+    var action: String = "",
+    @get:PropertyName("detail") @set:PropertyName("detail")
+    var detail: String = "",
+    @get:PropertyName("adminEmail") @set:PropertyName("adminEmail")
+    var adminEmail: String = "",
+    @get:PropertyName("targetId") @set:PropertyName("targetId")
+    var targetId: String = "",
+    @get:PropertyName("timestamp") @set:PropertyName("timestamp")
+    var timestamp: Long = System.currentTimeMillis()
+)
 

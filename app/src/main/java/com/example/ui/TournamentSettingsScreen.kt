@@ -141,54 +141,51 @@ fun TournamentSettingsScreen(
             // Status & Lifecycle Controller
             SettingsCard {
                 Text("Match Status Controller", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = VelorixTextPrimary, modifier = Modifier.padding(bottom = 10.dp))
-                // Status Segmented Control (Vercel Minimalist Aesthetic)
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp),
-                    color = Color(0xFF000000),
-                    border = BorderStroke(1.dp, Color(0xFF27272A))
+                // Status Underline Selector (no inner box-in-box)
+                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        val statusOptions = listOf("UPCOMING", "LIVE", "COMPLETED", "CANCELLED")
-                        statusOptions.forEach { opt ->
-                            val isSelected = status.equals(opt, ignoreCase = true)
-                            val activeBg = when (opt) {
-                                "LIVE" -> Color(0xFF3B1219)
-                                "COMPLETED" -> Color(0xFF102A1E)
-                                "CANCELLED" -> Color(0xFF3B1219)
-                                else -> Color(0xFF27272A)
-                            }
-                            val activeText = when (opt) {
-                                "LIVE" -> Color(0xFFFF6B6B)
-                                "COMPLETED" -> Color(0xFF4ADE80)
-                                "CANCELLED" -> Color(0xFFFF6B6B)
-                                else -> Color.White
-                            }
+                    val statusOptions = listOf("UPCOMING", "LIVE", "COMPLETED", "CANCELLED")
+                    statusOptions.forEachIndexed { idx, opt ->
+                        val isSelected = status.equals(opt, ignoreCase = true)
+                        val activeText = when (opt) {
+                            "LIVE" -> Color(0xFFFF6B6B)
+                            "COMPLETED" -> Color(0xFF4ADE80)
+                            "CANCELLED" -> Color(0xFFFF6B6B)
+                            else -> VelorixAccent
+                        }
+                        if (idx > 0) {
                             Box(
                                 modifier = Modifier
-                                    .weight(1f)
-                                    .background(if (isSelected) activeBg else Color.Transparent, RoundedCornerShape(8.dp))
-                                    .border(
-                                        width = 1.dp,
-                                        color = if (isSelected) Color(0xFF3F3F46) else Color.Transparent,
-                                        shape = RoundedCornerShape(8.dp)
-                                    )
-                                    .clickable { status = opt }
-                                    .padding(vertical = 9.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = opt,
-                                    color = if (isSelected) activeText else Color(0xFFA1A1AA),
-                                    fontSize = 10.5.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                                )
-                            }
+                                    .width(0.5.dp)
+                                    .height(18.dp)
+                                    .background(Color.White.copy(alpha = 0.12f))
+                            )
+                        }
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable { status = opt }
+                                .padding(vertical = 8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = opt,
+                                color = if (isSelected) activeText else Color(0xFFA1A1AA),
+                                fontSize = 10.5.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth(0.65f)
+                                    .height(if (isSelected) 2.dp else 0.dp)
+                                    .background(if (isSelected) activeText else Color.Transparent)
+                            )
                         }
                     }
                 }
@@ -546,46 +543,57 @@ fun TournamentSettingsScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+                colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent),
                 shape = RoundedCornerShape(12.dp),
                 enabled = !isSaving
             ) {
                 if (isSaving) {
-                    CircularProgressIndicator(color = Color.Black, modifier = Modifier.size(20.dp))
+                    CircularProgressIndicator(color = Color.White, modifier = Modifier.size(20.dp))
                 } else {
-                    Icon(Icons.Default.Save, contentDescription = null, tint = Color.Black, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Default.Save, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("SAVE TOURNAMENT CHANGES", fontWeight = FontWeight.Bold, color = Color.Black, fontSize = 13.sp, letterSpacing = 0.5.sp)
+                    Text("SAVE TOURNAMENT CHANGES", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp, letterSpacing = 0.5.sp)
                 }
             }
 
-            // Quick Cancel & Delete Controls in Settings
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Button(
-                    onClick = { showCancelConfirmDialog = true },
-                    modifier = Modifier.weight(1f).height(44.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF18181B)),
-                    border = BorderStroke(1.dp, Color(0xFF3F3F46)),
-                    shape = RoundedCornerShape(10.dp)
+            // Quick Cancel & Delete Controls in a single hairline-divided action strip
+            SettingsCard {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Default.Cancel, contentDescription = null, modifier = Modifier.size(15.dp), tint = Color(0xFFFBBF24))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Cancel Match", fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = Color(0xFFFBBF24))
-                }
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { showCancelConfirmDialog = true }
+                            .padding(vertical = 6.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Cancel, contentDescription = null, modifier = Modifier.size(15.dp), tint = Color(0xFFFBBF24))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Cancel Match", fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = Color(0xFFFBBF24))
+                    }
 
-                Button(
-                    onClick = { showDeleteConfirmDialog = true },
-                    modifier = Modifier.weight(1f).height(44.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF18181B)),
-                    border = BorderStroke(1.dp, Color(0xFF7F1D1D)),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(15.dp), tint = Color(0xFFF87171))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Delete Match", fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = Color(0xFFF87171))
+                    Box(
+                        modifier = Modifier
+                            .width(0.5.dp)
+                            .height(20.dp)
+                            .background(Color.White.copy(alpha = 0.14f))
+                    )
+
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { showDeleteConfirmDialog = true }
+                            .padding(vertical = 6.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(15.dp), tint = Color(0xFFF87171))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Delete Match", fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = Color(0xFFF87171))
+                    }
                 }
             }
             
@@ -663,8 +671,8 @@ private fun SettingsCard(
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
-        color = Color(0xFF0D0D0F),
-        border = BorderStroke(1.dp, Color(0xFF27272A))
+        color = Color(0xFF09090D),
+        border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.10f))
     ) {
         Column(
             modifier = Modifier
@@ -677,18 +685,24 @@ private fun SettingsCard(
 
 @Composable
 private fun WeaponPresetChip(label: String, allowed: String, banned: String, onApply: (String, String) -> Unit) {
-    Surface(
-        modifier = Modifier.clickable { onApply(allowed, banned) },
-        color = Color(0xFF18181B),
-        shape = RoundedCornerShape(8.dp),
-        border = BorderStroke(1.dp, Color(0xFF3F3F46))
+    Column(
+        modifier = Modifier
+            .clickable { onApply(allowed, banned) }
+            .padding(horizontal = 4.dp, vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
             text = label,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
             fontSize = 11.sp,
             color = Color.White,
             fontWeight = FontWeight.SemiBold
+        )
+        Spacer(modifier = Modifier.height(3.dp))
+        Box(
+            modifier = Modifier
+                .width(18.dp)
+                .height(1.dp)
+                .background(Color.White.copy(alpha = 0.35f))
         )
     }
 }

@@ -107,6 +107,7 @@ object VelorixAnalytics {
     fun setUserId(uid: String) {
         try {
             firebaseAnalytics?.setUserId(uid)
+            com.example.firebase.VelorixFirebaseSuite.bindUserIdentity(uid = uid, email = null)
         } catch (e: Exception) {
             Log.w(TAG, "Failed setting user ID: ${e.message}")
         }
@@ -115,6 +116,7 @@ object VelorixAnalytics {
     private fun logEvent(eventName: String, params: Bundle) {
         try {
             firebaseAnalytics?.logEvent(eventName, params)
+            com.example.firebase.VelorixFirebaseSuite.logBreadcrumb("Analytics", eventName)
         } catch (e: Exception) {
             Log.w(TAG, "Could not log event $eventName: ${e.message}")
         }

@@ -494,16 +494,15 @@ private val openSourceLicenses = listOf(
 
 @Composable
 private fun LicenseCard(license: OpenSourceLicense) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(10.dp),
-        color = Color(0xFF111420),
-        border = BorderStroke(1.dp, Color(0xFF1E2638))
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color.Black)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(12.dp)
+                .padding(vertical = 12.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -516,18 +515,12 @@ private fun LicenseCard(license: OpenSourceLicense) {
                     fontSize = 12.5.sp,
                     fontWeight = FontWeight.Bold
                 )
-                Surface(
-                    shape = RoundedCornerShape(4.dp),
-                    color = Color(0xFF1E293B)
-                ) {
-                    Text(
-                        text = license.licenseType,
-                        color = Color(0xFF38BDF8),
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                    )
-                }
+                Text(
+                    text = license.licenseType,
+                    color = Color(0xFF38BDF8),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
 
             Text(
@@ -544,21 +537,21 @@ private fun LicenseCard(license: OpenSourceLicense) {
                 lineHeight = 16.sp
             )
         }
+        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
     }
 }
 
 @Composable
 private fun ArchitectureOverviewCard() {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        color = Color(0xFF111420),
-        border = BorderStroke(1.dp, Color(0xFF1E2638))
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color.Black)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -574,21 +567,21 @@ private fun ArchitectureOverviewCard() {
                 lineHeight = 17.sp
             )
         }
+        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
     }
 }
 
 @Composable
 private fun DualSyncSystemCard() {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        color = Color(0xFF111420),
-        border = BorderStroke(1.dp, Color(0xFF1E2638))
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color.Black)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -604,21 +597,21 @@ private fun DualSyncSystemCard() {
                 lineHeight = 17.sp
             )
         }
+        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
     }
 }
 
 @Composable
 private fun SecurityComplianceCard() {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        color = Color(0xFF111420),
-        border = BorderStroke(1.dp, Color(0xFF1E2638))
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color.Black)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -634,21 +627,21 @@ private fun SecurityComplianceCard() {
                 lineHeight = 17.sp
             )
         }
+        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
     }
 }
 
 @Composable
 private fun TeamCreditsCard() {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        color = Color(0xFF111420),
-        border = BorderStroke(1.dp, Color(0xFF1E2638))
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color.Black)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -664,6 +657,7 @@ private fun TeamCreditsCard() {
                 lineHeight = 17.sp
             )
         }
+        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
     }
 }
 

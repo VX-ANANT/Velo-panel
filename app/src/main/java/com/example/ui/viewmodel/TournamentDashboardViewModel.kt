@@ -14,6 +14,18 @@ import com.example.domain.model.AdminRecord
 import com.example.domain.model.BannedUserRecord
 import com.example.domain.model.CheckInToken
 import com.example.domain.model.AppAnnouncementBanner
+import com.example.domain.model.AdminChannelType
+import com.example.domain.model.AdminChannelItem
+import com.example.domain.model.AccountDeletionRequest
+import com.example.domain.model.DataExportRequest
+import com.example.domain.model.DepositRequest
+import com.example.domain.model.TokenConversionRecord
+import com.example.domain.model.MissionItem
+import com.example.domain.model.TournamentChatMessage
+import com.example.domain.model.SystemConfig
+import com.example.domain.model.TournamentStandingEntry
+import com.example.domain.model.AdminAuditLogItem
+import com.example.data.repository.AdminIntegrationSyncManager
 import com.example.data.validation.UserRateLimiter
 import com.example.ui.common.GlobalErrorManager
 import kotlinx.coroutines.Dispatchers
@@ -105,7 +117,63 @@ fun DashboardState.Success.withDerivedMetrics(
     val effectiveNotifs = newNotifications ?: this.notifications
     val effectiveTournaments = newTournaments ?: tournaments ?: this.tournaments
 
-    val cleanUsers = effectiveUsers.filter { !it.isGuestSession }
+    val cleanUsers = effectiveUsers.filter { !it.isGuestSession }.map { u ->
+        val matchedRecords = effectiveTournaments.mapNotNull { t ->
+            val participant = t.participants.find { p ->
+                (p.userId.isNotBlank() && p.userId == u.id) ||
+                (p.playerId.isNotBlank() && p.playerId == u.id) ||
+                (u.gameId.isNotBlank() && p.freeFireUid.equals(u.gameId, ignoreCase = true)) ||
+                (u.ign.isNotBlank() && p.inGameName.equals(u.ign, ignoreCase = true)) ||
+                (u.username.isNotBlank() && p.playerName.equals(u.username, ignoreCase = true))
+            }
+            if (participant != null) {
+                val entryPaid = if (participant.entryFeePaid > 0.0) participant.entryFeePaid else t.entryFee.toDouble()
+                com.example.domain.model.PlayerMatchRecord(
+                    tournamentId = t.id,
+                    tournamentTitle = t.title,
+                    game = t.game,
+                    category = t.category,
+                    format = t.format,
+                    map = t.map,
+                    joinedAt = if (participant.joinedAt > 0L) participant.joinedAt else (t.parsedStartsAtMillis ?: 0L),
+                    entryFeePaid = entryPaid,
+                    paidFromDeposit = if (participant.paidFromDeposit > 0.0) participant.paidFromDeposit else entryPaid,
+                    paidFromWinning = participant.paidFromWinning,
+                    paidFromBonus = participant.paidFromBonus,
+                    kills = participant.kills,
+                    rank = participant.rank,
+                    winningAmount = participant.winningAmount,
+                    status = t.status
+                )
+            } else null
+        }
+        val mergedHistory = (u.matchHistory + matchedRecords)
+            .distinctBy { it.tournamentId }
+            .sortedByDescending { it.joinedAt }
+        val joinedIds = (u.joinedMatchIds + mergedHistory.map { it.tournamentId }).filter { it.isNotBlank() }.distinct()
+        val earliestMatchJoin = mergedHistory.map { it.joinedAt }.filter { it > 0L }.minOrNull() ?: u.firstMatchJoinedAt
+        val latestMatchJoin = mergedHistory.map { it.joinedAt }.filter { it > 0L }.maxOrNull() ?: u.lastMatchJoinedAt
+        val supportCases = effectiveTickets.count {
+            (it.userId.isNotBlank() && it.userId == u.id) ||
+            (u.email.isNotBlank() && it.userEmail.equals(u.email, ignoreCase = true))
+        }.coerceAtLeast(u.supportCasesCount)
+        val derivedTotalMatches = maxOf(u.totalMatchesJoined, joinedIds.size, mergedHistory.size)
+        val derivedEntryFees = maxOf(u.totalEntryFeesPaid, mergedHistory.sumOf { it.entryFeePaid })
+        val derivedEarnings = maxOf(u.totalEarnings, u.winningFunds, mergedHistory.sumOf { it.winningAmount })
+        val derivedKills = maxOf(u.kills, mergedHistory.sumOf { it.kills })
+        u.copy(
+            firstAppJoinAt = if (u.firstAppJoinAt > 0L) u.firstAppJoinAt else u.createdAt,
+            firstMatchJoinedAt = earliestMatchJoin,
+            lastMatchJoinedAt = latestMatchJoin,
+            totalMatchesJoined = derivedTotalMatches,
+            totalEntryFeesPaid = derivedEntryFees,
+            totalEarnings = derivedEarnings,
+            kills = derivedKills,
+            supportCasesCount = supportCases,
+            joinedMatchIds = joinedIds,
+            matchHistory = mergedHistory
+        )
+    }
     val sortedLeaderboard = if (newUsers != null || leaderboardPlayers.isEmpty()) {
         cleanUsers.sortedWith(
             compareByDescending<UserProfile> { it.totalEarnings }
@@ -193,6 +261,36 @@ class TournamentDashboardViewModel(
     private val activeStreamJobs = mutableListOf<kotlinx.coroutines.Job>()
 
     val userRoleManager: UserRoleManager = UserRoleManager(repository)
+    val integrationSyncManager: AdminIntegrationSyncManager = AdminIntegrationSyncManager(repository.database, repository.firestore)
+
+    private val _selectedAdminChannel = MutableStateFlow(AdminChannelType.ACCOUNT_DELETION)
+    val selectedAdminChannel: StateFlow<AdminChannelType> = _selectedAdminChannel.asStateFlow()
+
+    private val _activeChannelItems = MutableStateFlow<List<AdminChannelItem>>(emptyList())
+    val activeChannelItems: StateFlow<List<AdminChannelItem>> = _activeChannelItems.asStateFlow()
+
+    private val _accountDeletionRequests = MutableStateFlow<List<AccountDeletionRequest>>(emptyList())
+    val accountDeletionRequests: StateFlow<List<AccountDeletionRequest>> = _accountDeletionRequests.asStateFlow()
+
+    private val _dataExportRequests = MutableStateFlow<List<DataExportRequest>>(emptyList())
+    val dataExportRequests: StateFlow<List<DataExportRequest>> = _dataExportRequests.asStateFlow()
+
+    private val _depositRequests = MutableStateFlow<List<DepositRequest>>(emptyList())
+    val depositRequests: StateFlow<List<DepositRequest>> = _depositRequests.asStateFlow()
+
+    private val _tokenConversions = MutableStateFlow<List<TokenConversionRecord>>(emptyList())
+    val tokenConversions: StateFlow<List<TokenConversionRecord>> = _tokenConversions.asStateFlow()
+
+    private val _missions = MutableStateFlow<List<MissionItem>>(emptyList())
+    val missions: StateFlow<List<MissionItem>> = _missions.asStateFlow()
+
+    private val _systemConfig = MutableStateFlow(SystemConfig())
+    val systemConfig: StateFlow<SystemConfig> = _systemConfig.asStateFlow()
+
+    private val _auditLogs = MutableStateFlow<List<AdminAuditLogItem>>(emptyList())
+    val auditLogs: StateFlow<List<AdminAuditLogItem>> = _auditLogs.asStateFlow()
+
+    private var activeChannelStreamJob: Job? = null
 
     // In-memory locks to prevent real-time stream snapshots from causing 'revert-and-reactivate' UI glitches
     private val lockedAdminStates = java.util.concurrent.ConcurrentHashMap<String, Pair<AdminRecord, Long>>()
@@ -214,11 +312,13 @@ class TournamentDashboardViewModel(
         }
         if (email != null) {
             startStreams(forceRestart = true)
+            extractAndSyncRealDataFromBackend()
         }
     }
 
     init {
         startStreams(forceRestart = false)
+        extractAndSyncRealDataFromBackend()
     }
 
     fun fetchData() {
@@ -236,7 +336,10 @@ class TournamentDashboardViewModel(
         lockedDeletedUserIds.clear()
         lockedDeletedAdminUids.clear()
         repository.locallyDeletedUserIds.clear()
-        repository.locallyDeletedTournamentIds.clear()
+        val currentTourneysCount = (_uiState.value as? DashboardState.Success)?.tournaments?.size ?: 0
+        if (currentTourneysCount == 0 && repository.locallyDeletedTournamentIds.isNotEmpty()) {
+            repository.clearDeletedTournamentCache()
+        }
 
         // 2. Set syncing state in UI atomically
         _uiState.update { curr ->
@@ -245,8 +348,25 @@ class TournamentDashboardViewModel(
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
+                val targetEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
+                repository.ensureAuthenticatedSession(targetEmail)
                 GlobalErrorManager.emitSuccess("Extracting real data from Firebase RTDB & Cloud Firestore...")
-                val result = repository.extractRealDataFromBackend(forceServer = true)
+                var result = repository.extractRealDataFromBackend(forceServer = true)
+                if (result.tournaments.isEmpty() && repository.locallyDeletedTournamentIds.isNotEmpty()) {
+                    repository.clearDeletedTournamentCache()
+                    result = repository.extractRealDataFromBackend(forceServer = true)
+                }
+                val cleanTournaments = result.tournaments.filter { t ->
+                    t.id !in repository.locallyDeletedTournamentIds &&
+                        !repository.isPhantomOrDeletedTournament(
+                            tId = t.id,
+                            rawTitle = t.title,
+                            entryFee = t.entryFee,
+                            prizePool = t.prizePool,
+                            roomId = t.roomDetails?.roomId,
+                            roomPass = t.roomDetails?.roomPassword
+                        )
+                }
 
                 val initialEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
 
@@ -254,7 +374,7 @@ class TournamentDashboardViewModel(
                     _uiState.update { curr ->
                         val base = curr as? DashboardState.Success ?: DashboardState.Success(currentUserEmail = initialEmail)
                         base.withDerivedMetrics(
-                            newTournaments = result.tournaments,
+                            newTournaments = cleanTournaments,
                             newUsers = result.users,
                             newSyncing = false
                         ).copy(lastSyncTimestamp = System.currentTimeMillis())
@@ -325,8 +445,14 @@ class TournamentDashboardViewModel(
                             val lockedEntry = lockedUserStates[u.id]
                             if (lockedEntry != null) {
                                 val (lockedUser, lockTime) = lockedEntry
-                                if (now - lockTime < 20_000L) {
-                                    if (u.role == lockedUser.role && u.isBanned == lockedUser.isBanned && u.funds == lockedUser.funds) {
+                                if (now - lockTime < 25_000L) {
+                                    if (u.role == lockedUser.role &&
+                                        u.isBanned == lockedUser.isBanned &&
+                                        u.funds == lockedUser.funds &&
+                                        u.depositFunds == lockedUser.depositFunds &&
+                                        u.winningFunds == lockedUser.winningFunds &&
+                                        u.bonusFunds == lockedUser.bonusFunds
+                                    ) {
                                         lockedUserStates.remove(u.id)
                                         u
                                     } else {
@@ -350,7 +476,12 @@ class TournamentDashboardViewModel(
 
                         _uiState.update { curr ->
                             val s = curr as? DashboardState.Success ?: DashboardState.Success(currentUserEmail = initialEmail)
-                            s.withDerivedMetrics(newUsers = resolvedUsers)
+                            val finalUsers = if (resolvedUsers.size <= 1 && s.users.size > 1) {
+                                (s.users + resolvedUsers).distinctBy { it.id }.filter { !lockedDeletedUserIds.contains(it.id) }
+                            } else {
+                                resolvedUsers
+                            }
+                            s.withDerivedMetrics(newUsers = finalUsers)
                         }
                     }
             } catch (e: Exception) {
@@ -463,9 +594,25 @@ class TournamentDashboardViewModel(
                     .debounce(100L)
                     .flowOn(Dispatchers.Default)
                     .collect { realtimeTournaments ->
+                        val filteredTournaments = realtimeTournaments.filter { t ->
+                            t.id !in repository.locallyDeletedTournamentIds &&
+                                !repository.isPhantomOrDeletedTournament(
+                                    tId = t.id,
+                                    rawTitle = t.title,
+                                    entryFee = t.entryFee,
+                                    prizePool = t.prizePool,
+                                    roomId = t.roomDetails?.roomId,
+                                    roomPass = t.roomDetails?.roomPassword
+                                )
+                        }
                         _uiState.update { curr ->
                             val s = curr as? DashboardState.Success ?: DashboardState.Success(currentUserEmail = initialEmail)
-                            s.withDerivedMetrics(newTournaments = realtimeTournaments)
+                            val finalTournaments = if (filteredTournaments.isEmpty() && s.tournaments.isNotEmpty()) {
+                                s.tournaments.filter { it.id !in repository.locallyDeletedTournamentIds }
+                            } else {
+                                filteredTournaments
+                            }
+                            s.withDerivedMetrics(newTournaments = finalTournaments)
                         }
                     }
             } catch (e: Exception) {
@@ -575,9 +722,113 @@ class TournamentDashboardViewModel(
             }
         }
 
+        // 13. Stream Account Deletion Requests (#account-deletions)
+        val deletionRequestsJob = viewModelScope.launch(Dispatchers.Default) {
+            try {
+                integrationSyncManager.getAccountDeletionRequestsStream()
+                    .distinctUntilChanged()
+                    .flowOn(Dispatchers.Default)
+                    .collect { list ->
+                        _accountDeletionRequests.value = list
+                    }
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) e.printStackTrace()
+            }
+        }
+
+        // 14. Stream Data Export Archive (#data-exports)
+        val dataExportsJob = viewModelScope.launch(Dispatchers.Default) {
+            try {
+                integrationSyncManager.getDataExportRequestsStream()
+                    .distinctUntilChanged()
+                    .flowOn(Dispatchers.Default)
+                    .collect { list ->
+                        _dataExportRequests.value = list
+                    }
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) e.printStackTrace()
+            }
+        }
+
+        // 15. Stream Manual / Gateway Deposit Verification Queue (#deposits)
+        val depositsJob = viewModelScope.launch(Dispatchers.Default) {
+            try {
+                integrationSyncManager.getDepositRequestsStream()
+                    .distinctUntilChanged()
+                    .flowOn(Dispatchers.Default)
+                    .collect { list ->
+                        _depositRequests.value = list
+                    }
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) e.printStackTrace()
+            }
+        }
+
+        // 16. Stream Token Conversion Ledger (#token-ledger)
+        val tokenConvJob = viewModelScope.launch(Dispatchers.Default) {
+            try {
+                integrationSyncManager.getTokenConversionsStream()
+                    .distinctUntilChanged()
+                    .flowOn(Dispatchers.Default)
+                    .collect { list ->
+                        _tokenConversions.value = list
+                    }
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) e.printStackTrace()
+            }
+        }
+
+        // 17. Stream Missions (/missions)
+        val missionsJob = viewModelScope.launch(Dispatchers.Default) {
+            try {
+                integrationSyncManager.getMissionsStream()
+                    .distinctUntilChanged()
+                    .flowOn(Dispatchers.Default)
+                    .collect { list ->
+                        _missions.value = list
+                    }
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) e.printStackTrace()
+            }
+        }
+
+        // 18. Stream Global System Config (/system_config & /app_config)
+        val sysConfigJob = viewModelScope.launch(Dispatchers.Default) {
+            try {
+                integrationSyncManager.getSystemConfigStream()
+                    .distinctUntilChanged()
+                    .flowOn(Dispatchers.Default)
+                    .collect { cfg ->
+                        _systemConfig.value = cfg
+                    }
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) e.printStackTrace()
+            }
+        }
+
+        // 19. Stream Audit Logs (/audit_logs)
+        val auditLogsJob = viewModelScope.launch(Dispatchers.Default) {
+            try {
+                integrationSyncManager.getAuditLogsStream()
+                    .distinctUntilChanged()
+                    .flowOn(Dispatchers.Default)
+                    .collect { logs ->
+                        _auditLogs.value = logs
+                    }
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) e.printStackTrace()
+            }
+        }
+
+        startSelectedChannelStream(_selectedAdminChannel.value)
+
         synchronized(activeStreamJobs) {
             activeStreamJobs.addAll(
-                listOf(userJob, ticketsJob, payoutsJob, adminsJob, bannedJob, tournamentsJob, tokensJob, bannersJob, annJob, proofsJob, notifsJob, categoriesJob)
+                listOf(
+                    userJob, ticketsJob, payoutsJob, adminsJob, bannedJob, tournamentsJob,
+                    tokensJob, bannersJob, annJob, proofsJob, notifsJob, categoriesJob,
+                    deletionRequestsJob, dataExportsJob, depositsJob, tokenConvJob, missionsJob, sysConfigJob, auditLogsJob
+                )
             )
         }
     }
@@ -779,6 +1030,8 @@ class TournamentDashboardViewModel(
     }
 
     fun cancelTournament(tournamentId: String, reason: String) {
+        val currentState = _uiState.value as? DashboardState.Success
+        val targetTournament = currentState?.tournaments?.find { it.id == tournamentId }
         _uiState.update { curr ->
             val s = curr as? DashboardState.Success ?: return@update curr
             val updatedList = s.tournaments.map {
@@ -790,6 +1043,15 @@ class TournamentDashboardViewModel(
             try {
                 val currAdminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
                 val currAdminUid = repository.auth.currentUser?.uid
+                if (targetTournament != null) {
+                    val allUsers = (_uiState.value as? DashboardState.Success)?.users ?: emptyList()
+                    integrationSyncManager.cancelTournamentAndAutoRefund(
+                        tournament = targetTournament,
+                        reason = reason,
+                        allUsers = allUsers,
+                        adminEmail = currAdminEmail
+                    )
+                }
                 repository.cancelTournament(tournamentId, reason, currAdminEmail, currAdminUid)
             } catch (e: Exception) {
                 GlobalErrorManager.emitFirestoreError("Cancel Tournament", e)
@@ -798,9 +1060,21 @@ class TournamentDashboardViewModel(
     }
 
     fun deleteTournament(tournamentId: String) {
+        repository.markTournamentDeleted(tournamentId)
         _uiState.update { curr ->
             val s = curr as? DashboardState.Success ?: return@update curr
-            val updatedList = s.tournaments.filter { it.id != tournamentId }
+            val updatedList = s.tournaments.filter {
+                it.id != tournamentId &&
+                    it.id !in repository.locallyDeletedTournamentIds &&
+                    !repository.isPhantomOrDeletedTournament(
+                        tId = it.id,
+                        rawTitle = it.title,
+                        entryFee = it.entryFee,
+                        prizePool = it.prizePool,
+                        roomId = it.roomDetails?.roomId,
+                        roomPass = it.roomDetails?.roomPassword
+                    )
+            }
             s.withDerivedMetrics(newTournaments = updatedList)
         }
         viewModelScope.launch(Dispatchers.IO) {
@@ -923,6 +1197,9 @@ class TournamentDashboardViewModel(
         val currAdminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
         
         viewModelScope.launch(Dispatchers.IO) {
+            try {
+                integrationSyncManager.setUserBanStatus(user, newBanned, reason, currAdminEmail)
+            } catch (_: Exception) {}
             val result = userRoleManager.toggleUserBan(user, newBanned, reason, currAdminEmail)
             result.onSuccess { updatedUser ->
                 lockedUserStates[user.id] = updatedUser to System.currentTimeMillis()
@@ -1017,25 +1294,110 @@ class TournamentDashboardViewModel(
         }
     }
 
-    fun addFundsToUser(user: UserProfile, amount: Double) {
-        val rateLimitCheck = UserRateLimiter.checkAndRecord(UserRateLimiter.ActionType.WALLET_TRANSACTION, user.id)
-        if (!rateLimitCheck.isAllowed) {
-            GlobalErrorManager.emitError(rateLimitCheck.reasonMessage)
-            return
+    fun addFundsToUser(
+        user: UserProfile,
+        amount: Double,
+        bucket: com.example.domain.model.WalletBucket = com.example.domain.model.WalletBucket.DEPOSIT,
+        reason: String = "Fund adjustment by admin"
+    ) {
+        val currentStateUsers = (_uiState.value as? DashboardState.Success)?.users ?: emptyList()
+        val latestUser = lockedUserStates[user.id]?.first
+            ?: currentStateUsers.find { it.id == user.id }
+            ?: user
+
+        val newDeposit = when (bucket) {
+            com.example.domain.model.WalletBucket.DEPOSIT -> (latestUser.depositFunds + amount).coerceAtLeast(0.0)
+            else -> latestUser.depositFunds.coerceAtLeast(0.0)
         }
-        val newBalance = user.funds + amount
+        val newWinning = when (bucket) {
+            com.example.domain.model.WalletBucket.WINNING -> (latestUser.winningFunds + amount).coerceAtLeast(0.0)
+            else -> latestUser.winningFunds.coerceAtLeast(0.0)
+        }
+        val newBonus = when (bucket) {
+            com.example.domain.model.WalletBucket.BONUS -> (latestUser.bonusFunds + amount).coerceAtLeast(0.0)
+            else -> latestUser.bonusFunds.coerceAtLeast(0.0)
+        }
+        val newReferralBonus = when (bucket) {
+            com.example.domain.model.WalletBucket.BONUS -> if (amount > 0) maxOf(latestUser.referralBonusEarned, latestUser.bonusFunds) + amount else newBonus
+            else -> maxOf(latestUser.referralBonusEarned, newBonus)
+        }
+        val newTotal = newDeposit + newWinning + newBonus
+        val now = System.currentTimeMillis()
+        val updatedUser = latestUser.copy(
+            funds = newTotal,
+            balance = newTotal,
+            depositFunds = newDeposit,
+            winningFunds = newWinning,
+            bonusFunds = newBonus,
+            referralBonusEarned = newReferralBonus,
+            totalDeposited = if (bucket == com.example.domain.model.WalletBucket.DEPOSIT && amount > 0) latestUser.totalDeposited + amount else latestUser.totalDeposited,
+            totalEarnings = if (bucket == com.example.domain.model.WalletBucket.WINNING && amount > 0) latestUser.totalEarnings + amount else latestUser.totalEarnings,
+            lastActive = now
+        )
+        lockedUserStates[user.id] = updatedUser to now
+        repository.recentAdminWalletOverrides[user.id] = updatedUser to now
         _uiState.update { curr ->
             val s = curr as? DashboardState.Success ?: return@update curr
-            s.withDerivedMetrics(users = s.users.map { if (it.id == user.id) it.copy(funds = newBalance) else it })
+            s.withDerivedMetrics(users = s.users.map { if (it.id == user.id) updatedUser else it })
         }
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val currAdminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
-                repository.adjustUserBalance(user.id, newBalance, "Fund adjustment by admin", currAdminEmail)
-                GlobalErrorManager.emitSuccess("Wallet updated: ₹$amount added to ${user.username}")
+                val syncedUser = repository.adjustUserWalletByBucket(
+                    user = latestUser,
+                    deltaAmount = amount,
+                    bucket = bucket,
+                    reason = reason,
+                    adminEmail = currAdminEmail
+                )
+                if (syncedUser != null) {
+                    val syncTime = System.currentTimeMillis()
+                    lockedUserStates[user.id] = syncedUser to syncTime
+                    _uiState.update { curr ->
+                        val s = curr as? DashboardState.Success ?: return@update curr
+                        s.withDerivedMetrics(users = s.users.map { if (it.id == user.id) syncedUser else it })
+                    }
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
                 GlobalErrorManager.emitError("Failed to adjust wallet: ${e.message}")
+            }
+        }
+    }
+
+    fun recordPlayerMatchWinning(
+        user: UserProfile,
+        tournamentId: String,
+        tournamentTitle: String,
+        kills: Int,
+        rank: Int,
+        winningAmount: Double,
+        entryFeePaid: Double
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val currAdminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
+                val updatedUser = repository.recordPlayerMatchStatsAndWinning(
+                    user = user,
+                    tournamentId = tournamentId,
+                    tournamentTitle = tournamentTitle,
+                    kills = kills,
+                    rank = rank,
+                    winningAmount = winningAmount,
+                    entryFeePaid = entryFeePaid,
+                    adminEmail = currAdminEmail
+                )
+                if (updatedUser != null) {
+                    lockedUserStates[user.id] = updatedUser to System.currentTimeMillis()
+                    _uiState.update { curr ->
+                        val s = curr as? DashboardState.Success ?: return@update curr
+                        s.withDerivedMetrics(users = s.users.map { if (it.id == user.id) updatedUser else it })
+                    }
+                }
+                GlobalErrorManager.emitSuccess("Match stats & ₹${"%.0f".format(winningAmount)} Winning Balance updated for ${user.username}")
+            } catch (e: Exception) {
+                e.printStackTrace()
+                GlobalErrorManager.emitError("Failed to record match stats: ${e.message}")
             }
         }
     }
@@ -1118,6 +1480,7 @@ class TournamentDashboardViewModel(
         ticket: SupportTicket,
         amount: Double,
         reason: String = "Support Ticket Resolution Compensation",
+        bucket: com.example.domain.model.WalletBucket = com.example.domain.model.WalletBucket.DEPOSIT,
         onComplete: (Boolean) -> Unit = {}
     ) {
         if (amount <= 0) {
@@ -1131,15 +1494,24 @@ class TournamentDashboardViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 if (targetUser != null) {
-                    val newBalance = targetUser.funds + amount
-                    repository.adjustUserBalance(targetUser.id, newBalance, reason, adminEmail)
-                    _uiState.update { current ->
-                        val s = current as? DashboardState.Success ?: return@update current
-                        s.withDerivedMetrics(users = s.users.map { if (it.id == targetUser.id) it.copy(funds = newBalance) else it })
+                    val updatedUser = repository.adjustUserWalletByBucket(
+                        user = targetUser,
+                        deltaAmount = amount,
+                        bucket = bucket,
+                        reason = reason,
+                        adminEmail = adminEmail
+                    )
+                    if (updatedUser != null) {
+                        lockedUserStates[targetUser.id] = updatedUser to System.currentTimeMillis()
+                        _uiState.update { current ->
+                            val s = current as? DashboardState.Success ?: return@update current
+                            s.withDerivedMetrics(users = s.users.map { if (it.id == targetUser.id) updatedUser else it })
+                        }
                     }
                 } else if (ticket.userEmail.isNotBlank()) {
                     val fallbackId = "USR_${ticket.userEmail.hashCode()}"
-                    repository.adjustUserBalance(fallbackId, amount, reason, adminEmail)
+                    val fallbackUser = UserProfile(id = fallbackId, email = ticket.userEmail, username = ticket.userEmail.substringBefore("@"))
+                    repository.adjustUserWalletByBucket(fallbackUser, amount, bucket, reason, adminEmail)
                 }
                 // Send automated system confirmation message in ticket chat
                 repository.sendTicketMessage(
@@ -1356,15 +1728,8 @@ class TournamentDashboardViewModel(
     fun testPushNotification(context: android.content.Context) {
         viewModelScope.launch(Dispatchers.IO) {
             val liveTourney = (_uiState.value as? DashboardState.Success)?.tournaments?.firstOrNull()
-            if (liveTourney != null) {
-                repository.dispatchAutoTournamentCampaign(liveTourney)
-            } else {
-                repository.publishCampaignNotification(
-                    title = "Velorix Push & Campaign Test",
-                    message = "Notification Engine is active! Tournament campaigns & system notifications are operating in real-time.",
-                    priority = "URGENT"
-                )
-            }
+            com.example.notification.VelorixFcmManager.dispatchTestPushToUserPanel(liveTourney)
+            GlobalErrorManager.emitSuccess("Test push dispatched to User Panel (com.tournaments.velorix)!")
         }
     }
 
@@ -1380,6 +1745,355 @@ class TournamentDashboardViewModel(
                     GlobalErrorManager.emitError("Purge failed: ${result.second}")
                 }
                 onResult(result.first, result.second)
+            }
+        }
+    }
+
+    // =========================================================================
+    // ADMIN INTEGRATION MASTER PROMPT ACTIONS (10 CHANNELS, DPDP, DEPOSITS, TOKENS, SYSTEM CONFIG, CHAT)
+    // =========================================================================
+
+    fun selectAdminChannel(channel: AdminChannelType) {
+        _selectedAdminChannel.value = channel
+        startSelectedChannelStream(channel)
+    }
+
+    private fun startSelectedChannelStream(channel: AdminChannelType) {
+        activeChannelStreamJob?.cancel()
+        activeChannelStreamJob = viewModelScope.launch(Dispatchers.Default) {
+            try {
+                integrationSyncManager.getAdminChannelStream(channel.channelKey)
+                    .distinctUntilChanged()
+                    .flowOn(Dispatchers.Default)
+                    .collect { items ->
+                        _activeChannelItems.value = items
+                    }
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) e.printStackTrace()
+            }
+        }
+    }
+
+    fun updateAdminChannelItemStatus(channelType: String, itemId: String, status: String, note: String = "") {
+        viewModelScope.launch(Dispatchers.IO) {
+            val adminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
+            integrationSyncManager.updateAdminChannelItemStatus(channelType, itemId, status, note, adminEmail)
+        }
+    }
+
+    fun pushTestSituationEvent(situationLabel: String = "ADMIN_SITUATION_VERIFICATION") {
+        viewModelScope.launch(Dispatchers.IO) {
+            val adminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
+            integrationSyncManager.pushTestSituationEventToChannels(adminEmail)
+        }
+    }
+
+    fun approveAccountDeletion(request: AccountDeletionRequest) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val adminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
+            lockedDeletedUserIds.add(request.userId)
+            integrationSyncManager.approveAndPermanentlyDeleteUser(request, adminEmail)
+            _uiState.update { curr ->
+                val s = curr as? DashboardState.Success ?: return@update curr
+                s.withDerivedMetrics(newUsers = s.users.filter { it.id != request.userId })
+            }
+        }
+    }
+
+    fun restoreAccountDeletion(request: AccountDeletionRequest) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val adminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
+            integrationSyncManager.rejectAndRestoreUserAccount(request, adminEmail)
+        }
+    }
+
+    fun generateUserDpdpExport(user: UserProfile, onComplete: (DataExportRequest?) -> Unit = {}) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val record = integrationSyncManager.generateAndArchiveUserDataExport(user)
+            withContext(Dispatchers.Main) {
+                onComplete(record)
+            }
+        }
+    }
+
+    fun resetUserAvatarToDefault(user: UserProfile) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val adminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
+            integrationSyncManager.resetUserAvatarToDefault(user, adminEmail)
+            val updated = user.copy(
+                avatarUrl = "avatar_1",
+                version = user.version + 1,
+                updatedAt = System.currentTimeMillis()
+            )
+            lockedUserStates[user.id] = Pair(updated, System.currentTimeMillis())
+            _uiState.update { curr ->
+                val s = curr as? DashboardState.Success ?: return@update curr
+                s.withDerivedMetrics(newUsers = s.users.map { if (it.id == user.id) updated else it })
+            }
+        }
+    }
+
+    fun adjustUserTokens(user: UserProfile, tokenDelta: Int, reason: String) {
+        if (tokenDelta == 0) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val adminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
+            integrationSyncManager.adjustUserTokens(user, tokenDelta, reason, adminEmail)
+            val newTokens = (user.tokens + tokenDelta).coerceAtLeast(0)
+            val updated = user.copy(
+                tokens = newTokens,
+                version = user.version + 1,
+                updatedAt = System.currentTimeMillis()
+            )
+            lockedUserStates[user.id] = Pair(updated, System.currentTimeMillis())
+            _uiState.update { curr ->
+                val s = curr as? DashboardState.Success ?: return@update curr
+                s.withDerivedMetrics(newUsers = s.users.map { if (it.id == user.id) updated else it })
+            }
+        }
+    }
+
+    fun approveDepositRequest(request: DepositRequest) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val adminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
+            val payoutReq = PayoutRequest(
+                id = request.id.ifBlank { request.requestId },
+                uid = request.effectiveUserId,
+                username = request.username.ifBlank { request.userName },
+                email = request.userEmail,
+                paymentMethod = request.paymentMethod,
+                paymentId = request.utrNumber,
+                vtAmount = request.amount,
+                status = request.status,
+                requestedAt = request.createdAt
+            )
+            repository.approveDeposit(payoutReq, adminEmail)
+        }
+    }
+
+    fun rejectDepositRequest(request: DepositRequest, reason: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val adminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
+            val payoutReq = PayoutRequest(
+                id = request.id.ifBlank { request.requestId },
+                uid = request.effectiveUserId,
+                username = request.username.ifBlank { request.userName },
+                email = request.userEmail,
+                paymentMethod = request.paymentMethod,
+                paymentId = request.utrNumber,
+                vtAmount = request.amount,
+                status = request.status,
+                requestedAt = request.createdAt
+            )
+            repository.rejectDeposit(payoutReq, reason, adminEmail)
+        }
+    }
+
+    fun saveMission(mission: MissionItem) {
+        viewModelScope.launch(Dispatchers.IO) {
+            integrationSyncManager.saveMission(mission)
+        }
+    }
+
+    fun deleteMission(missionId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            integrationSyncManager.deleteMission(missionId)
+        }
+    }
+
+    fun saveSystemConfig(config: SystemConfig) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val adminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
+            integrationSyncManager.saveSystemConfig(config, adminEmail)
+            _systemConfig.value = config.copy(updatedAt = System.currentTimeMillis())
+        }
+    }
+
+    fun savePromotionalBanner(banner: AppAnnouncementBanner) {
+        viewModelScope.launch(Dispatchers.IO) {
+            integrationSyncManager.savePromotionalBanner(banner)
+        }
+    }
+
+    fun deletePromotionalBanner(bannerId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            integrationSyncManager.deletePromotionalBanner(bannerId)
+        }
+    }
+
+    fun sendTargetedNotification(userId: String, title: String, message: String, type: String = "SYSTEM") {
+        viewModelScope.launch(Dispatchers.IO) {
+            integrationSyncManager.sendTargetedUserNotification(userId, title, message, type)
+            GlobalErrorManager.emitSuccess("Notification [$type] delivered to /notifications/$userId in RTDB & Firestore.")
+        }
+    }
+
+    fun sendGlobalBroadcastNotification(title: String, message: String, type: String = "ANNOUNCEMENT") {
+        viewModelScope.launch(Dispatchers.IO) {
+            integrationSyncManager.sendGlobalBroadcastNotification(title, message, type)
+        }
+    }
+
+    fun getTournamentChatStream(tournamentId: String): Flow<List<TournamentChatMessage>> {
+        return integrationSyncManager.getTournamentChatStream(tournamentId)
+    }
+
+    fun sendAdminTournamentChat(tournamentId: String, message: String, isPinned: Boolean = false) {
+        if (message.isBlank()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val adminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
+            val adminName = "ADMIN • ${adminEmail.substringBefore("@").uppercase()}"
+            integrationSyncManager.sendAdminTournamentChatMessage(
+                tournamentId = tournamentId,
+                message = message,
+                isPinned = isPinned,
+                adminName = adminName
+            )
+        }
+    }
+
+    fun togglePinTournamentChat(tournamentId: String, messageId: String, isPinned: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            integrationSyncManager.togglePinTournamentChatMessage(tournamentId, messageId, isPinned)
+        }
+    }
+
+    fun deleteTournamentChat(tournamentId: String, messageId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            integrationSyncManager.deleteTournamentChatMessage(tournamentId, messageId)
+        }
+    }
+
+    // =========================================================================
+    // MODULE 1-4: MULTI-POSITION STANDINGS, CANCELLATION AUTO-REFUND & MODERATION
+    // =========================================================================
+
+    fun loadTournamentStandings(
+        tournament: Tournament,
+        onLoaded: (List<TournamentStandingEntry>) -> Unit
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val allUsers = (_uiState.value as? DashboardState.Success)?.users ?: emptyList()
+            val list = integrationSyncManager.loadTournamentParticipantsForStandings(tournament, allUsers)
+            withContext(Dispatchers.Main) {
+                onLoaded(list)
+            }
+        }
+    }
+
+    fun publishTournamentStandings(
+        tournament: Tournament,
+        standings: List<TournamentStandingEntry>,
+        onComplete: (Boolean) -> Unit = {}
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val adminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
+            val ok = integrationSyncManager.publishTournamentStandingsAndPrizes(
+                tournament = tournament,
+                rawStandings = standings,
+                adminEmail = adminEmail
+            )
+            if (ok) {
+                val sorted = standings.sortedBy { it.rank.coerceAtLeast(1) }
+                val totalDisbursed = sorted.sumOf { (it.rankPrize + it.killPrize).coerceAtLeast(0.0) }
+                val top1 = sorted.firstOrNull { it.rank == 1 } ?: sorted.firstOrNull()
+                _uiState.update { curr ->
+                    val s = curr as? DashboardState.Success ?: return@update curr
+                    val updatedTourneys = s.tournaments.map { t ->
+                        if (t.id == tournament.id) {
+                            t.copy(
+                                status = "COMPLETED",
+                                isCompleted = true,
+                                payoutStatus = "PAID",
+                                completedAt = System.currentTimeMillis(),
+                                totalPrizeDisbursed = totalDisbursed,
+                                winnerUid = top1?.userId ?: t.winnerUid,
+                                winnerName = top1?.inGameName ?: t.winnerName,
+                                winnerPrize = top1?.let { it.rankPrize + it.killPrize } ?: t.winnerPrize,
+                                finalLeaderboard = sorted,
+                                standings = sorted
+                            )
+                        } else t
+                    }
+                    s.withDerivedMetrics(newTournaments = updatedTourneys)
+                }
+            }
+            withContext(Dispatchers.Main) {
+                onComplete(ok)
+            }
+        }
+    }
+
+    fun cancelTournamentWithAutoRefund(
+        tournament: Tournament,
+        reason: String,
+        onComplete: (Boolean) -> Unit = {}
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val adminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
+            val allUsers = (_uiState.value as? DashboardState.Success)?.users ?: emptyList()
+            val ok = integrationSyncManager.cancelTournamentAndAutoRefund(
+                tournament = tournament,
+                reason = reason.ifBlank { "Cancelled by Admin" },
+                allUsers = allUsers,
+                adminEmail = adminEmail
+            )
+            if (ok) {
+                _uiState.update { curr ->
+                    val s = curr as? DashboardState.Success ?: return@update curr
+                    val updatedTourneys = s.tournaments.map { t ->
+                        if (t.id == tournament.id) t.copy(status = "CANCELLED") else t
+                    }
+                    s.withDerivedMetrics(newTournaments = updatedTourneys)
+                }
+            }
+            withContext(Dispatchers.Main) {
+                onComplete(ok)
+            }
+        }
+    }
+
+    fun setUserBanWithReason(user: UserProfile, isBanned: Boolean, reason: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val adminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
+            val ok = integrationSyncManager.setUserBanStatus(user, isBanned, reason, adminEmail)
+            if (ok) {
+                val updated = user.copy(
+                    isBanned = isBanned,
+                    status = if (isBanned) "banned" else "active",
+                    banReason = if (isBanned) reason.ifBlank { "Violation of Fair Play Policy" } else "",
+                    banType = if (isBanned) "PERMANENT" else "",
+                    version = user.version + 1,
+                    updatedAt = System.currentTimeMillis()
+                )
+                lockedUserStates[user.id] = Pair(updated, System.currentTimeMillis())
+                _uiState.update { curr ->
+                    val s = curr as? DashboardState.Success ?: return@update curr
+                    s.withDerivedMetrics(newUsers = s.users.map { if (it.id == user.id) updated else it })
+                }
+            }
+        }
+    }
+
+    fun setUserSuspendWithDuration(user: UserProfile, isSuspended: Boolean, reason: String, durationHours: Int = 24) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val adminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
+            val ok = integrationSyncManager.setUserSuspendStatus(user, isSuspended, reason, durationHours, adminEmail)
+            if (ok) {
+                val now = System.currentTimeMillis()
+                val until = if (isSuspended) now + (durationHours.coerceAtLeast(1) * 3600_000L) else 0L
+                val updated = user.copy(
+                    isSuspended = isSuspended,
+                    status = if (isSuspended) "suspended" else "active",
+                    suspendReason = if (isSuspended) reason.ifBlank { "Temporary Suspension" } else "",
+                    suspendedUntil = until,
+                    version = user.version + 1,
+                    updatedAt = now
+                )
+                lockedUserStates[user.id] = Pair(updated, now)
+                _uiState.update { curr ->
+                    val s = curr as? DashboardState.Success ?: return@update curr
+                    s.withDerivedMetrics(newUsers = s.users.map { if (it.id == user.id) updated else it })
+                }
             }
         }
     }

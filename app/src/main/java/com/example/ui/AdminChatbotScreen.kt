@@ -250,7 +250,7 @@ fun AdminChatbotScreen(
         val rateCheck = UserRateLimiter.checkAndRecord(UserRateLimiter.ActionType.GEMINI_CHAT_MESSAGE)
         if (!rateCheck.isAllowed) {
             messages = messages + ChatMessage(
-                text = "⏳ Rate Limit Active: ${rateCheck.reasonMessage}",
+                text = "Rate Limit Active: ${rateCheck.reasonMessage}",
                 isUser = false,
                 isError = true
             )

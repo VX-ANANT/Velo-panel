@@ -127,34 +127,34 @@ enum class HyperOSTheme(
     val glowColor: Color
 ) {
     NEBULA_PURPLE(
-        themeName = "Hyper Nebula",
-        primaryColor = Color(0xFFD0BCFF),
-        secondaryColor = Color(0xFF7F56D9),
-        glowColor = Color(0xFF9E77ED)
+        themeName = "System Blue",
+        primaryColor = Color(0xFF0A84FF),
+        secondaryColor = Color(0xFF0066CC),
+        glowColor = Color(0xFF38BDF8)
     ),
     GLACIER_CYAN(
-        themeName = "Xiaomi Cyan",
-        primaryColor = Color(0xFF4DD0E1),
-        secondaryColor = Color(0xFF00ACC1),
-        glowColor = Color(0xFF26C6DA)
+        themeName = "Vercel Mono",
+        primaryColor = Color(0xFFEDEDED),
+        secondaryColor = Color(0xFFA1A1AA),
+        glowColor = Color(0xFFD4D4D8)
     ),
     TURBO_AMBER(
-        themeName = "Game Turbo Amber",
-        primaryColor = Color(0xFFFFB300),
-        secondaryColor = Color(0xFFFF6D00),
-        glowColor = Color(0xFFFF9100)
+        themeName = "Titanium Slate",
+        primaryColor = Color(0xFF94A3B8),
+        secondaryColor = Color(0xFF64748B),
+        glowColor = Color(0xFFCBD5E1)
     ),
     AURORA_EMERALD(
-        themeName = "Aurora Emerald",
-        primaryColor = Color(0xFF69F0AE),
-        secondaryColor = Color(0xFF00BFA5),
-        glowColor = Color(0xFF00E676)
+        themeName = "Signal Amber",
+        primaryColor = Color(0xFFFF9F0A),
+        secondaryColor = Color(0xFFD97706),
+        glowColor = Color(0xFFFBBF24)
     ),
     ELECTRIC_ROSE(
-        themeName = "Cyber Neon Pink",
-        primaryColor = Color(0xFFFF4081),
-        secondaryColor = Color(0xFFC2185B),
-        glowColor = Color(0xFFFF80AB)
+        themeName = "System Crimson",
+        primaryColor = Color(0xFFFF453A),
+        secondaryColor = Color(0xFFDC2626),
+        glowColor = Color(0xFFF87171)
     )
 }
 

@@ -76,9 +76,9 @@
       ".read": "auth != null && !root.child('banned_users').child(auth.uid).exists()",
       ".write": "auth != null && !root.child('banned_users').child(auth.uid).exists()",
       "$tournamentId": {
-        ".validate": "newData.hasChildren(['title', 'game'])",
-        "title": { ".validate": "newData.isString()" },
-        "game": { ".validate": "newData.isString()" },
+        ".validate": "data.exists() || !newData.exists() || newData.child('title').exists() || newData.child('roomDetails').exists() || newData.child('status').exists() || newData.child('participants').exists()",
+        "title": { ".validate": "!newData.exists() || newData.isString()" },
+        "game": { ".validate": "!newData.exists() || newData.isString()" },
         "category": { ".validate": "!newData.exists() || newData.isString()" },
         "format": { ".validate": "!newData.exists() || newData.isString()" },
         "map": { ".validate": "!newData.exists() || newData.isString()" },
@@ -96,9 +96,9 @@
         "roomDetails": {
           ".read": "auth != null",
           ".write": "auth != null",
-          ".validate": "newData.hasChildren(['roomId', 'roomPassword'])",
-          "roomId": { ".validate": "newData.isString()" },
-          "roomPassword": { ".validate": "newData.isString()" }
+          ".validate": "!newData.exists() || newData.hasChildren(['roomId', 'roomPassword']) || newData.child('roomId').exists()",
+          "roomId": { ".validate": "!newData.exists() || newData.isString()" },
+          "roomPassword": { ".validate": "!newData.exists() || newData.isString()" }
         }
       }
     },

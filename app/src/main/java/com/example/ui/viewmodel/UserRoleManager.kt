@@ -267,59 +267,25 @@ class UserRoleManager(
      */
     suspend fun updateUserProfile(user: UserProfile): Result<UserProfile> = runCatching {
         val now = System.currentTimeMillis()
-
-        val updates = mutableMapOf<String, Any>(
-            "id" to user.id,
-            "uid" to user.id,
-            "username" to user.username,
-            "name" to user.username,
-            "displayName" to user.username,
-            "email" to user.email,
-            "phone" to user.phone,
-            "gameId" to user.gameId,
-            "ign" to user.ign,
-            "role" to user.role,
-            "funds" to user.totalWalletBalance,
-            "balance" to user.totalWalletBalance,
-            "walletBalance" to user.totalWalletBalance,
-            "wallet_balance" to user.totalWalletBalance,
-            "depositFunds" to user.depositFunds,
-            "winningFunds" to user.winningFunds,
-            "bonusFunds" to user.bonusFunds,
-            "tokens" to user.tokens,
-            "loginStreak" to user.loginStreak,
-            "wins" to user.wins,
-            "kills" to user.kills,
-            "activityPoints" to user.activityPoints,
-            "totalEarnings" to user.totalEarnings,
-            "isBanned" to user.isBanned,
-            "banned" to user.isBanned,
-            "status" to if (user.isBanned) "BANNED" else if (user.isSuspended) "SUSPENDED" else "ACTIVE",
-            "banReason" to user.banReason,
-            "banCaseId" to user.banCaseId,
-            "bannedAt" to user.bannedAt,
-            "isSuspended" to user.isSuspended,
-            "suspendedUntil" to user.suspendedUntil,
-            "suspensionReason" to user.suspensionReason,
-            "isVpnBlocked" to user.isVpnBlocked,
-            "vpnBlocked" to user.isVpnBlocked,
-            "isForceUpdateRequired" to user.isForceUpdateRequired,
-            "forceUpdate" to user.isForceUpdateRequired,
-            "minVersionRequired" to user.minVersionRequired,
-            "isMaintenanceBypass" to user.isMaintenanceBypass,
-            "deviceModel" to user.deviceModel,
-            "ipAddress" to user.ipAddress,
-            "updatedAt" to now,
-            "lastActive" to now
+        val effectiveFirstJoin = if (user.firstAppJoinAt > 0L) user.firstAppJoinAt else if (user.createdAt > 0L) user.createdAt else now
+        val normalizedUser = user.copy(
+            funds = user.totalWalletBalance,
+            createdAt = if (user.createdAt > 0L) user.createdAt else effectiveFirstJoin,
+            firstAppJoinAt = effectiveFirstJoin,
+            lastActive = now
         )
-        if (user.avatarUrl != null) updates["avatarUrl"] = user.avatarUrl!!
-        if (user.createdAt > 0) updates["createdAt"] = user.createdAt
+        val updates = repository.buildStructuredPlayerDatabaseMap(normalizedUser)
 
         // 1. Primary RTDB update (guarantees instantaneous live sync for active players)
         try {
-            database.child("users").child(user.id).updateChildren(updates).await()
-            database.child("userProfiles").child(user.id).updateChildren(updates).await()
-            database.child("players").child(user.id).updateChildren(updates).await()
+            database.child("users").child(normalizedUser.id).updateChildren(updates).await()
+            database.child("userProfiles").child(normalizedUser.id).updateChildren(updates).await()
+            database.child("players").child(normalizedUser.id).updateChildren(updates).await()
+            database.child("player_database_records").child(normalizedUser.id).updateChildren(updates).await()
+            val walletSection = updates["walletAndFinanceSummary"] as? Map<String, Any>
+            if (walletSection != null) {
+                database.child("wallet_accounts").child(normalizedUser.id).updateChildren(walletSection).await()
+            }
         } catch (e: Exception) {
             Log.e(TAG, "RTDB updateUserProfile write error: ${e.message}")
             throw e // Re-throw only if RTDB write genuinely fails
@@ -327,14 +293,15 @@ class UserRoleManager(
 
         // 2. Secondary Firestore mirror (safely catch and ignore if Firestore is unprovisioned)
         try {
-            firestore.collection("users").document(user.id).set(updates, SetOptions.merge()).await()
-            firestore.collection("userProfiles").document(user.id).set(updates, SetOptions.merge()).await()
-            firestore.collection("players").document(user.id).set(updates, SetOptions.merge()).await()
+            firestore.collection("users").document(normalizedUser.id).set(updates, SetOptions.merge()).await()
+            firestore.collection("userProfiles").document(normalizedUser.id).set(updates, SetOptions.merge()).await()
+            firestore.collection("players").document(normalizedUser.id).set(updates, SetOptions.merge()).await()
+            firestore.collection("player_database_records").document(normalizedUser.id).set(updates, SetOptions.merge()).await()
         } catch (e: Exception) {
             Log.d(TAG, "Firestore updateUserProfile skipped (RTDB is primary): ${e.message}")
         }
 
-        user
+        normalizedUser
     }
 
     /**

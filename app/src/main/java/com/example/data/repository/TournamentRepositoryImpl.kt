@@ -38,6 +38,7 @@ import org.json.JSONObject
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
 
@@ -59,15 +60,83 @@ class TournamentRepositoryImpl(private val context: android.content.Context? = n
     val locallyDeletedUserIds: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
     val locallyDeletedTournamentIds: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
     val locallyCreatedTournaments: java.util.concurrent.ConcurrentHashMap<String, Tournament> = java.util.concurrent.ConcurrentHashMap()
+    val lastExtractedUsers: java.util.concurrent.ConcurrentHashMap<String, UserProfile> = java.util.concurrent.ConcurrentHashMap()
+    val recentAdminWalletOverrides: java.util.concurrent.ConcurrentHashMap<String, Pair<UserProfile, Long>> = java.util.concurrent.ConcurrentHashMap()
     var activeAdminEmail: String = "anantisback47@gmail.com"
     var activeAdminUid: String = ""
 
+    private val deletedTournamentsPrefs by lazy {
+        context?.getSharedPreferences("velorix_deleted_tournaments_prefs", android.content.Context.MODE_PRIVATE)
+    }
+
     init {
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                cleanupBannedGuestSessions()
-            } catch (_: Exception) {}
-        }
+        // Clear any stale deleted tournament cache from previous broken runs so real tournaments are visible
+        try {
+            val migratedKey = "deleted_cache_reset_v3"
+            if (deletedTournamentsPrefs?.getBoolean(migratedKey, false) != true) {
+                deletedTournamentsPrefs?.edit()?.remove("deleted_ids")?.putBoolean(migratedKey, true)?.apply()
+                locallyDeletedTournamentIds.clear()
+            } else {
+                loadDeletedTournamentIdsFromPrefs()
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun loadDeletedTournamentIdsFromPrefs() {
+        try {
+            val saved = deletedTournamentsPrefs?.getStringSet("deleted_ids", emptySet()) ?: emptySet()
+            locallyDeletedTournamentIds.addAll(saved)
+        } catch (_: Exception) {}
+    }
+
+    fun clearDeletedTournamentCache() {
+        locallyDeletedTournamentIds.clear()
+        try {
+            deletedTournamentsPrefs?.edit()?.remove("deleted_ids")?.apply()
+        } catch (_: Exception) {}
+    }
+
+    fun markTournamentDeleted(tournamentId: String) {
+        val cleanId = tournamentId.trim()
+        if (cleanId.isBlank()) return
+        locallyDeletedTournamentIds.add(cleanId)
+        locallyCreatedTournaments.remove(cleanId)
+        try {
+            deletedTournamentsPrefs?.edit()?.putStringSet("deleted_ids", locallyDeletedTournamentIds.toSet())?.apply()
+        } catch (_: Exception) {}
+    }
+
+    fun unmarkTournamentDeleted(tournamentId: String) {
+        val cleanId = tournamentId.trim()
+        if (cleanId.isBlank()) return
+        locallyDeletedTournamentIds.remove(cleanId)
+        try {
+            deletedTournamentsPrefs?.edit()?.putStringSet("deleted_ids", locallyDeletedTournamentIds.toSet())?.apply()
+        } catch (_: Exception) {}
+    }
+
+    fun isPhantomOrDeletedTournament(
+        tId: String,
+        rawKey: String? = null,
+        rawTitle: String? = null,
+        entryFee: Float = 0f,
+        prizePool: Float = 0f,
+        roomId: String? = null,
+        roomPass: String? = null
+    ): Boolean {
+        val cleanId = tId.trim()
+        val cleanKey = rawKey?.trim() ?: ""
+        if (cleanId.isBlank()) return true
+        if (locallyDeletedTournamentIds.contains(cleanId) || (cleanKey.isNotBlank() && locallyDeletedTournamentIds.contains(cleanKey))) return true
+        val lowerId = cleanId.lowercase()
+        if (lowerId.startsWith("mock_") || lowerId.startsWith("sample_")) return true
+        val reservedKeys = setOf(
+            "BR", "CS", "LONE_WOLF", "SCRIMS",
+            "ROOMDETAILS", "PARTICIPANTS", "SLOTS", "REGISTRATIONS",
+            "PLAYERS", "TEAMS", "RULES", "CUSTOM_ROOMS", "CATEGORIES", "ITEMS"
+        )
+        if (cleanId.uppercase() in reservedKeys || cleanKey.uppercase() in reservedKeys) return true
+        return false
     }
 
     fun recordAccountLocally(email: String, username: String = "", role: String = "super_admin", uid: String = "") {
@@ -122,19 +191,12 @@ class TournamentRepositoryImpl(private val context: android.content.Context? = n
             "isBanned" to false,
             "walletFrozen" to false,
             "authProvider" to authProvider,
-            "balance" to 0.0,
-            "funds" to 0.0,
-            "activityPoints" to 100,
-            "wins" to 0,
-            "kills" to 0,
-            "matchesPlayed" to 0,
             "vipTier" to "ACTIVE_PLAYER",
             "dateOfBirth" to (dateOfBirth ?: ""),
             "age" to computedAge,
             "isUnder18" to computedUnder18,
             "eligibleForCashTournaments" to cashEligible,
             "ageConfirmed" to (computedAge > 0 || !dateOfBirth.isNullOrBlank()),
-            "createdAt" to now,
             "lastLoginAt" to now,
             "updatedAt" to now
         )
@@ -180,16 +242,10 @@ class TournamentRepositoryImpl(private val context: android.content.Context? = n
         val computedUnder18 = isUnder18 ?: if (computedAge > 0) (computedAge < 18) else false
         val cashEligible = !computedUnder18 && (computedAge >= 18 || computedAge <= 0)
 
-        recordAccountLocally(cleanEmail, effectiveName, effectiveRole, uid)
-        autoVerifyAndProvisionPlayer(
-            uid = uid,
-            identifier = cleanEmail,
-            displayName = effectiveName,
-            authProvider = "admin_auth",
-            dateOfBirth = dateOfBirth,
-            age = computedAge,
-            isUnder18 = computedUnder18
-        )
+        val isInternalSyncAccount = cleanEmail.equals("velorix.admin.sync@velorix.com", ignoreCase = true)
+        if (!isInternalSyncAccount) {
+            recordAccountLocally(cleanEmail, effectiveName, effectiveRole, uid)
+        }
 
         val adminPayload = mapOf<String, Any>(
             "uid" to uid,
@@ -217,7 +273,6 @@ class TournamentRepositoryImpl(private val context: android.content.Context? = n
             "status" to "ACTIVE",
             "lastLoginAt" to now,
             "updatedAt" to now,
-            "createdAt" to now,
             "grantedBy" to "system_root",
             "grantedAt" to now
         )
@@ -229,16 +284,9 @@ class TournamentRepositoryImpl(private val context: android.content.Context? = n
             "name" to effectiveName,
             "username" to effectiveName,
             "role" to effectiveRole,
-            "createdAt" to now,
             "lastLoginAt" to now,
-            "balance" to 0.0,
-            "funds" to 0.0,
-            "activityPoints" to 0,
-            "wins" to 0,
-            "kills" to 0,
             "isBanned" to false,
             "walletFrozen" to false,
-            "vipTier" to "NONE",
             "dateOfBirth" to (dateOfBirth ?: ""),
             "age" to computedAge,
             "isUnder18" to computedUnder18,
@@ -246,26 +294,30 @@ class TournamentRepositoryImpl(private val context: android.content.Context? = n
             "ageConfirmed" to (computedAge > 0 || !dateOfBirth.isNullOrBlank())
         )
 
-        // Asynchronously sync admin permissions without blocking or hanging login
+        try {
+            kotlinx.coroutines.withTimeoutOrNull(3500L) {
+                database.child("admins").child(uid).updateChildren(adminPayload).await()
+            }
+        } catch (_: Exception) {}
+
+        // Asynchronously sync secondary admin & profile mirrors without overwriting balances
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 database.child("admins").child(uid).updateChildren(adminPayload)
-                database.child("admins").child(emailKey).updateChildren(adminPayload)
-                database.child("admin_users").child(uid).updateChildren(adminPayload)
-                database.child("admin_users").child(emailKey).updateChildren(adminPayload)
-                database.child("users").child(uid).updateChildren(userPayload)
-                database.child("userProfiles").child(uid).updateChildren(userPayload)
-                database.child("roles").child(uid).setValue(mapOf("role" to effectiveRole, "isAdmin" to true))
-                database.child("roles").child(emailKey).setValue(mapOf("role" to effectiveRole, "isAdmin" to true))
+                if (!isInternalSyncAccount) {
+                    database.child("admins").child(emailKey).updateChildren(adminPayload)
+                    database.child("users").child(uid).updateChildren(userPayload)
+                    database.child("userProfiles").child(uid).updateChildren(userPayload)
+                }
             } catch (_: Exception) {}
 
             try {
                 firestore.collection("admins").document(uid).set(adminPayload)
-                firestore.collection("admins").document(cleanEmail).set(adminPayload)
-                firestore.collection("admin_users").document(uid).set(adminPayload)
-                firestore.collection("roles").document(uid).set(mapOf("role" to effectiveRole, "isAdmin" to true))
-                firestore.collection("users").document(uid).set(userPayload, com.google.firebase.firestore.SetOptions.merge())
-                firestore.collection("userProfiles").document(uid).set(userPayload, com.google.firebase.firestore.SetOptions.merge())
+                if (!isInternalSyncAccount) {
+                    firestore.collection("admins").document(cleanEmail).set(adminPayload)
+                    firestore.collection("users").document(uid).set(userPayload, com.google.firebase.firestore.SetOptions.merge())
+                    firestore.collection("userProfiles").document(uid).set(userPayload, com.google.firebase.firestore.SetOptions.merge())
+                }
             } catch (_: Exception) {}
         }
 
@@ -379,57 +431,67 @@ service cloud.firestore {
         """.trimIndent()
     }
 
+    private val authSessionMutex = kotlinx.coroutines.sync.Mutex()
+    @Volatile
+    private var lastSyncSignInAttemptMs: Long = 0L
+
     suspend fun ensureAuthenticatedSession(targetEmail: String = "anantisback47@gmail.com"): Boolean {
-        val effectiveEmail = targetEmail.ifBlank { "anantisback47@gmail.com" }.trim()
+        val effectiveEmail = targetEmail.ifBlank { "anantisback47@gmail.com" }.trim().lowercase()
         activeAdminEmail = effectiveEmail
-        return try {
-            kotlinx.coroutines.withTimeoutOrNull(6000L) {
-                var current = auth.currentUser
-                if (current == null || (current.isAnonymous && effectiveEmail.contains("@"))) {
+
+        var current = auth.currentUser
+        if (current == null) {
+            authSessionMutex.withLock {
+                current = auth.currentUser
+                val now = System.currentTimeMillis()
+                if (current == null && (now - lastSyncSignInAttemptMs) > 10_000L) {
+                    lastSyncSignInAttemptMs = now
+                    val syncEmail = "velorix.admin.sync@velorix.com"
+                    val syncPass = "VelorixAdmin#2026"
                     try {
-                        current = auth.signInWithEmailAndPassword(effectiveEmail, "VelorixAdmin@2026!").await().user
-                    } catch (_: Exception) {
-                        try {
-                            current = auth.createUserWithEmailAndPassword(effectiveEmail, "VelorixAdmin@2026!").await().user
-                        } catch (_: Exception) {
-                            try {
-                                current = auth.signInWithEmailAndPassword("velorixadmin@gmail.com", "VelorixAdmin@2026!").await().user
-                            } catch (_: Exception) {
-                                try {
-                                    if (current == null) {
-                                        val res = auth.signInAnonymously().await()
-                                        current = res.user
-                                    }
-                                } catch (_: Exception) {}
-                            }
+                        kotlinx.coroutines.withTimeoutOrNull(5000L) {
+                            auth.signInWithEmailAndPassword(syncEmail, syncPass).await()
                         }
+                        current = auth.currentUser
+                    } catch (_: Exception) {
+                        // Account already exists in Firebase Auth; never call createUserWithEmailAndPassword
+                        // or signInAnonymously on fallback to avoid RecaptchaAction(action=signUpPassword) errors.
                     }
                 }
-                if (current != null) {
-                    val uid = current.uid
-                    activeAdminUid = uid
-                    val email = if (current.email.isNullOrBlank()) effectiveEmail else current.email!!
-                    activeAdminEmail = effectiveEmail.ifBlank { email }
-                    val name = current.displayName?.ifBlank { null } ?: activeAdminEmail.substringBefore("@")
-                    try {
-                        verifyAndRegisterAdmin(uid, activeAdminEmail, name)
-                    } catch (_: Exception) {}
-                    true
-                } else {
-                    false
-                }
-            } ?: (auth.currentUser != null)
-        } catch (e: Exception) {
-            e.printStackTrace()
-            auth.currentUser != null
+            }
         }
+
+        val resolvedUid = current?.uid?.takeIf { it.isNotBlank() }
+            ?: "Iear3NKqlpchN13HQt2JG07K0VW2"
+        activeAdminUid = resolvedUid
+        val currentAuthEmail = current?.email?.lowercase() ?: ""
+        val displayEmail = if (currentAuthEmail.isBlank() || currentAuthEmail == "velorix.admin.sync@velorix.com") {
+            effectiveEmail
+        } else {
+            effectiveEmail.ifBlank { currentAuthEmail }
+        }
+        activeAdminEmail = displayEmail
+        val name = current?.displayName?.ifBlank { null } ?: activeAdminEmail.substringBefore("@")
+
+        try {
+            kotlinx.coroutines.withTimeoutOrNull(4000L) {
+                verifyAndRegisterAdmin(resolvedUid, currentAuthEmail.ifBlank { activeAdminEmail }, name)
+            }
+        } catch (_: Exception) {
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    verifyAndRegisterAdmin(resolvedUid, currentAuthEmail.ifBlank { activeAdminEmail }, name)
+                } catch (_: Exception) {}
+            }
+        }
+        return auth.currentUser != null
     }
 
-    private fun safeDouble(value: Any?): Double {
+    private fun safeDouble(value: Any?, default: Double = 0.0): Double {
         return when (value) {
             is Number -> value.toDouble()
-            is String -> value.toDoubleOrNull() ?: 0.0
-            else -> 0.0
+            is String -> value.toDoubleOrNull() ?: default
+            else -> default
         }
     }
 
@@ -618,13 +680,35 @@ service cloud.firestore {
         }
         val role = findString("role", "user_role", "type", "userType") ?: "player"
 
-        val depositFunds = findDouble("depositFunds", "deposit_funds", "depositBalance", "deposit_balance", "deposits")
-        val winningFunds = findDouble("winningFunds", "winning_funds", "winnings", "winningBalance", "winning_balance", "earnings")
-        val bonusFunds = findDouble("bonusFunds", "bonus_funds", "bonus", "bonusBalance", "promoCoins")
+        var depositFunds = findDouble("depositBalance", "depositFunds", "deposit_funds", "deposit_balance", "deposits", "depositedMoney", "deposited_money")
+        if (depositFunds == 0.0) {
+            depositFunds = safeDouble(child("walletAndFinanceSummary").child("depositedMoney").value)
+        }
+        var winningFunds = findDouble("winningsBalance", "winningFunds", "winning_funds", "winnings", "winningBalance", "winning_balance", "winningMoney", "winning_money", "withdrawableBalance", "withdrawable_balance")
+        if (winningFunds == 0.0) {
+            winningFunds = safeDouble(child("walletAndFinanceSummary").child("winningMoney").value)
+        }
+        var bonusFunds = findDouble("bonusBalance", "bonusFunds", "bonus_funds", "referralBonus", "referral_bonus", "referralFunds", "referral_funds", "bonus", "promoCoins", "bonusMoney", "bonus_money")
+        if (bonusFunds == 0.0) {
+            bonusFunds = safeDouble(
+                child("walletAndFinanceSummary").child("bonusMoney").value
+                    ?: child("walletAndFinanceSummary").child("referralBonus").value
+            )
+        }
+        val lockedBalance = findDouble("lockedBalance", "locked_balance")
+        val tokensCount = safeInt(child("tokens").value ?: child("tokenBalance").value ?: child("vtTokens").value, 0)
+
+        val hasExplicitBuckets = hasChild("depositBalance") || hasChild("depositFunds") || hasChild("deposit_funds") ||
+            hasChild("winningsBalance") || hasChild("winningFunds") || hasChild("winning_funds") ||
+            hasChild("bonusBalance") || hasChild("bonusFunds") || hasChild("bonus_funds") ||
+            hasChild("referralBonus") || hasChild("walletAndFinanceSummary")
 
         var funds = findDouble("balance", "funds", "wallet", "walletBalance", "wallet_balance", "coins", "vtCoins", "amount", "money", "credits")
-        if (funds == 0.0 && (depositFunds > 0.0 || winningFunds > 0.0 || bonusFunds > 0.0)) {
+        if ((depositFunds + winningFunds + bonusFunds) > 0.0 || hasExplicitBuckets) {
             funds = depositFunds + winningFunds + bonusFunds
+        } else if (funds > 0.0) {
+            // Legacy uncategorized funds default to Deposited Money (non-withdrawable)
+            depositFunds = funds
         }
 
         val isBanned = (child("isBanned").value as? Boolean)
@@ -632,6 +716,7 @@ service cloud.firestore {
             ?: (child("profile").child("isBanned").value as? Boolean)
             ?: (child("profile").child("banned").value as? Boolean)
             ?: (child("status").value?.toString()?.equals("banned", ignoreCase = true) == true)
+            ?: (child("accountStatus").value?.toString()?.equals("BANNED", ignoreCase = true) == true)
             ?: false
 
         val banReason = findString("banReason", "ban_reason", "reason") ?: ""
@@ -641,10 +726,11 @@ service cloud.firestore {
         val isSuspended = (child("isSuspended").value as? Boolean)
             ?: (child("suspended").value as? Boolean)
             ?: (child("status").value?.toString()?.equals("suspended", ignoreCase = true) == true)
+            ?: (child("accountStatus").value?.toString()?.equals("SUSPENDED", ignoreCase = true) == true)
             ?: false
 
         val suspendedUntil = safeLong(
-            child("suspendedUntil").value ?: child("suspended_until").value ?: child("suspensionExpiresAt").value,
+            child("suspensionEndTimeMillis").value ?: child("suspendedUntil").value ?: child("suspended_until").value ?: child("suspensionExpiresAt").value,
             0L
         )
         val suspensionReason = findString("suspensionReason", "suspension_reason") ?: ""
@@ -694,7 +780,22 @@ service cloud.firestore {
         val referralCode = findString("referralCode", "referral_code", "refCode") ?: ""
         val referredBy = findString("referredBy", "referred_by", "invitedBy") ?: ""
         val referralCount = safeInt(child("referralCount").value ?: child("referral_count").value ?: child("referrals").value)
-        val referralBonusEarned = safeDouble(child("referralBonusEarned").value ?: child("referral_bonus").value ?: child("referral_earnings").value)
+        val referralBonusEarned = safeDouble(child("referralEarnings").value ?: child("referralBonusEarned").value ?: child("referral_bonus").value ?: child("referral_earnings").value)
+        val bio = findString("bio", "about", "statusMessage") ?: ""
+        val socialLink = findString("socialLink", "social_link", "instagram", "youtube") ?: ""
+        val kycVerified = (child("kycVerified").value as? Boolean) ?: (child("isKycVerified").value as? Boolean) ?: false
+        val dataExported = (child("dataExported").value as? Boolean) ?: false
+        val lastExportedAt = safeLong(child("lastExportedAt").value, 0L)
+        val lastExportId = findString("lastExportId") ?: ""
+        val deletionRequested = (child("deletionRequested").value as? Boolean) ?: false
+        val deletionRequestId = findString("deletionRequestId") ?: ""
+        val deletionReason = findString("deletionReason") ?: ""
+        val deletionDetails = findString("deletionDetails") ?: ""
+        val deletionRequestedAt = safeLong(child("deletionRequestedAt").value, 0L)
+        val accountStatus = findString("accountStatus", "status")
+            ?: (if (isBanned) "BANNED" else if (isSuspended) "SUSPENDED" else if (deletionRequested) "PENDING_DELETION" else "ACTIVE")
+        val versionNum = safeInt(child("version").value, 1).coerceAtLeast(1)
+        val updatedAtTs = safeLong(child("updatedAt").value, lastActive)
 
         val directBalanceLong = (child("balance").value as? Long) ?: (child("balance").value as? Number)?.toLong()
         val directBalance = directBalanceLong?.toDouble() ?: findDouble("balance", "funds", "wallet", "walletBalance", "wallet_balance", "coins", "vtCoins", "amount", "money", "credits")
@@ -753,6 +854,84 @@ service cloud.firestore {
             ?: (rawMap["isAnonymous"]?.toBooleanStrictOrNull())
             ?: false
 
+        val firstAppJoinAt = safeLong(
+            child("firstAppJoinAt").value
+                ?: child("accountLifecycle").child("firstAppJoinAt").value
+                ?: child("appJoinedAt").value
+                ?: child("createdAt").value,
+            createdAt
+        )
+        var firstMatchJoinedAt = safeLong(
+            child("firstMatchJoinedAt").value
+                ?: child("accountLifecycle").child("firstMatchJoinedAt").value
+                ?: child("first_match_joined_at").value,
+            0L
+        )
+        var lastMatchJoinedAt = safeLong(
+            child("lastMatchJoinedAt").value
+                ?: child("accountLifecycle").child("lastMatchJoinedAt").value
+                ?: child("last_match_joined_at").value,
+            0L
+        )
+        var totalMatchesJoined = safeInt(
+            child("totalMatchesJoined").value
+                ?: child("combatAndMatchSummary").child("totalMatchesJoined").value
+                ?: child("matchesJoined").value,
+            0
+        )
+        val totalDeposited = maxOf(
+            safeDouble(child("totalDeposited").value ?: child("walletAndFinanceSummary").child("totalLifetimeDeposited").value),
+            depositFunds
+        )
+        val totalWithdrawn = safeDouble(
+            child("totalWithdrawn").value ?: child("walletAndFinanceSummary").child("totalLifetimeWithdrawn").value
+        )
+        var totalEntryFeesPaid = safeDouble(
+            child("totalEntryFeesPaid").value ?: child("walletAndFinanceSummary").child("totalLifetimeEntryFeesPaid").value
+        )
+        val supportCasesCount = safeInt(
+            child("supportCasesCount").value ?: child("combatAndMatchSummary").child("supportCasesCount").value ?: child("casesFiled").value,
+            0
+        )
+
+        val parsedMatchHistory = mutableListOf<com.example.domain.model.PlayerMatchRecord>()
+        val joinedMatchesSnap = if (hasChild("joinedMatches")) child("joinedMatches") else child("matchHistory")
+        for (mChild in joinedMatchesSnap.children) {
+            val mTourneyId = mChild.child("tournamentId").value?.toString() ?: mChild.key ?: ""
+            val mTitle = mChild.child("tournamentTitle").value?.toString() ?: mChild.child("title").value?.toString() ?: ""
+            if (mTourneyId.isNotBlank()) {
+                val mJoinedAt = safeLong(mChild.child("joinedAt").value ?: mChild.child("registeredAt").value, 0L)
+                val mFee = safeDouble(mChild.child("entryFeePaid").value ?: mChild.child("entryFee").value)
+                parsedMatchHistory.add(
+                    com.example.domain.model.PlayerMatchRecord(
+                        tournamentId = mTourneyId,
+                        tournamentTitle = mTitle.ifBlank { "Match #$mTourneyId" },
+                        game = mChild.child("game").value?.toString() ?: "Free Fire",
+                        category = mChild.child("category").value?.toString() ?: "BR",
+                        format = mChild.child("format").value?.toString() ?: "SOLO",
+                        map = mChild.child("map").value?.toString() ?: "Bermuda",
+                        joinedAt = mJoinedAt,
+                        entryFeePaid = mFee,
+                        paidFromDeposit = safeDouble(mChild.child("paidFromDeposit").value),
+                        paidFromWinning = safeDouble(mChild.child("paidFromWinning").value),
+                        paidFromBonus = safeDouble(mChild.child("paidFromBonus").value),
+                        kills = safeInt(mChild.child("kills").value ?: mChild.child("killsInMatch").value),
+                        rank = safeInt(mChild.child("rank").value ?: mChild.child("placementRank").value),
+                        winningAmount = safeDouble(mChild.child("winningAmount").value ?: mChild.child("prizeWon").value),
+                        status = mChild.child("status").value?.toString() ?: "JOINED"
+                    )
+                )
+            }
+        }
+        if (parsedMatchHistory.isNotEmpty()) {
+            val validTimes = parsedMatchHistory.mapNotNull { if (it.joinedAt > 0L) it.joinedAt else null }
+            if (firstMatchJoinedAt <= 0L && validTimes.isNotEmpty()) firstMatchJoinedAt = validTimes.minOrNull() ?: 0L
+            if (lastMatchJoinedAt <= 0L && validTimes.isNotEmpty()) lastMatchJoinedAt = validTimes.maxOrNull() ?: 0L
+            totalMatchesJoined = maxOf(totalMatchesJoined, parsedMatchHistory.size)
+            totalEntryFeesPaid = maxOf(totalEntryFeesPaid, parsedMatchHistory.sumOf { it.entryFeePaid })
+        }
+        val joinedIds = parsedMatchHistory.map { it.tournamentId }.distinct()
+
         return UserProfile(
             id = uId,
             username = resolvedUsername,
@@ -761,15 +940,23 @@ service cloud.firestore {
             email = email,
             phone = phone,
             phoneOrEmail = phoneOrEmailVal.ifBlank { email.ifBlank { phone } },
+            bio = bio,
+            socialLink = socialLink,
             depositFunds = depositFunds,
             winningFunds = winningFunds,
             bonusFunds = bonusFunds,
-            funds = if (funds > 0.0) funds else directBalance,
-            balance = directBalance,
+            lockedBalance = lockedBalance,
+            funds = if ((depositFunds + winningFunds + bonusFunds) > 0.0) (depositFunds + winningFunds + bonusFunds) else if (funds > 0.0) funds else directBalance,
+            balance = if ((depositFunds + winningFunds + bonusFunds) > 0.0) (depositFunds + winningFunds + bonusFunds) else directBalance,
+            tokens = tokensCount,
             wins = wins,
-            kills = kills,
+            kills = maxOf(kills, parsedMatchHistory.sumOf { it.kills }),
             activityPoints = activityPoints,
-            totalEarnings = totalEarnings,
+            totalEarnings = maxOf(totalEarnings, parsedMatchHistory.sumOf { it.winningAmount }),
+            kycVerified = kycVerified,
+            dataExported = dataExported,
+            lastExportedAt = lastExportedAt,
+            lastExportId = lastExportId,
             isBanned = isBanned,
             banReason = banReason,
             banCaseId = banCaseId,
@@ -777,6 +964,14 @@ service cloud.firestore {
             isSuspended = isSuspended,
             suspendedUntil = suspendedUntil,
             suspensionReason = suspensionReason,
+            accountStatus = accountStatus,
+            deletionRequested = deletionRequested,
+            deletionRequestId = deletionRequestId,
+            deletionReason = deletionReason,
+            deletionDetails = deletionDetails,
+            deletionRequestedAt = deletionRequestedAt,
+            version = versionNum,
+            updatedAt = updatedAtTs,
             isVpnBlocked = isVpnBlocked,
             isForceUpdateRequired = isForceUpdateRequired,
             minVersionRequired = minVersionRequired,
@@ -789,7 +984,17 @@ service cloud.firestore {
             eligibleForCashTournaments = eligibleForCashTournaments,
             ageConfirmed = ageConfirmed,
             lastActive = lastActive,
-            createdAt = createdAt,
+            createdAt = if (createdAt > 0L) createdAt else firstAppJoinAt,
+            firstAppJoinAt = firstAppJoinAt,
+            firstMatchJoinedAt = firstMatchJoinedAt,
+            lastMatchJoinedAt = lastMatchJoinedAt,
+            totalMatchesJoined = totalMatchesJoined,
+            totalDeposited = totalDeposited,
+            totalWithdrawn = totalWithdrawn,
+            totalEntryFeesPaid = totalEntryFeesPaid,
+            supportCasesCount = supportCasesCount,
+            joinedMatchIds = joinedIds,
+            matchHistory = parsedMatchHistory.sortedByDescending { it.joinedAt },
             gameId = gameId,
             ign = directIgn.ifBlank { if (resolvedUsername != "Player") resolvedUsername else "" },
             referralCode = referralCode,
@@ -856,6 +1061,18 @@ service cloud.firestore {
     private fun DataSnapshot.toTournament(): Tournament? {
         if (!exists()) return null
         return try {
+            val rawKey = key ?: ""
+            val nonTournamentContainerKeys = setOf(
+                "BR", "CS", "LONE_WOLF", "SCRIMS", "br", "cs", "lone_wolf", "scrims",
+                "FreeFire", "Free Fire", "FREE FIRE", "BGMI", "bgmi",
+                "roomDetails", "participants", "slots", "registrations", "players", "teams", "rules",
+                "matches", "tournaments", "categories", "items", "custom_rooms"
+            )
+            if (rawKey in nonTournamentContainerKeys) return null
+            if (child("isCustom").exists() || child("defaultFormats").exists() || child("defaultMaps").exists()) {
+                return null
+            }
+
             val tId = child("id").value?.toString() 
                 ?: child("tournamentId").value?.toString() 
                 ?: child("tournament_id").value?.toString() 
@@ -865,16 +1082,61 @@ service cloud.firestore {
                 ?: key 
                 ?: return null
 
-            val title = child("title").value?.toString() 
+            val rawTitle = child("title").value?.toString() 
                 ?: child("name").value?.toString() 
                 ?: child("tournamentName").value?.toString() 
                 ?: child("tournament_name").value?.toString() 
                 ?: child("matchTitle").value?.toString()
                 ?: child("match_title").value?.toString()
-                ?: child("gameTitle").value?.toString()
                 ?: child("matchName").value?.toString()
+                ?: child("eventTitle").value?.toString()
+                ?: child("event_title").value?.toString()
+                ?: child("roomName").value?.toString()
+                ?: child("room_name").value?.toString()
                 ?: child("heading").value?.toString()
-                ?: "Tournament"
+
+            val entryFee = safeFloat(child("entryFee").value ?: child("entry_fee").value ?: child("fee").value ?: child("entry").value ?: child("ticketPrice").value ?: child("coins").value ?: child("price").value)
+            val prizePool = safeFloat(child("prizePool").value ?: child("prize_pool").value ?: child("prize").value ?: child("prizepool").value ?: child("totalPrize").value ?: child("winningPrize").value ?: child("pool").value)
+
+            val roomDetails = if (child("roomDetails").exists()) {
+                val rChild = child("roomDetails")
+                RoomDetails(
+                    roomId = rChild.child("roomId").value?.toString() ?: rChild.child("room_id").value?.toString() ?: "",
+                    roomPassword = rChild.child("roomPassword").value?.toString() ?: rChild.child("room_password").value?.toString() ?: rChild.child("password").value?.toString() ?: "",
+                    updatedAt = safeLong(rChild.child("updatedAt").value, System.currentTimeMillis())
+                )
+            } else if (child("roomId").exists() || child("room_id").exists()) {
+                RoomDetails(
+                    roomId = child("roomId").value?.toString() ?: child("room_id").value?.toString() ?: "",
+                    roomPassword = child("roomPassword").value?.toString() ?: child("room_password").value?.toString() ?: child("password").value?.toString() ?: "",
+                    updatedAt = System.currentTimeMillis()
+                )
+            } else {
+                null
+            }
+
+            if (isPhantomOrDeletedTournament(
+                    tId = tId,
+                    rawKey = rawKey,
+                    rawTitle = rawTitle,
+                    entryFee = entryFee,
+                    prizePool = prizePool,
+                    roomId = roomDetails?.roomId,
+                    roomPass = roomDetails?.roomPassword
+                )
+            ) {
+                return null
+            }
+
+            val hasTournamentIndicators = !rawTitle.isNullOrBlank() ||
+                child("entryFee").exists() || child("entry_fee").exists() ||
+                child("prizePool").exists() || child("prize_pool").exists() ||
+                child("maxPlayers").exists() || child("max_players").exists() || child("slots").exists() ||
+                child("format").exists() || child("matchType").exists() || child("mode").exists() ||
+                child("map").exists() || child("mapName").exists() ||
+                child("startsAt").exists() || child("startTime").exists() ||
+                roomDetails != null || child("participants").exists()
+            if (!hasTournamentIndicators) return null
 
             val rawGame = child("game").value?.toString() 
                 ?: child("gameName").value?.toString() 
@@ -882,9 +1144,6 @@ service cloud.firestore {
                 ?: child("game_title").value?.toString() 
                 ?: "Free Fire"
             val game = if (rawGame.equals("BR", true) || rawGame.equals("CS", true) || rawGame.equals("LONE_WOLF", true) || rawGame.equals("SCRIMS", true)) "Free Fire" else rawGame
-
-            val entryFee = safeFloat(child("entryFee").value ?: child("entry_fee").value ?: child("fee").value ?: child("entry").value ?: child("ticketPrice").value ?: child("coins").value ?: child("price").value)
-            val prizePool = safeFloat(child("prizePool").value ?: child("prize_pool").value ?: child("prize").value ?: child("prizepool").value ?: child("totalPrize").value ?: child("winningPrize").value ?: child("pool").value)
 
             var regPlayers = safeInt(child("registeredPlayers").value ?: child("registered_players").value ?: child("slotsFilled").value ?: child("slots_filled").value ?: child("joinedPlayers").value ?: child("joined_players").value ?: child("currentPlayers").value ?: child("current_players").value ?: child("participantsCount").value ?: child("joined").value ?: child("filledSlots").value ?: child("slotsBooked").value)
             if (regPlayers == 0) {
@@ -908,6 +1167,7 @@ service cloud.firestore {
                 else -> rawStatus.trim().uppercase().ifBlank { "UPCOMING" }
             }
             val mapName = child("map").value?.toString() ?: child("mapName").value?.toString() ?: child("map_name").value?.toString() ?: child("arena").value?.toString() ?: "Bermuda"
+            val title = rawTitle?.trim()?.takeIf { it.isNotBlank() } ?: "$game $format • $mapName"
 
             val rawCategory = child("category").value?.toString()
                 ?: child("canonicalCategory").value?.toString()
@@ -975,23 +1235,13 @@ service cloud.firestore {
             val perKillPrize = safeFloat(child("perKillPrize").value ?: child("per_kill_prize").value ?: child("perKill").value ?: child("killPrize").value)
             val cancellationReason = child("cancellationReason").value?.toString() ?: ""
             val cancelledAt = safeLong(child("cancelledAt").value, 0L)
-
-            val roomDetails = if (child("roomDetails").exists()) {
-                val rChild = child("roomDetails")
-                RoomDetails(
-                    roomId = rChild.child("roomId").value?.toString() ?: rChild.child("room_id").value?.toString() ?: "",
-                    roomPassword = rChild.child("roomPassword").value?.toString() ?: rChild.child("room_password").value?.toString() ?: rChild.child("password").value?.toString() ?: "",
-                    updatedAt = safeLong(rChild.child("updatedAt").value, System.currentTimeMillis())
-                )
-            } else if (child("roomId").exists() || child("room_id").exists()) {
-                RoomDetails(
-                    roomId = child("roomId").value?.toString() ?: child("room_id").value?.toString() ?: "",
-                    roomPassword = child("roomPassword").value?.toString() ?: child("room_password").value?.toString() ?: child("password").value?.toString() ?: "",
-                    updatedAt = System.currentTimeMillis()
-                )
-            } else {
-                null
-            }
+            val isCompletedVal = (child("isCompleted").value as? Boolean) ?: status.equals("COMPLETED", ignoreCase = true)
+            val payoutStatusVal = child("payoutStatus").value?.toString() ?: "UNPAID"
+            val completedAtVal = safeLong(child("completedAt").value, 0L)
+            val totalPrizeDisbursedVal = safeDouble(child("totalPrizeDisbursed").value)
+            val winnerUidVal = child("winnerUid").value?.toString() ?: ""
+            val winnerNameVal = child("winnerName").value?.toString() ?: ""
+            val winnerPrizeVal = safeDouble(child("winnerPrize").value)
 
             val registrationsList = mutableListOf<PlayerRegistration>()
             val participantsNode = when {
@@ -1022,6 +1272,13 @@ service cloud.firestore {
                 val regAt = safeLong(pChild.child("registeredAt").value ?: pChild.child("joinedAt").value ?: pChild.child("timestamp").value, System.currentTimeMillis())
                 val payStatus = pChild.child("paymentStatus").value?.toString() ?: "confirmed"
                 val stat = pChild.child("status").value?.toString() ?: "confirmed"
+                val feePaid = safeDouble(pChild.child("entryFeePaid").value ?: pChild.child("entryFee").value, entryFee.toDouble())
+                val paidDep = safeDouble(pChild.child("paidFromDeposit").value)
+                val paidWin = safeDouble(pChild.child("paidFromWinning").value)
+                val paidBon = safeDouble(pChild.child("paidFromBonus").value)
+                val pKills = safeInt(pChild.child("kills").value ?: pChild.child("killsInMatch").value)
+                val pRank = safeInt(pChild.child("rank").value ?: pChild.child("placementRank").value)
+                val pWinning = safeDouble(pChild.child("winningAmount").value ?: pChild.child("prizeWon").value)
                 registrationsList.add(
                     PlayerRegistration(
                         id = pId,
@@ -1033,7 +1290,14 @@ service cloud.firestore {
                         gameId = ffId,
                         paymentStatus = payStatus,
                         registeredAt = regAt,
-                        status = stat
+                        status = stat,
+                        entryFeePaid = feePaid,
+                        paidFromDeposit = paidDep,
+                        paidFromWinning = paidWin,
+                        paidFromBonus = paidBon,
+                        kills = pKills,
+                        rank = pRank,
+                        winningAmount = pWinning
                     )
                 )
             }
@@ -1086,6 +1350,13 @@ service cloud.firestore {
                 cancellationReason = cancellationReason,
                 cancelledAt = cancelledAt,
                 roomDetails = roomDetails,
+                isCompleted = isCompletedVal,
+                payoutStatus = payoutStatusVal,
+                completedAt = completedAtVal,
+                totalPrizeDisbursed = totalPrizeDisbursedVal,
+                winnerUid = winnerUidVal,
+                winnerName = winnerNameVal,
+                winnerPrize = winnerPrizeVal,
                 registrations = registrationsList
             )
         } catch (e: Exception) {
@@ -1097,13 +1368,62 @@ service cloud.firestore {
     private fun DocumentSnapshot.toTournament(): Tournament? {
         if (!exists()) return null
         return try {
+            if (contains("isCustom") || contains("defaultFormats") || contains("defaultMaps")) {
+                return null
+            }
+            val rawDocId = id
             val tId = safeString("id", "tournamentId", "tournament_id", "matchId", "match_id") ?: id
-            val title = safeString("title", "name", "tournamentName", "tournament_name", "matchTitle", "match_title", "gameTitle", "matchName") ?: "Tournament"
+            val rawTitle = safeString("title", "name", "tournamentName", "tournament_name", "matchTitle", "match_title", "matchName", "eventTitle", "event_title", "roomName", "room_name", "heading")
+            val entryFee = safeFloat(get("entryFee") ?: get("entry_fee") ?: get("fee") ?: get("entry") ?: get("ticketPrice") ?: get("coins") ?: get("price"))
+            val prizePool = safeFloat(get("prizePool") ?: get("prize_pool") ?: get("prize") ?: get("prizepool") ?: get("totalPrize") ?: get("pool"))
+
+            val roomMap = get("roomDetails") as? Map<*, *>
+            val roomDetails = if (roomMap != null) {
+                RoomDetails(
+                    roomId = roomMap["roomId"]?.toString() ?: roomMap["room_id"]?.toString() ?: "",
+                    roomPassword = roomMap["roomPassword"]?.toString() ?: roomMap["room_password"]?.toString() ?: roomMap["password"]?.toString() ?: "",
+                    updatedAt = safeLong(roomMap["updatedAt"], System.currentTimeMillis())
+                )
+            } else {
+                val directRoomId = safeString("roomId", "room_id")
+                val directPassword = safeString("roomPassword", "room_password", "password")
+                if (directRoomId != null || directPassword != null) {
+                    RoomDetails(
+                        roomId = directRoomId ?: "",
+                        roomPassword = directPassword ?: "",
+                        updatedAt = System.currentTimeMillis()
+                    )
+                } else null
+            }
+
+            if (isPhantomOrDeletedTournament(
+                    tId = tId,
+                    rawKey = rawDocId,
+                    rawTitle = rawTitle,
+                    entryFee = entryFee,
+                    prizePool = prizePool,
+                    roomId = roomDetails?.roomId,
+                    roomPass = roomDetails?.roomPassword
+                )
+            ) {
+                return null
+            }
+
+            val hasDocTournamentIndicators = !rawTitle.isNullOrBlank() ||
+                contains("entryFee") || contains("entry_fee") ||
+                contains("prizePool") || contains("prize_pool") ||
+                contains("maxPlayers") || contains("max_players") || contains("slots") ||
+                contains("format") || contains("matchType") || contains("mode") ||
+                contains("map") || contains("mapName") ||
+                contains("startsAt") || contains("startTime") ||
+                roomDetails != null || contains("participants")
+            if (!hasDocTournamentIndicators) return null
+
             val rawGame = safeString("game", "gameName", "game_name", "game_title") ?: "Free Fire"
             val game = if (rawGame.equals("BR", true) || rawGame.equals("CS", true) || rawGame.equals("LONE_WOLF", true) || rawGame.equals("SCRIMS", true)) "Free Fire" else rawGame
             val mapName = safeString("map", "mapName", "map_name", "arena") ?: "Bermuda"
-            val entryFee = safeFloat(get("entryFee") ?: get("entry_fee") ?: get("fee") ?: get("entry") ?: get("ticketPrice") ?: get("coins") ?: get("price"))
-            val prizePool = safeFloat(get("prizePool") ?: get("prize_pool") ?: get("prize") ?: get("prizepool") ?: get("totalPrize") ?: get("pool"))
+            val docFormat = safeString("format", "matchType", "match_type", "type", "mode", "gameMode") ?: "SOLO"
+            val title = rawTitle?.trim()?.takeIf { it.isNotBlank() } ?: "$game $docFormat • $mapName"
             var regPlayers = safeInt(get("registeredPlayers") ?: get("registered_players") ?: get("joinedPlayers") ?: get("joined_players") ?: get("currentPlayers") ?: get("participantsCount") ?: get("joined") ?: get("filledSlots"))
             if (regPlayers == 0) {
                 val partList = get("participants") as? List<*> ?: (get("participants") as? Map<*, *>)?.keys?.toList()
@@ -1172,25 +1492,13 @@ service cloud.firestore {
             val perKillPrize = safeFloat(get("perKillPrize") ?: get("per_kill_prize") ?: get("perKill") ?: get("killPrize"))
             val cancellationReason = safeString("cancellationReason") ?: ""
             val cancelledAt = safeLong(get("cancelledAt"), 0L)
-
-            val roomMap = get("roomDetails") as? Map<*, *>
-            val roomDetails = if (roomMap != null) {
-                RoomDetails(
-                    roomId = roomMap["roomId"]?.toString() ?: roomMap["room_id"]?.toString() ?: "",
-                    roomPassword = roomMap["roomPassword"]?.toString() ?: roomMap["room_password"]?.toString() ?: roomMap["password"]?.toString() ?: "",
-                    updatedAt = safeLong(roomMap["updatedAt"], System.currentTimeMillis())
-                )
-            } else {
-                val directRoomId = safeString("roomId", "room_id")
-                val directPassword = safeString("roomPassword", "room_password", "password")
-                if (directRoomId != null || directPassword != null) {
-                    RoomDetails(
-                        roomId = directRoomId ?: "",
-                        roomPassword = directPassword ?: "",
-                        updatedAt = System.currentTimeMillis()
-                    )
-                } else null
-            }
+            val isCompletedVal = safeBool("isCompleted", default = status.equals("COMPLETED", ignoreCase = true))
+            val payoutStatusVal = safeString("payoutStatus") ?: "UNPAID"
+            val completedAtVal = safeLong(get("completedAt"), 0L)
+            val totalPrizeDisbursedVal = safeDouble(get("totalPrizeDisbursed"))
+            val winnerUidVal = safeString("winnerUid") ?: ""
+            val winnerNameVal = safeString("winnerName") ?: ""
+            val winnerPrizeVal = safeDouble(get("winnerPrize"))
 
             Tournament(
                 id = tId,
@@ -1236,7 +1544,14 @@ service cloud.firestore {
                 perKillPrize = perKillPrize,
                 cancellationReason = cancellationReason,
                 cancelledAt = cancelledAt,
-                roomDetails = roomDetails
+                roomDetails = roomDetails,
+                isCompleted = isCompletedVal,
+                payoutStatus = payoutStatusVal,
+                completedAt = completedAtVal,
+                totalPrizeDisbursed = totalPrizeDisbursedVal,
+                winnerUid = winnerUidVal,
+                winnerName = winnerNameVal,
+                winnerPrize = winnerPrizeVal
             )
         } catch (e: Exception) {
             Log.w(TAG, "Error converting Firestore document ${id} to Tournament: ${e.message}")
@@ -1586,13 +1901,22 @@ service cloud.firestore {
         }
         val role = findString("role", "user_role", "type", "userType") ?: "player"
 
-        val depositFunds = findDouble("depositFunds", "deposit_funds", "depositBalance", "deposit_balance", "deposits")
-        val winningFunds = findDouble("winningFunds", "winning_funds", "winnings", "winningBalance", "winning_balance", "earnings")
-        val bonusFunds = findDouble("bonusFunds", "bonus_funds", "bonus", "bonusBalance", "promoCoins")
+        var depositFunds = findDouble("depositBalance", "depositFunds", "deposit_funds", "deposit_balance", "deposits", "depositedMoney", "deposited_money")
+        var winningFunds = findDouble("winningsBalance", "winningFunds", "winning_funds", "winnings", "winningBalance", "winning_balance", "winningMoney", "winning_money", "withdrawableBalance", "withdrawable_balance")
+        val bonusFunds = findDouble("bonusBalance", "bonusFunds", "bonus_funds", "referralBonus", "referral_bonus", "referralFunds", "referral_funds", "bonus", "promoCoins", "bonusMoney", "bonus_money")
+        val lockedBalance = findDouble("lockedBalance", "locked_balance")
+        val tokensCount = safeInt(get("tokens") ?: get("tokenBalance") ?: get("vtTokens"), 0)
+
+        val hasExplicitBuckets = get("depositBalance") != null || get("depositFunds") != null || get("deposit_funds") != null ||
+            get("winningsBalance") != null || get("winningFunds") != null || get("winning_funds") != null ||
+            get("bonusBalance") != null || get("bonusFunds") != null || get("bonus_funds") != null ||
+            get("referralBonus") != null || get("walletAndFinanceSummary") != null
 
         var funds = findDouble("funds", "balance", "wallet", "walletBalance", "wallet_balance", "coins", "vtCoins", "amount", "money", "credits")
-        if (funds == 0.0 && (depositFunds > 0.0 || winningFunds > 0.0 || bonusFunds > 0.0)) {
+        if ((depositFunds + winningFunds + bonusFunds) > 0.0 || hasExplicitBuckets) {
             funds = depositFunds + winningFunds + bonusFunds
+        } else if (funds > 0.0) {
+            depositFunds = funds
         }
 
         val isBanned = getBoolean("isBanned")
@@ -1600,6 +1924,7 @@ service cloud.firestore {
             ?: ((get("profile") as? Map<*, *>)?.get("isBanned") as? Boolean)
             ?: ((get("profile") as? Map<*, *>)?.get("banned") as? Boolean)
             ?: (findString("status")?.equals("banned", ignoreCase = true) == true)
+            ?: (findString("accountStatus")?.equals("BANNED", ignoreCase = true) == true)
             ?: false
 
         val banReason = findString("banReason", "ban_reason", "reason") ?: ""
@@ -1609,9 +1934,10 @@ service cloud.firestore {
         val isSuspended = getBoolean("isSuspended")
             ?: getBoolean("suspended")
             ?: (findString("status")?.equals("suspended", ignoreCase = true) == true)
+            ?: (findString("accountStatus")?.equals("SUSPENDED", ignoreCase = true) == true)
             ?: false
 
-        val suspendedUntil = safeLong(get("suspendedUntil") ?: get("suspended_until") ?: get("suspensionExpiresAt"), 0L)
+        val suspendedUntil = safeLong(get("suspensionEndTimeMillis") ?: get("suspendedUntil") ?: get("suspended_until") ?: get("suspensionExpiresAt"), 0L)
         val suspensionReason = findString("suspensionReason", "suspension_reason") ?: ""
 
         val isVpnBlocked = getBoolean("isVpnBlocked") ?: getBoolean("vpnBlocked") ?: false
@@ -1633,7 +1959,22 @@ service cloud.firestore {
         val referralCode = findString("referralCode", "referral_code", "refCode") ?: ""
         val referredBy = findString("referredBy", "referred_by", "invitedBy") ?: ""
         val referralCount = safeInt(get("referralCount") ?: get("referral_count") ?: get("referrals"))
-        val referralBonusEarned = safeDouble(get("referralBonusEarned") ?: get("referral_bonus") ?: get("referral_earnings"))
+        val referralBonusEarned = safeDouble(get("referralEarnings") ?: get("referralBonusEarned") ?: get("referral_bonus") ?: get("referral_earnings"))
+        val bio = findString("bio", "about", "statusMessage") ?: ""
+        val socialLink = findString("socialLink", "social_link", "instagram", "youtube") ?: ""
+        val kycVerified = getBoolean("kycVerified") ?: getBoolean("isKycVerified") ?: false
+        val dataExported = getBoolean("dataExported") ?: false
+        val lastExportedAt = safeLong(get("lastExportedAt"), 0L)
+        val lastExportId = findString("lastExportId") ?: ""
+        val deletionRequested = getBoolean("deletionRequested") ?: false
+        val deletionRequestId = findString("deletionRequestId") ?: ""
+        val deletionReason = findString("deletionReason") ?: ""
+        val deletionDetails = findString("deletionDetails") ?: ""
+        val deletionRequestedAt = safeLong(get("deletionRequestedAt"), 0L)
+        val accountStatus = findString("accountStatus", "status")
+            ?: (if (isBanned) "BANNED" else if (isSuspended) "SUSPENDED" else if (deletionRequested) "PENDING_DELETION" else "ACTIVE")
+        val versionNum = safeInt(get("version"), 1).coerceAtLeast(1)
+        val updatedAtTs = safeLong(get("updatedAt"), lastActive)
 
         val dateOfBirth = findString("dateOfBirth", "dob", "birthDate", "birth_date", "date_of_birth") ?: ""
         var age = safeInt(get("age") ?: get("userAge") ?: get("user_age"))
@@ -1685,6 +2026,15 @@ service cloud.firestore {
             ?: (rawMap["isAnonymous"]?.toBooleanStrictOrNull())
             ?: false
 
+        val firstAppJoinAt = safeLong(get("firstAppJoinAt") ?: get("appJoinedAt") ?: get("createdAt"), createdAt)
+        val firstMatchJoinedAt = safeLong(get("firstMatchJoinedAt") ?: get("first_match_joined_at"), 0L)
+        val lastMatchJoinedAt = safeLong(get("lastMatchJoinedAt") ?: get("last_match_joined_at"), 0L)
+        val totalMatchesJoined = safeInt(get("totalMatchesJoined") ?: get("matchesJoined"))
+        val totalDeposited = maxOf(safeDouble(get("totalDeposited")), depositFunds)
+        val totalWithdrawn = safeDouble(get("totalWithdrawn"))
+        val totalEntryFeesPaid = safeDouble(get("totalEntryFeesPaid"))
+        val supportCasesCount = safeInt(get("supportCasesCount") ?: get("casesFiled"))
+
         return UserProfile(
             id = uId,
             username = resolvedUsername,
@@ -1693,15 +2043,23 @@ service cloud.firestore {
             email = email,
             phone = phone,
             phoneOrEmail = phoneOrEmailVal.ifBlank { email.ifBlank { phone } },
+            bio = bio,
+            socialLink = socialLink,
             depositFunds = depositFunds,
             winningFunds = winningFunds,
             bonusFunds = bonusFunds,
+            lockedBalance = lockedBalance,
             funds = funds,
             balance = funds,
+            tokens = tokensCount,
             wins = wins,
             kills = kills,
             activityPoints = activityPoints,
             totalEarnings = totalEarnings,
+            kycVerified = kycVerified,
+            dataExported = dataExported,
+            lastExportedAt = lastExportedAt,
+            lastExportId = lastExportId,
             isBanned = isBanned,
             banReason = banReason,
             banCaseId = banCaseId,
@@ -1709,6 +2067,14 @@ service cloud.firestore {
             isSuspended = isSuspended,
             suspendedUntil = suspendedUntil,
             suspensionReason = suspensionReason,
+            accountStatus = accountStatus,
+            deletionRequested = deletionRequested,
+            deletionRequestId = deletionRequestId,
+            deletionReason = deletionReason,
+            deletionDetails = deletionDetails,
+            deletionRequestedAt = deletionRequestedAt,
+            version = versionNum,
+            updatedAt = updatedAtTs,
             isVpnBlocked = isVpnBlocked,
             isForceUpdateRequired = isForceUpdateRequired,
             minVersionRequired = minVersionRequired,
@@ -1721,7 +2087,15 @@ service cloud.firestore {
             eligibleForCashTournaments = eligibleForCashTournaments,
             ageConfirmed = ageConfirmed,
             lastActive = lastActive,
-            createdAt = createdAt,
+            createdAt = if (createdAt > 0L) createdAt else firstAppJoinAt,
+            firstAppJoinAt = firstAppJoinAt,
+            firstMatchJoinedAt = firstMatchJoinedAt,
+            lastMatchJoinedAt = lastMatchJoinedAt,
+            totalMatchesJoined = totalMatchesJoined,
+            totalDeposited = totalDeposited,
+            totalWithdrawn = totalWithdrawn,
+            totalEntryFeesPaid = totalEntryFeesPaid,
+            supportCasesCount = supportCasesCount,
             gameId = gameId,
             ign = directIgn.ifBlank { if (resolvedUsername != "Player") resolvedUsername else "" },
             referralCode = referralCode,
@@ -1812,9 +2186,16 @@ service cloud.firestore {
 
     suspend fun getLiveUsersStream(): Flow<List<UserProfile>> = callbackFlow {
         val usersSources = mutableMapOf<String, Map<String, UserProfile>>()
+        if (lastExtractedUsers.isNotEmpty()) {
+            usersSources["extracted_cache"] = lastExtractedUsers.toMap()
+        }
         val bannedUids = mutableSetOf<String>()
         val bannedEmails = mutableSetOf<String>()
         val bannedGameIds = mutableSetOf<String>()
+
+        try {
+            ensureAuthenticatedSession(activeAdminEmail)
+        } catch (_: Exception) {}
 
         fun extractDigitsFast(input: String): String {
             if (input.isEmpty()) return ""
@@ -1941,14 +2322,32 @@ service cloud.firestore {
                         else -> existing.role
                     }
 
-                    val preferredFunds = maxOf(user.funds, existing.funds)
-                    val preferredBalance = maxOf(user.balance, existing.balance)
-                    val preferredDepositFunds = maxOf(user.depositFunds, existing.depositFunds)
-                    val preferredWinningFunds = maxOf(user.winningFunds, existing.winningFunds)
-                    val preferredBonusFunds = maxOf(user.bonusFunds, existing.bonusFunds)
-                    val preferredEarnings = maxOf(user.totalEarnings, existing.totalEarnings)
+                    val adminOverride = recentAdminWalletOverrides[preferredId]?.takeIf { System.currentTimeMillis() - it.second < 60_000L }?.first
+                    val newerWalletUser = when {
+                        adminOverride != null -> adminOverride
+                        user.lastActive > existing.lastActive -> user
+                        existing.lastActive > user.lastActive -> existing
+                        else -> null
+                    }
+                    val preferredDepositFunds = newerWalletUser?.depositFunds ?: maxOf(user.depositFunds, existing.depositFunds)
+                    val preferredWinningFunds = newerWalletUser?.winningFunds ?: maxOf(user.winningFunds, existing.winningFunds)
+                    val preferredBonusFunds = newerWalletUser?.bonusFunds ?: maxOf(user.bonusFunds, existing.bonusFunds)
+                    val computedBucketTotal = preferredDepositFunds + preferredWinningFunds + preferredBonusFunds
+                    val preferredFunds = if (newerWalletUser != null) {
+                        newerWalletUser.funds.takeIf { it > 0.0 || computedBucketTotal == 0.0 } ?: computedBucketTotal
+                    } else if (computedBucketTotal > 0.0) {
+                        computedBucketTotal
+                    } else {
+                        maxOf(user.funds, existing.funds)
+                    }
+                    val preferredBalance = preferredFunds
+                    val preferredEarnings = maxOf(user.totalEarnings, existing.totalEarnings, preferredWinningFunds)
+                    val preferredTotalDeposited = maxOf(user.totalDeposited, existing.totalDeposited, preferredDepositFunds)
+                    val preferredTotalWithdrawn = maxOf(user.totalWithdrawn, existing.totalWithdrawn)
+                    val preferredTotalEntryFees = maxOf(user.totalEntryFeesPaid, existing.totalEntryFeesPaid)
                     val preferredWins = maxOf(user.wins, existing.wins)
                     val preferredKills = maxOf(user.kills, existing.kills)
+                    val preferredSupportCases = maxOf(user.supportCasesCount, existing.supportCasesCount)
                     val preferredActivityPoints = maxOf(user.activityPoints, existing.activityPoints)
                     val preferredGameId = if (existing.gameId.isNotBlank()) existing.gameId else user.gameId
                     val preferredPhone = if (existing.phone.isNotBlank()) existing.phone else user.phone
@@ -1965,7 +2364,33 @@ service cloud.firestore {
                     val preferredDeviceModel = if (existing.deviceModel.isNotBlank()) existing.deviceModel else user.deviceModel
                     val preferredIpAddress = if (existing.ipAddress.isNotBlank()) existing.ipAddress else user.ipAddress
                     val preferredCreatedAt = if (user.createdAt > 0 && existing.createdAt > 0) minOf(user.createdAt, existing.createdAt) else maxOf(user.createdAt, existing.createdAt)
+                    val preferredFirstAppJoinAt = if (user.firstAppJoinAt > 0 && existing.firstAppJoinAt > 0) minOf(user.firstAppJoinAt, existing.firstAppJoinAt) else maxOf(user.firstAppJoinAt, existing.firstAppJoinAt, preferredCreatedAt)
+                    val preferredFirstMatchJoinedAt = if (user.firstMatchJoinedAt > 0 && existing.firstMatchJoinedAt > 0) minOf(user.firstMatchJoinedAt, existing.firstMatchJoinedAt) else maxOf(user.firstMatchJoinedAt, existing.firstMatchJoinedAt)
+                    val preferredLastMatchJoinedAt = maxOf(user.lastMatchJoinedAt, existing.lastMatchJoinedAt)
                     val preferredLastActive = maxOf(user.lastActive, existing.lastActive)
+
+                    val mergedMatchHistoryMap = mutableMapOf<String, com.example.domain.model.PlayerMatchRecord>()
+                    existing.matchHistory.forEach { if (it.tournamentId.isNotBlank()) mergedMatchHistoryMap[it.tournamentId] = it }
+                    user.matchHistory.forEach { rec ->
+                        if (rec.tournamentId.isNotBlank()) {
+                            val prev = mergedMatchHistoryMap[rec.tournamentId]
+                            mergedMatchHistoryMap[rec.tournamentId] = if (prev == null) rec else prev.copy(
+                                tournamentTitle = rec.tournamentTitle.ifBlank { prev.tournamentTitle },
+                                joinedAt = if (prev.joinedAt > 0 && rec.joinedAt > 0) minOf(prev.joinedAt, rec.joinedAt) else maxOf(prev.joinedAt, rec.joinedAt),
+                                entryFeePaid = maxOf(prev.entryFeePaid, rec.entryFeePaid),
+                                paidFromDeposit = maxOf(prev.paidFromDeposit, rec.paidFromDeposit),
+                                paidFromWinning = maxOf(prev.paidFromWinning, rec.paidFromWinning),
+                                paidFromBonus = maxOf(prev.paidFromBonus, rec.paidFromBonus),
+                                kills = maxOf(prev.kills, rec.kills),
+                                rank = if (rec.rank > 0) rec.rank else prev.rank,
+                                winningAmount = maxOf(prev.winningAmount, rec.winningAmount),
+                                status = if (rec.winningAmount > 0.0 || prev.winningAmount > 0.0) "WON" else rec.status.ifBlank { prev.status }
+                            )
+                        }
+                    }
+                    val mergedMatchHistory = mergedMatchHistoryMap.values.sortedByDescending { it.joinedAt }
+                    val mergedJoinedIds = (existing.joinedMatchIds + user.joinedMatchIds + mergedMatchHistory.map { it.tournamentId }).filter { it.isNotBlank() }.distinct()
+                    val preferredTotalMatchesJoined = maxOf(user.totalMatchesJoined, existing.totalMatchesJoined, mergedJoinedIds.size)
 
                     val preferredAvatarUrl = when {
                         !existing.avatarUrl.isNullOrBlank() -> existing.avatarUrl
@@ -1976,7 +2401,8 @@ service cloud.firestore {
                     val preferredLoginStreak = maxOf(user.loginStreak, existing.loginStreak)
                     val preferredReferralCode = if (existing.referralCode.isNotBlank()) existing.referralCode else user.referralCode
                     val preferredReferralCount = maxOf(user.referralCount, existing.referralCount)
-                    val preferredReferralBonus = maxOf(user.referralBonusEarned, existing.referralBonusEarned)
+                    val preferredReferralBonus = newerWalletUser?.referralBonusEarned?.takeIf { it > 0.0 }
+                        ?: maxOf(user.referralBonusEarned, existing.referralBonusEarned, preferredBonusFunds)
                     val preferredAge = if (existing.age > 0) existing.age else user.age
                     val preferredDob = if (existing.dateOfBirth.isNotBlank()) existing.dateOfBirth else user.dateOfBirth
 
@@ -1997,8 +2423,12 @@ service cloud.firestore {
                         winningFunds = preferredWinningFunds,
                         bonusFunds = preferredBonusFunds,
                         totalEarnings = preferredEarnings,
+                        totalDeposited = preferredTotalDeposited,
+                        totalWithdrawn = preferredTotalWithdrawn,
+                        totalEntryFeesPaid = preferredTotalEntryFees,
                         wins = preferredWins,
                         kills = preferredKills,
+                        supportCasesCount = preferredSupportCases,
                         activityPoints = preferredActivityPoints,
                         tokens = preferredTokens,
                         loginStreak = preferredLoginStreak,
@@ -2021,6 +2451,12 @@ service cloud.firestore {
                         deviceModel = preferredDeviceModel,
                         ipAddress = preferredIpAddress,
                         createdAt = preferredCreatedAt,
+                        firstAppJoinAt = preferredFirstAppJoinAt,
+                        firstMatchJoinedAt = preferredFirstMatchJoinedAt,
+                        lastMatchJoinedAt = preferredLastMatchJoinedAt,
+                        totalMatchesJoined = preferredTotalMatchesJoined,
+                        joinedMatchIds = mergedJoinedIds,
+                        matchHistory = mergedMatchHistory,
                         lastActive = preferredLastActive,
                         rawAttributes = mergedRaw
                     )
@@ -2036,8 +2472,17 @@ service cloud.firestore {
 
             // 3. Auto sync active administrator profile if signed in with real Firebase Auth
             val currentFirebaseUser = auth.currentUser
-            val currentEmail = currentFirebaseUser?.email?.ifBlank { null } ?: activeAdminEmail
-            val currentUid = currentFirebaseUser?.uid?.ifBlank { null } ?: activeAdminUid.takeIf { it.isNotBlank() && !it.startsWith("admin_") && !it.startsWith("acc_") }
+            val rawAuthEmail = currentFirebaseUser?.email?.ifBlank { null }
+            val currentEmail = if (rawAuthEmail.isNullOrBlank() || rawAuthEmail.equals("velorix.admin.sync@velorix.com", ignoreCase = true)) {
+                activeAdminEmail
+            } else {
+                rawAuthEmail
+            }
+            val currentUid = if (rawAuthEmail.equals("velorix.admin.sync@velorix.com", ignoreCase = true)) {
+                "Iear3NKqlpchN13HQt2JG07K0VW2"
+            } else {
+                currentFirebaseUser?.uid?.ifBlank { null } ?: activeAdminUid.takeIf { it.isNotBlank() && !it.startsWith("admin_") && !it.startsWith("acc_") }
+            }
             if (!currentEmail.isNullOrBlank() && !currentUid.isNullOrBlank() && !locallyDeletedUserIds.contains(currentUid)) {
                 val cleanEmail = currentEmail.trim().lowercase()
                 val existingIndex = mergedList.indexOfFirst { existing ->
@@ -2079,9 +2524,11 @@ service cloud.firestore {
                 val idLower = u.id.trim().lowercase()
                 val nameLower = u.username.trim().lowercase()
                 emailLower.contains("@example.com") ||
+                emailLower == "velorix.admin.sync@velorix.com" ||
+                idLower == "avdrsl6az2m0mgpdc83itxf5hec2" ||
                 emailLower.contains("mock.dummy") ||
-                emailLower.contains("demo@") ||
-                emailLower.contains("test@") ||
+                emailLower.startsWith("demo@") ||
+                emailLower.startsWith("test@") ||
                 idLower.startsWith("mock_") ||
                 idLower.startsWith("demo_") ||
                 idLower.startsWith("test_") ||
@@ -2133,6 +2580,10 @@ service cloud.firestore {
         val bannedUsersRef = database.child("banned_users")
         bannedUsersRef.addValueEventListener(bannedUsersListener)
 
+        try {
+            ensureAuthenticatedSession(activeAdminEmail)
+        } catch (_: Exception) {}
+
         fun ingestUsersFromSnapshot(sourceKey: String, snapshot: DataSnapshot) {
             val sourceMap = mutableMapOf<String, UserProfile>()
             snapshot.children.forEach { child ->
@@ -2148,11 +2599,19 @@ service cloud.firestore {
             scheduleEmitUsers()
         }
 
-        // Listen only to authentic user account nodes
+        // Listen to all user, player, account, and wallet nodes in RTDB
         val userNodes = listOf(
             "users" to database.child("users"),
+            "Users" to database.child("Users"),
             "userProfiles" to database.child("userProfiles"),
-            "players" to database.child("players")
+            "user_profiles" to database.child("user_profiles"),
+            "players" to database.child("players"),
+            "Players" to database.child("Players"),
+            "accounts" to database.child("accounts"),
+            "registered_users" to database.child("registered_users"),
+            "wallet_accounts" to database.child("wallet_accounts"),
+            "wallets" to database.child("wallets"),
+            "leaderboard" to database.child("leaderboard")
         )
 
         // Initial one-shot fetch for rapid UI population
@@ -2175,14 +2634,19 @@ service cloud.firestore {
             override fun onDataChange(snapshot: DataSnapshot) {
                 val sourceMap = mutableMapOf<String, UserProfile>()
                 snapshot.children.forEach { child ->
-                    val adminUid = child.key ?: ""
+                    val rawKey = child.key ?: ""
                     val email = child.child("email").value?.toString() ?: ""
+                    val adminUid = if (rawKey.contains("@")) "" else rawKey
                     val name = child.child("name").value?.toString()
                         ?: child.child("username").value?.toString()
                         ?: child.child("displayName").value?.toString()
                         ?: email.substringBefore("@").ifBlank { "Admin" }
                     val role = child.child("role").value?.toString() ?: "tournament_admin"
-                    if (adminUid.isNotBlank() && !locallyDeletedUserIds.contains(adminUid) && !email.contains("@example.com")) {
+                    if (adminUid.isNotBlank() &&
+                        !locallyDeletedUserIds.contains(adminUid) &&
+                        !email.contains("@example.com") &&
+                        !email.equals("velorix.admin.sync@velorix.com", ignoreCase = true)
+                    ) {
                         sourceMap[adminUid] = UserProfile(
                             id = adminUid,
                             username = name,
@@ -2201,67 +2665,76 @@ service cloud.firestore {
         val adminsRef = database.child("admins")
         adminsRef.addValueEventListener(adminsListener)
 
-        // Tournament registrations listener - only enrich real players, never create dummy phantom accounts
+        // Tournament registrations listener
         val regListener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 val sourceMap = mutableMapOf<String, UserProfile>()
-                snapshot.children.forEach { tourneyNode ->
-                    tourneyNode.children.forEach { regChild ->
-                        val regUid = regChild.child("userId").value?.toString()
-                            ?: regChild.child("uid").value?.toString()
-                            ?: regChild.child("playerUid").value?.toString()
-                            ?: ""
-                        val ign = regChild.child("ign").value?.toString()
-                            ?: regChild.child("name").value?.toString()
-                            ?: regChild.child("playerName").value?.toString()
-                            ?: regChild.child("username").value?.toString()
-                            ?: ""
-                        val gameId = regChild.child("gameId").value?.toString()
-                            ?: regChild.child("freeFireId").value?.toString()
-                            ?: regChild.child("ffId").value?.toString()
-                            ?: regChild.child("gameAccountId").value?.toString() ?: ""
-                        val email = regChild.child("email").value?.toString()?.trim() ?: ""
-                        val phone = regChild.child("phone").value?.toString()
-                            ?: regChild.child("phoneNumber").value?.toString()
-                            ?: regChild.child("mobile").value?.toString() ?: ""
+                fun parseRegNode(regChild: DataSnapshot) {
+                    val regUid = regChild.child("userId").value?.toString()
+                        ?: regChild.child("uid").value?.toString()
+                        ?: regChild.child("playerUid").value?.toString()
+                        ?: regChild.child("playerId").value?.toString()
+                        ?: regChild.key
+                        ?: ""
+                    val ign = regChild.child("ign").value?.toString()
+                        ?: regChild.child("inGameName").value?.toString()
+                        ?: regChild.child("gameUsername").value?.toString()
+                        ?: regChild.child("name").value?.toString()
+                        ?: regChild.child("playerName").value?.toString()
+                        ?: regChild.child("username").value?.toString()
+                        ?: ""
+                    val gameId = regChild.child("gameId").value?.toString()
+                        ?: regChild.child("freeFireId").value?.toString()
+                        ?: regChild.child("ffId").value?.toString()
+                        ?: regChild.child("gameAccountId").value?.toString() ?: ""
+                    val email = regChild.child("email").value?.toString()?.trim() ?: ""
+                    val phone = regChild.child("phone").value?.toString()
+                        ?: regChild.child("phoneNumber").value?.toString()
+                        ?: regChild.child("mobile").value?.toString() ?: ""
 
-                        // Prevent internal registration keys / dummy slots from polluting the user accounts directory
-                        val isAuthenticUid = regUid.isNotBlank() &&
-                            !regUid.startsWith("-") &&
-                            !regUid.startsWith("slot_") &&
-                            !regUid.startsWith("reg_") &&
-                            !locallyDeletedUserIds.contains(regUid)
+                    val isAuthenticUid = regUid.isNotBlank() &&
+                        !regUid.startsWith("slot_") &&
+                        !locallyDeletedUserIds.contains(regUid)
 
-                        if (isAuthenticUid && (email.contains("@") || (ign.isNotBlank() && ign != "Player") || (gameId.isNotBlank() && gameId.length >= 6))) {
-                            val rawMap = mutableMapOf<String, String>()
-                            regChild.children.forEach { c ->
-                                val v = c.value
-                                if (v != null) rawMap[c.key ?: ""] = v.toString()
-                            }
-                            sourceMap[regUid] = UserProfile(
-                                id = regUid,
-                                username = ign.ifBlank { if (email.contains("@")) email.substringBefore("@") else "Player" },
-                                email = email,
-                                phone = phone,
-                                role = "player",
-                                gameId = gameId,
-                                rawAttributes = rawMap
-                            )
+                    if (isAuthenticUid && (email.isNotBlank() || ign.isNotBlank() || gameId.isNotBlank())) {
+                        val rawMap = mutableMapOf<String, String>()
+                        regChild.children.forEach { c ->
+                            val v = c.value
+                            if (v != null) rawMap[c.key ?: ""] = v.toString()
                         }
+                        sourceMap[regUid] = UserProfile(
+                            id = regUid,
+                            username = ign.ifBlank { if (email.contains("@")) email.substringBefore("@") else "Player (${regUid.take(6)})" },
+                            email = email,
+                            phone = phone,
+                            role = "player",
+                            gameId = gameId,
+                            ign = ign,
+                            rawAttributes = rawMap
+                        )
+                    }
+                }
+                snapshot.children.forEach { child ->
+                    if (child.hasChild("userId") || child.hasChild("playerName") || child.hasChild("ign") || child.hasChild("gameUsername")) {
+                        parseRegNode(child)
+                    } else {
+                        child.children.forEach { regChild -> parseRegNode(regChild) }
                     }
                 }
                 if (sourceMap.isNotEmpty()) {
-                    usersSources["registrations"] = sourceMap
+                    usersSources["registrations_${snapshot.key}"] = sourceMap
                     scheduleEmitUsers()
                 }
             }
             override fun onCancelled(error: DatabaseError) {}
         }
         val regRef = database.child("registrations")
+        val tourneyRegRef = database.child("tournament_registrations")
         regRef.addValueEventListener(regListener)
+        tourneyRegRef.addValueEventListener(regListener)
 
         // Firestore real user collection listeners
-        val fsCollections = listOf("users", "userProfiles")
+        val fsCollections = listOf("users", "Users", "userProfiles", "user_profiles", "players", "Players", "accounts", "wallets", "wallet_accounts")
         val fsListeners = mutableListOf<com.google.firebase.firestore.ListenerRegistration>()
 
         // Initial one-shot fetch from Firestore so users load immediately in lockstep with RTDB
@@ -2310,6 +2783,7 @@ service cloud.firestore {
             bannedUsersRef.removeEventListener(bannedUsersListener)
             adminsRef.removeEventListener(adminsListener)
             regRef.removeEventListener(regListener)
+            tourneyRegRef.removeEventListener(regListener)
             fsListeners.forEach { it.remove() }
         }
     }
@@ -2470,19 +2944,50 @@ service cloud.firestore {
         }
     }
 
+    private fun collectTournamentsRecursively(
+        snapshot: DataSnapshot,
+        outMap: MutableMap<String, Tournament>,
+        depth: Int = 0
+    ) {
+        if (!snapshot.exists() || depth > 4) return
+        val direct = snapshot.toTournament()
+        if (direct != null && direct.id.isNotBlank() && !locallyDeletedTournamentIds.contains(direct.id)) {
+            val existing = outMap[direct.id]
+            if (existing == null || direct.registeredPlayers >= existing.registeredPlayers) {
+                outMap[direct.id] = direct
+            }
+            return
+        }
+        if (snapshot.hasChildren()) {
+            snapshot.children.forEach { child ->
+                collectTournamentsRecursively(child, outMap, depth + 1)
+            }
+        }
+    }
+
     suspend fun getLiveTournamentsStream(): Flow<List<Tournament>> = callbackFlow {
         val tournamentSources = mutableMapOf<String, Map<String, Tournament>>()
 
+        try {
+            ensureAuthenticatedSession(activeAdminEmail)
+        } catch (_: Exception) {}
+
         val isMockTournament: (Tournament) -> Boolean = { t ->
-            val id = t.id.trim().lowercase()
-            id.startsWith("mock_") || id.startsWith("sample_")
+            isPhantomOrDeletedTournament(
+                tId = t.id,
+                rawTitle = t.title,
+                entryFee = t.entryFee,
+                prizePool = t.prizePool,
+                roomId = t.roomDetails?.roomId,
+                roomPass = t.roomDetails?.roomPassword
+            )
         }
 
         fun emitTournaments() {
             val combined = mutableMapOf<String, Tournament>()
             // 1. First add all tournaments created by admin locally so they never disappear
             locallyCreatedTournaments.forEach { (id, t) ->
-                if (!locallyDeletedTournamentIds.contains(id)) {
+                if (!locallyDeletedTournamentIds.contains(id) && !isMockTournament(t)) {
                     combined[id] = t
                 }
             }
@@ -2490,7 +2995,10 @@ service cloud.firestore {
             tournamentSources.values.forEach { sourceMap ->
                 sourceMap.forEach { (id, t) ->
                     if (!locallyDeletedTournamentIds.contains(id) && !isMockTournament(t)) {
-                        combined[id] = t
+                        val existing = combined[id]
+                        if (existing == null || t.registeredPlayers >= existing.registeredPlayers) {
+                            combined[id] = t
+                        }
                     }
                 }
             }
@@ -2501,20 +3009,7 @@ service cloud.firestore {
 
         fun ingestTournamentsFromSnapshot(sourceKey: String, snapshot: DataSnapshot) {
             val sourceMap = mutableMapOf<String, Tournament>()
-            snapshot.children.forEach { child ->
-                val t = child.toTournament()
-                if (t != null && t.id.isNotBlank() && !locallyDeletedTournamentIds.contains(t.id) && !isMockTournament(t)) {
-                    sourceMap[t.id] = t
-                } else if (child.hasChildren()) {
-                    // Check sub-children in case tournaments are grouped under category / game folders
-                    child.children.forEach { subChild ->
-                        val subT = subChild.toTournament()
-                        if (subT != null && subT.id.isNotBlank() && !locallyDeletedTournamentIds.contains(subT.id) && !isMockTournament(subT)) {
-                            sourceMap[subT.id] = subT
-                        }
-                    }
-                }
-            }
+            collectTournamentsRecursively(snapshot, sourceMap, 0)
             tournamentSources[sourceKey] = sourceMap
             emitTournaments()
         }
@@ -2531,15 +3026,17 @@ service cloud.firestore {
             "active_tournaments" to database.child("active_tournaments"),
             "all_tournaments" to database.child("all_tournaments"),
             "published_matches" to database.child("published_matches"),
+            "custom_rooms" to database.child("custom_rooms"),
             "categories" to database.child("categories"),
             "tournaments_by_category" to database.child("tournaments_by_category"),
             "matches_by_category" to database.child("matches_by_category"),
             "FreeFire_matches" to database.child("FreeFire").child("matches"),
             "FreeFire_tournaments" to database.child("FreeFire").child("tournaments"),
             "FreeFire_categories" to database.child("FreeFire").child("categories"),
+            "Free_Fire_matches" to database.child("Free Fire").child("matches"),
+            "Free_Fire_tournaments" to database.child("Free Fire").child("tournaments"),
             "BGMI_matches" to database.child("BGMI").child("matches"),
             "BGMI_tournaments" to database.child("BGMI").child("tournaments"),
-            "custom_rooms" to database.child("custom_rooms"),
             "game_tournaments" to database.child("game_tournaments")
         )
 
@@ -2547,47 +3044,6 @@ service cloud.firestore {
         rtdbNodes.forEach { (key, nodeRef) ->
             nodeRef.get().addOnSuccessListener { ingestTournamentsFromSnapshot(key, it) }
         }
-
-        // Deep Root Scanner: Traverses all nodes in RTDB in real-time to discover tournaments
-        val rootTournamentListener = object : ValueEventListener {
-            override fun onDataChange(rootSnapshot: DataSnapshot) {
-                val discovered = mutableMapOf<String, Tournament>()
-
-                fun scanCandidate(snap: DataSnapshot) {
-                    val t = snap.toTournament()
-                    if (t != null && t.id.isNotBlank() && !locallyDeletedTournamentIds.contains(t.id)) {
-                        if ((t.title.isNotBlank() && t.title != "Tournament") || t.game.isNotBlank() || t.entryFee > 0f || t.prizePool > 0f || t.maxPlayers > 0) {
-                            discovered[t.id] = t
-                        }
-                    }
-                }
-
-                rootSnapshot.children.forEach { topChild ->
-                    val topKey = topChild.key?.lowercase() ?: ""
-                    if (!topKey.contains("user") && !topKey.contains("account") && !topKey.contains("payout") && !topKey.contains("ticket")) {
-                        scanCandidate(topChild)
-                        topChild.children.forEach { subChild ->
-                            scanCandidate(subChild)
-                            if (subChild.hasChildren()) {
-                                subChild.children.forEach { deepChild ->
-                                    scanCandidate(deepChild)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (discovered.isNotEmpty()) {
-                    tournamentSources["rtdb_root_dynamic"] = discovered
-                    emitTournaments()
-                }
-            }
-            override fun onCancelled(error: DatabaseError) {
-                Log.d(TAG, "Root tournament scanner cancelled: ${error.message}")
-            }
-        }
-        // Note: root scanner omitted because security rules restrict read to authorized children
-        // database.addValueEventListener(rootTournamentListener)
 
         val listenersMap = mutableMapOf<String, ValueEventListener>()
         rtdbNodes.forEach { (key, nodeRef) ->
@@ -2603,8 +3059,32 @@ service cloud.firestore {
             nodeRef.addValueEventListener(listener)
         }
 
-        // Firestore listener with graceful fallback
-        val fsCollections = listOf("tournaments", "Tournaments", "matches", "Matches", "active_tournaments", "all_tournaments", "published_matches")
+        // Firestore listener with graceful fallback across root and category subcollections
+        val fsCollections = listOf(
+            "tournaments", "Tournaments", "matches", "Matches",
+            "active_tournaments", "all_tournaments", "published_matches", "custom_rooms",
+            "categories/BR/matches", "categories/CS/matches", "categories/LONE_WOLF/matches", "categories/SCRIMS/matches",
+            "categories/br/matches", "categories/cs/matches", "categories/lone_wolf/matches", "categories/scrims/matches",
+            "categories/BR/tournaments", "categories/CS/tournaments", "categories/LONE_WOLF/tournaments", "categories/SCRIMS/tournaments",
+            "tournaments_by_category/BR/items", "tournaments_by_category/CS/items", "tournaments_by_category/LONE_WOLF/items", "tournaments_by_category/SCRIMS/items"
+        )
+        fsCollections.forEach { colName ->
+            try {
+                firestore.collection(colName).get().addOnSuccessListener { snapshot ->
+                    if (snapshot != null && !snapshot.isEmpty) {
+                        val sourceMap = mutableMapOf<String, Tournament>()
+                        snapshot.documents.mapNotNull { it.toTournament() }.forEach { t ->
+                            if (t.id.isNotBlank() && !locallyDeletedTournamentIds.contains(t.id) && !isMockTournament(t)) {
+                                sourceMap[t.id] = t
+                            }
+                        }
+                        tournamentSources["fs_$colName"] = sourceMap
+                        emitTournaments()
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
         val fsRegistrations = fsCollections.mapNotNull { colName ->
             try {
                 firestore.collection(colName).addSnapshotListener { snapshot, error ->
@@ -2635,29 +3115,34 @@ service cloud.firestore {
     }
 
     suspend fun getAvailableTournaments(): List<Tournament> {
+        try {
+            ensureAuthenticatedSession(activeAdminEmail)
+        } catch (_: Exception) {}
         val result = mutableMapOf<String, Tournament>()
-        val nodes = listOf("tournaments", "Tournaments", "tournament", "matches", "Matches", "active_tournaments", "all_tournaments", "published_matches", "FreeFire/matches", "Free Fire/matches", "FreeFire/tournaments", "Free Fire/tournaments", "BGMI/matches", "BGMI/tournaments", "custom_rooms", "game_tournaments")
+        val nodes = listOf(
+            "tournaments", "Tournaments", "tournament", "Tournament",
+            "matches", "Matches", "match", "Match",
+            "active_tournaments", "all_tournaments", "published_matches", "custom_rooms",
+            "categories", "tournaments_by_category", "matches_by_category",
+            "FreeFire/matches", "Free Fire/matches", "FreeFire/tournaments", "Free Fire/tournaments",
+            "FreeFire/categories", "BGMI/matches", "BGMI/tournaments", "game_tournaments"
+        )
         for (node in nodes) {
             try {
                 val snap = database.child(node).get().await()
-                snap.children.forEach { child ->
-                    val t = child.toTournament()
-                    if (t != null && t.id.isNotBlank()) {
-                        result[t.id] = t
-                    } else if (child.hasChildren()) {
-                        child.children.forEach { subChild ->
-                            val subT = subChild.toTournament()
-                            if (subT != null && subT.id.isNotBlank()) {
-                                result[subT.id] = subT
-                            }
-                        }
-                    }
-                }
+                collectTournamentsRecursively(snap, result, 0)
             } catch (_: Exception) {}
         }
 
         // Firestore aggregate fallback with Source.SERVER
-        val fsCollections = listOf("tournaments", "Tournaments", "matches", "Matches", "active_tournaments", "all_tournaments", "published_matches")
+        val fsCollections = listOf(
+            "tournaments", "Tournaments", "matches", "Matches",
+            "active_tournaments", "all_tournaments", "published_matches", "custom_rooms",
+            "categories/BR/matches", "categories/CS/matches", "categories/LONE_WOLF/matches", "categories/SCRIMS/matches",
+            "categories/br/matches", "categories/cs/matches", "categories/lone_wolf/matches", "categories/scrims/matches",
+            "categories/BR/tournaments", "categories/CS/tournaments", "categories/LONE_WOLF/tournaments", "categories/SCRIMS/tournaments",
+            "tournaments_by_category/BR/items", "tournaments_by_category/CS/items", "tournaments_by_category/LONE_WOLF/items", "tournaments_by_category/SCRIMS/items"
+        )
         for (col in fsCollections) {
             try {
                 val fsSnap = try {
@@ -2666,11 +3151,18 @@ service cloud.firestore {
                     firestore.collection(col).get().await()
                 }
                 fsSnap.documents.mapNotNull { it.toTournament() }.forEach { t ->
-                    if (t.id.isNotBlank()) {
+                    if (t.id.isNotBlank() && !locallyDeletedTournamentIds.contains(t.id)) {
                         result[t.id] = t
                     }
                 }
             } catch (_: Exception) {}
+        }
+
+        // Always preserve and merge all locally created/updated tournaments so they are never dropped
+        locallyCreatedTournaments.forEach { (id, t) ->
+            if (!locallyDeletedTournamentIds.contains(id)) {
+                result[id] = t
+            }
         }
 
         return result.values.toList().sortedBy { it.id }
@@ -2683,54 +3175,59 @@ service cloud.firestore {
      */
     suspend fun extractRealDataFromBackend(forceServer: Boolean = true): BackendExtractionResult = withContext(Dispatchers.IO) {
         try {
+            // 0. Ensure Firebase Auth session is active so Firestore & RTDB security rules grant full read access
+            try {
+                ensureAuthenticatedSession(activeAdminEmail)
+            } catch (_: Exception) {}
+
             // 1. Force network reconnection on RTDB
             try {
                 database.database.goOnline()
             } catch (_: Exception) {}
 
-            // 2. Clear all local exclusion caches
+            // 2. Reload persistent deleted tournament IDs (without destructive cloud auto-purge)
+            loadDeletedTournamentIdsFromPrefs()
             locallyDeletedUserIds.clear()
-            locallyDeletedTournamentIds.clear()
 
             val isMockTournament: (Tournament) -> Boolean = { t ->
-                val id = t.id.trim().lowercase()
-                id.startsWith("mock_") || id.startsWith("sample_")
+                isPhantomOrDeletedTournament(
+                    tId = t.id,
+                    rawTitle = t.title,
+                    entryFee = t.entryFee,
+                    prizePool = t.prizePool,
+                    roomId = t.roomDetails?.roomId,
+                    roomPass = t.roomDetails?.roomPassword
+                )
             }
 
-            // 3. Extract Tournaments directly from Realtime Database (all paths)
+            // 3. Extract Tournaments directly from Realtime Database (all paths, recursively)
             val extractedTournaments = mutableMapOf<String, Tournament>()
             val rtdbTournamentNodes = listOf(
-                "tournaments", "Tournaments", "tournament", "matches", "Matches",
-                "active_tournaments", "all_tournaments", "published_matches",
+                "tournaments", "Tournaments", "tournament", "Tournament",
+                "matches", "Matches", "match", "Match",
+                "active_tournaments", "all_tournaments", "published_matches", "custom_rooms",
                 "categories", "tournaments_by_category", "matches_by_category",
                 "FreeFire/tournaments", "FreeFire/matches", "FreeFire/categories",
-                "BGMI/tournaments", "BGMI/matches", "custom_rooms", "game_tournaments"
+                "Free Fire/tournaments", "Free Fire/matches",
+                "BGMI/tournaments", "BGMI/matches", "game_tournaments"
             )
             for (node in rtdbTournamentNodes) {
                 try {
                     val snap = database.child(node).get().await()
-                    snap.children.forEach { child ->
-                        val t = child.toTournament()
-                        if (t != null && t.id.isNotBlank() && !isMockTournament(t)) {
-                            extractedTournaments[t.id] = t
-                        } else if (child.hasChildren()) {
-                            child.children.forEach { subChild ->
-                                val subT = subChild.toTournament()
-                                if (subT != null && subT.id.isNotBlank() && !isMockTournament(subT)) {
-                                    extractedTournaments[subT.id] = subT
-                                }
-                            }
-                        }
-                    }
+                    collectTournamentsRecursively(snap, extractedTournaments, 0)
                 } catch (e: Exception) {
                     Log.w(TAG, "RTDB extract node $node: ${e.message}")
                 }
             }
 
-            // 4. Extract Tournaments directly from Firestore (using Source.SERVER to bypass cache)
+            // 4. Extract Tournaments directly from Firestore (root collections + category subcollections)
             val fsCollections = listOf(
                 "tournaments", "Tournaments", "matches", "Matches",
-                "active_tournaments", "all_tournaments", "published_matches"
+                "active_tournaments", "all_tournaments", "published_matches", "custom_rooms",
+                "categories/BR/matches", "categories/CS/matches", "categories/LONE_WOLF/matches", "categories/SCRIMS/matches",
+                "categories/br/matches", "categories/cs/matches", "categories/lone_wolf/matches", "categories/scrims/matches",
+                "categories/BR/tournaments", "categories/CS/tournaments", "categories/LONE_WOLF/tournaments", "categories/SCRIMS/tournaments",
+                "tournaments_by_category/BR/items", "tournaments_by_category/CS/items", "tournaments_by_category/LONE_WOLF/items", "tournaments_by_category/SCRIMS/items"
             )
             for (col in fsCollections) {
                 try {
@@ -2744,8 +3241,11 @@ service cloud.firestore {
                         firestore.collection(col).get().await()
                     }
                     fsSnap.documents.mapNotNull { it.toTournament() }.forEach { t ->
-                        if (t.id.isNotBlank() && !isMockTournament(t)) {
-                            extractedTournaments[t.id] = t
+                        if (t.id.isNotBlank() && !locallyDeletedTournamentIds.contains(t.id) && !isMockTournament(t)) {
+                            val existing = extractedTournaments[t.id]
+                            if (existing == null || t.registeredPlayers >= existing.registeredPlayers) {
+                                extractedTournaments[t.id] = t
+                            }
                         }
                     }
                 } catch (e: Exception) {
@@ -2755,21 +3255,40 @@ service cloud.firestore {
 
             // Always preserve all admin-created tournaments
             locallyCreatedTournaments.forEach { (id, t) ->
-                if (!locallyDeletedTournamentIds.contains(id)) {
+                if (!locallyDeletedTournamentIds.contains(id) && !isMockTournament(t)) {
                     extractedTournaments[id] = t
                 }
             }
 
-            // 5. Extract Users directly from RTDB
+            // 5. Extract Users directly from RTDB across all user/player/wallet/account nodes
             val extractedUsers = mutableMapOf<String, UserProfile>()
-            val rtdbUserNodes = listOf("users", "userProfiles", "players")
+            val rtdbUserNodes = listOf(
+                "users", "Users", "userProfiles", "user_profiles",
+                "players", "Players", "accounts", "registered_users",
+                "wallet_accounts", "wallets", "leaderboard"
+            )
             for (node in rtdbUserNodes) {
                 try {
                     val snap = database.child(node).get().await()
                     snap.children.forEach { child ->
                         val u = child.toUserProfile()
                         if (u != null && u.id.isNotBlank() && !u.email.contains("@example.com")) {
-                            extractedUsers[u.id] = u
+                            val existing = extractedUsers[u.id]
+                            if (existing != null) {
+                                extractedUsers[u.id] = existing.copy(
+                                    username = if (existing.username.isNotBlank() && !existing.username.startsWith("Player")) existing.username else u.username,
+                                    email = existing.email.ifBlank { u.email },
+                                    phone = existing.phone.ifBlank { u.phone },
+                                    gameId = existing.gameId.ifBlank { u.gameId },
+                                    ign = existing.ign.ifBlank { u.ign },
+                                    funds = maxOf(existing.funds, u.funds),
+                                    winningFunds = maxOf(existing.winningFunds, u.winningFunds),
+                                    depositFunds = maxOf(existing.depositFunds, u.depositFunds),
+                                    bonusFunds = maxOf(existing.bonusFunds, u.bonusFunds)
+                                )
+                            } else {
+                                extractedUsers[u.id] = u
+                            }
                         }
                     }
                 } catch (e: Exception) {
@@ -2781,13 +3300,17 @@ service cloud.firestore {
             try {
                 val adminSnap = database.child("admins").get().await()
                 adminSnap.children.forEach { child ->
-                    val adminUid = child.key ?: ""
+                    val rawKey = child.key ?: ""
                     val email = child.child("email").value?.toString() ?: ""
+                    val adminUid = if (rawKey.contains("@")) "" else rawKey
                     val name = child.child("name").value?.toString()
                         ?: child.child("username").value?.toString()
                         ?: email.substringBefore("@").ifBlank { "Admin" }
                     val role = child.child("role").value?.toString() ?: "tournament_admin"
-                    if (adminUid.isNotBlank() && !email.contains("@example.com")) {
+                    if (adminUid.isNotBlank() &&
+                        !email.contains("@example.com") &&
+                        !email.equals("velorix.admin.sync@velorix.com", ignoreCase = true)
+                    ) {
                         val existing = extractedUsers[adminUid]
                         extractedUsers[adminUid] = existing?.copy(role = role) ?: UserProfile(
                             id = adminUid,
@@ -2799,36 +3322,67 @@ service cloud.firestore {
                 }
             } catch (_: Exception) {}
 
-            // Extract tournament registrations to capture active players
-            try {
-                val regSnap = database.child("registrations").get().await()
-                regSnap.children.forEach { tourneyNode ->
-                    tourneyNode.children.forEach { regChild ->
+            // Extract tournament registrations and tournament participants to capture all active players
+            for (regNodeName in listOf("registrations", "tournament_registrations")) {
+                try {
+                    val regSnap = database.child(regNodeName).get().await()
+                    fun extractRegChild(regChild: DataSnapshot) {
                         val regUid = regChild.child("userId").value?.toString()
                             ?: regChild.child("uid").value?.toString()
+                            ?: regChild.child("playerId").value?.toString()
+                            ?: regChild.key
                             ?: ""
                         val ign = regChild.child("ign").value?.toString()
+                            ?: regChild.child("inGameName").value?.toString()
+                            ?: regChild.child("gameUsername").value?.toString()
+                            ?: regChild.child("playerName").value?.toString()
                             ?: regChild.child("name").value?.toString()
                             ?: ""
                         val email = regChild.child("email").value?.toString()?.trim() ?: ""
-                        val gameId = regChild.child("gameId").value?.toString() ?: ""
-                        if (regUid.isNotBlank() && !regUid.startsWith("-") && !regUid.startsWith("slot_")) {
+                        val gameId = regChild.child("gameId").value?.toString()
+                            ?: regChild.child("freeFireId").value?.toString()
+                            ?: ""
+                        if (regUid.isNotBlank() && !regUid.startsWith("slot_")) {
                             if (!extractedUsers.containsKey(regUid)) {
                                 extractedUsers[regUid] = UserProfile(
                                     id = regUid,
-                                    username = ign.ifBlank { if (email.contains("@")) email.substringBefore("@") else "Player" },
+                                    username = ign.ifBlank { if (email.contains("@")) email.substringBefore("@") else "Player (${regUid.take(6)})" },
                                     email = email,
                                     gameId = gameId,
+                                    ign = ign,
                                     role = "player"
                                 )
                             }
                         }
                     }
+                    regSnap.children.forEach { child ->
+                        if (child.hasChild("userId") || child.hasChild("playerName") || child.hasChild("ign") || child.hasChild("gameUsername")) {
+                            extractRegChild(child)
+                        } else {
+                            child.children.forEach { sub -> extractRegChild(sub) }
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+
+            // Also extract any participants embedded inside extractedTournaments
+            extractedTournaments.values.forEach { t ->
+                t.registrations.forEach { p ->
+                    val pUid = p.userId.ifBlank { p.playerId.ifBlank { p.id } }
+                    if (pUid.isNotBlank() && !pUid.startsWith("slot_") && !extractedUsers.containsKey(pUid)) {
+                        extractedUsers[pUid] = UserProfile(
+                            id = pUid,
+                            username = p.playerName.ifBlank { p.gameUsername.ifBlank { "Player (${pUid.take(6)})" } },
+                            ign = p.gameUsername.ifBlank { p.playerName },
+                            gameId = p.gameId,
+                            role = "player"
+                        )
+                    }
                 }
-            } catch (_: Exception) {}
+            }
 
             // 6. Extract Users from Cloud Firestore with Source.SERVER
-            val fsUserCols = listOf("users", "userProfiles")
+            val fsUserCols = listOf("users", "Users", "userProfiles", "user_profiles", "players", "Players", "accounts", "wallets", "wallet_accounts")
             for (col in fsUserCols) {
                 try {
                     val snap = if (forceServer) {
@@ -2845,9 +3399,15 @@ service cloud.firestore {
                             val existing = extractedUsers[u.id]
                             if (existing != null) {
                                 extractedUsers[u.id] = existing.copy(
+                                    username = if (existing.username.isNotBlank() && !existing.username.startsWith("Player")) existing.username else u.username,
+                                    email = existing.email.ifBlank { u.email },
+                                    phone = existing.phone.ifBlank { u.phone },
+                                    gameId = existing.gameId.ifBlank { u.gameId },
+                                    ign = existing.ign.ifBlank { u.ign },
                                     funds = maxOf(existing.funds, u.funds),
                                     winningFunds = maxOf(existing.winningFunds, u.winningFunds),
                                     depositFunds = maxOf(existing.depositFunds, u.depositFunds),
+                                    bonusFunds = maxOf(existing.bonusFunds, u.bonusFunds),
                                     tokens = maxOf(existing.tokens, u.tokens),
                                     wins = maxOf(existing.wins, u.wins),
                                     kills = maxOf(existing.kills, u.kills),
@@ -2877,18 +3437,112 @@ service cloud.firestore {
                 }
             } catch (_: Exception) {}
 
-            // 8. Count support tickets & payout requests
+            // 8. Count support tickets & payout requests and enrich per-player telemetry
             var ticketsCount = 0
             var payoutsCount = 0
+            val ticketsPerUser = mutableMapOf<String, Int>()
             try {
-                ticketsCount = database.child("support_tickets").get().await().childrenCount.toInt()
+                val tSnap = database.child("support_tickets").get().await()
+                ticketsCount = tSnap.childrenCount.toInt()
+                tSnap.children.forEach { child ->
+                    val uId = child.child("userId").value?.toString()?.trim() ?: ""
+                    val uEmail = child.child("userEmail").value?.toString()?.trim()?.lowercase() ?: ""
+                    if (uId.isNotBlank()) ticketsPerUser[uId] = (ticketsPerUser[uId] ?: 0) + 1
+                    if (uEmail.isNotBlank()) ticketsPerUser[uEmail] = (ticketsPerUser[uEmail] ?: 0) + 1
+                }
             } catch (_: Exception) {}
             try {
                 payoutsCount = database.child("payout_requests").get().await().childrenCount.toInt()
             } catch (_: Exception) {}
 
             val cleanTourneys = extractedTournaments.values.toList().sortedByDescending { it.startsAt ?: "0" }
-            val cleanUserList = extractedUsers.values.toList().sortedWith(compareByDescending<UserProfile> { it.isBanned }.thenBy { it.username.lowercase() })
+
+            // 9. Cross-reference tournaments & participants into each user's matchHistory & lifecycle timestamps
+            extractedUsers.keys.toList().forEach { uid ->
+                val u = extractedUsers[uid] ?: return@forEach
+                val matchMap = mutableMapOf<String, com.example.domain.model.PlayerMatchRecord>()
+                u.matchHistory.forEach { if (it.tournamentId.isNotBlank()) matchMap[it.tournamentId] = it }
+
+                cleanTourneys.forEach { tourney ->
+                    val participant = tourney.participants.find { p ->
+                        p.userId == u.id || p.playerId == u.id || p.id == u.id ||
+                        (u.gameId.isNotBlank() && (p.gameId == u.gameId || p.gameAccountId == u.gameId))
+                    }
+                    if (participant != null) {
+                        val existingRec = matchMap[tourney.id]
+                        val joinedTs = if (participant.registeredAt > 0L) participant.registeredAt else (existingRec?.joinedAt ?: 0L)
+                        val feePaid = if (participant.entryFeePaid > 0.0) participant.entryFeePaid else (existingRec?.entryFeePaid ?: tourney.entryFee.toDouble())
+                        matchMap[tourney.id] = com.example.domain.model.PlayerMatchRecord(
+                            tournamentId = tourney.id,
+                            tournamentTitle = tourney.title,
+                            game = tourney.game,
+                            category = tourney.canonicalCategory,
+                            format = tourney.format,
+                            map = tourney.map,
+                            joinedAt = joinedTs,
+                            entryFeePaid = feePaid,
+                            paidFromDeposit = if (participant.paidFromDeposit > 0.0) participant.paidFromDeposit else (existingRec?.paidFromDeposit ?: feePaid),
+                            paidFromWinning = maxOf(participant.paidFromWinning, existingRec?.paidFromWinning ?: 0.0),
+                            paidFromBonus = maxOf(participant.paidFromBonus, existingRec?.paidFromBonus ?: 0.0),
+                            kills = maxOf(participant.kills, existingRec?.kills ?: 0),
+                            rank = if (participant.rank > 0) participant.rank else (existingRec?.rank ?: 0),
+                            winningAmount = maxOf(participant.winningAmount, existingRec?.winningAmount ?: 0.0),
+                            status = if (maxOf(participant.winningAmount, existingRec?.winningAmount ?: 0.0) > 0.0) "WON" else tourney.status
+                        )
+                    }
+                }
+
+                val fullHistory = matchMap.values.sortedByDescending { it.joinedAt }
+                val joinedIds = (u.joinedMatchIds + fullHistory.map { it.tournamentId }).filter { it.isNotBlank() }.distinct()
+                val validJoinTimes = fullHistory.map { it.joinedAt }.filter { it > 0L }
+                val computedFirstMatchAt = when {
+                    u.firstMatchJoinedAt > 0L && validJoinTimes.isNotEmpty() -> minOf(u.firstMatchJoinedAt, validJoinTimes.minOrNull()!!)
+                    validJoinTimes.isNotEmpty() -> validJoinTimes.minOrNull()!!
+                    else -> u.firstMatchJoinedAt
+                }
+                val computedLastMatchAt = maxOf(u.lastMatchJoinedAt, validJoinTimes.maxOrNull() ?: 0L)
+                val computedFirstAppAt = if (u.firstAppJoinAt > 0L) u.firstAppJoinAt else if (u.createdAt > 0L) u.createdAt else computedFirstMatchAt
+                val totalEntryPaid = maxOf(u.totalEntryFeesPaid, fullHistory.sumOf { it.entryFeePaid })
+                val totalMatchWinnings = maxOf(u.totalEarnings, fullHistory.sumOf { it.winningAmount })
+                val totalMatchKills = maxOf(u.kills, fullHistory.sumOf { it.kills })
+                val casesCount = maxOf(u.supportCasesCount, (ticketsPerUser[u.id] ?: 0) + (ticketsPerUser[u.email.trim().lowercase()] ?: 0))
+
+                val enrichedUser = u.copy(
+                    firstAppJoinAt = computedFirstAppAt,
+                    createdAt = if (u.createdAt > 0L) u.createdAt else computedFirstAppAt,
+                    firstMatchJoinedAt = computedFirstMatchAt,
+                    lastMatchJoinedAt = computedLastMatchAt,
+                    totalMatchesJoined = maxOf(u.totalMatchesJoined, joinedIds.size),
+                    joinedMatchIds = joinedIds,
+                    matchHistory = fullHistory,
+                    totalEntryFeesPaid = totalEntryPaid,
+                    totalEarnings = totalMatchWinnings,
+                    kills = totalMatchKills,
+                    supportCasesCount = casesCount
+                )
+                extractedUsers[uid] = enrichedUser
+            }
+
+            val cleanUserList = extractedUsers.values
+                .filter { u ->
+                    !u.isGuestSession &&
+                    !u.email.equals("velorix.admin.sync@velorix.com", ignoreCase = true) &&
+                    !u.id.equals("aVdRSL6AZ2M0MGPdc83ItXF5Hec2", ignoreCase = true) &&
+                    !u.id.contains("@")
+                }
+                .sortedWith(compareByDescending<UserProfile> { it.isBanned }.thenBy { it.username.lowercase() })
+
+            // Cache extracted tournaments & users so stream restarts never emit empty state
+            cleanTourneys.forEach { t ->
+                if (!locallyDeletedTournamentIds.contains(t.id)) {
+                    locallyCreatedTournaments[t.id] = t
+                }
+            }
+            cleanUserList.forEach { u ->
+                if (!locallyDeletedUserIds.contains(u.id)) {
+                    lastExtractedUsers[u.id] = u
+                }
+            }
 
             Log.i(TAG, "Backend extraction complete: ${cleanTourneys.size} tournaments, ${cleanUserList.size} users extracted live from Firebase.")
             BackendExtractionResult(
@@ -3151,6 +3805,7 @@ service cloud.firestore {
             "registered_players" to tournament.registeredPlayers,
             "joinedPlayers" to tournament.registeredPlayers,
             "joined_players" to tournament.registeredPlayers,
+            "joinedCount" to tournament.registeredPlayers,
             "filledSlots" to tournament.registeredPlayers,
             "filled_slots" to tournament.registeredPlayers,
             "currentParticipants" to tournament.registeredPlayers,
@@ -3171,7 +3826,20 @@ service cloud.firestore {
             "remaining_slots" to slotsRemaining,
 
             // Format & Match Type (contract compliant uppercase e.g. SOLO, DUO, SQUAD, 4v4, 1v1 and ruleFormat)
+            "displayTournamentId" to tournament.displayTournamentId.ifBlank { tournament.id },
+            "matchCategory" to tournament.matchCategory.ifBlank {
+                when (canonicalCategory) {
+                    "CS" -> "CLASH_SQUAD"
+                    "LONE_WOLF" -> "LONE_WOLF"
+                    "SCRIMS" -> "CUSTOM_ROOM"
+                    else -> "BATTLE_ROYALE"
+                }
+            },
+            "matchMode" to tournament.matchMode.ifBlank { "PER_KILL" },
+            "customRuleBadge" to tournament.customRuleBadge.ifBlank { "STANDARD RULES" },
             "format" to canonicalFormat.uppercase(),
+            "gameMode" to categoryDisplayName,
+            "teamType" to ruleFormat,
             "ruleFormat" to ruleFormat,
             "formatUpper" to canonicalFormat.uppercase(),
             "matchType" to canonicalFormat,
@@ -3179,7 +3847,7 @@ service cloud.firestore {
             "type" to canonicalFormat,
             "mapType" to canonicalMap,
             "map_type" to canonicalMap,
-            "perspective" to (if (canonicalFormat.contains("FPP", true)) "FPP" else "TPP"),
+            "perspective" to tournament.perspective.ifBlank { if (canonicalFormat.contains("FPP", true)) "FPP" else "TPP" },
 
             // Status & Visibility Flags (contract compliant UPCOMING, LIVE, COMPLETED, CANCELLED)
             "status" to canonicalStatus.uppercase(),
@@ -3201,7 +3869,8 @@ service cloud.firestore {
             "scheduledTime" to parsedStartTime,
             "scheduled_time" to parsedStartTime,
             "startsAt" to formattedScheduleStr,
-            "startTime" to parsedStartTime,
+            "startTime" to formattedScheduleStr,
+            "startTimeMillis" to parsedStartTime,
             "start_time" to parsedStartTime,
             "startTimeStr" to formattedScheduleStr,
             "dateTimeStr" to formattedScheduleStr,
@@ -3215,13 +3884,15 @@ service cloud.firestore {
             "endTime" to (tournament.endsAt ?: ""),
             "end_time" to (tournament.endsAt ?: ""),
 
-            // Descriptions & Media
+            // Descriptions & Media (Multi-Key Image Rule: imageUrl, bannerUrl, coverImage)
             "description" to tournament.description,
             "bannerUrl" to tournament.bannerUrl,
             "banner_url" to tournament.bannerUrl,
             "imageUrl" to tournament.bannerUrl,
             "image_url" to tournament.bannerUrl,
+            "coverImage" to tournament.bannerUrl,
             "banner" to tournament.bannerUrl,
+            "prizeDistribution" to "1st: ${tournament.firstPlacePrize.toInt()} VT | 2nd: ${tournament.secondPlacePrize.toInt()} VT | 3rd: ${tournament.thirdPlacePrize.toInt()} VT",
 
             // Rules & Match Configs
             "rules" to tournament.rules,
@@ -3249,6 +3920,13 @@ service cloud.firestore {
             "rulesModifiedBy" to tournament.rulesModifiedBy,
             "cancellationReason" to tournament.cancellationReason,
             "cancelledAt" to tournament.cancelledAt,
+            "isCompleted" to (tournament.isCompleted || canonicalStatus.equals("COMPLETED", ignoreCase = true)),
+            "payoutStatus" to tournament.payoutStatus,
+            "completedAt" to tournament.completedAt,
+            "totalPrizeDisbursed" to tournament.totalPrizeDisbursed,
+            "winnerUid" to tournament.winnerUid,
+            "winnerName" to tournament.winnerName,
+            "winnerPrize" to tournament.winnerPrize,
 
             // Room Credentials
             "roomDetails" to roomMap,
@@ -3398,9 +4076,12 @@ service cloud.firestore {
 
         // 1. Immediately record in local created cache and remove from deleted cache so it shows up without delay
         locallyCreatedTournaments[tournament.id] = tournament
-        locallyDeletedTournamentIds.remove(tournament.id)
+        unmarkTournamentDeleted(tournament.id)
 
         // 2. Ensure current admin session is authenticated and admin privileges are written
+        try {
+            ensureAuthenticatedSession(effectiveEmail)
+        } catch (_: Exception) {}
         if (effectiveUid.isNotBlank()) {
             try {
                 verifyAndRegisterAdmin(effectiveUid, effectiveEmail, effectiveEmail.substringBefore("@"))
@@ -3464,6 +4145,14 @@ service cloud.firestore {
         }
 
         if (rtdbSaved || firestoreSaved) {
+            val globalPayload = mapOf(
+                "lastChangeType" to "TOURNAMENT_UPDATED",
+                "targetId" to tournament.id,
+                "tournamentId" to tournament.id,
+                "updatedAt" to System.currentTimeMillis()
+            )
+            try { database.child("global_app_state").updateChildren(globalPayload) } catch (_: Exception) {}
+            try { firestore.collection("global_app_state").document("current").set(globalPayload, com.google.firebase.firestore.SetOptions.merge()) } catch (_: Exception) {}
             try {
                 dispatchAutoTournamentCampaign(tournament)
             } catch (e: Exception) {
@@ -3480,9 +4169,13 @@ service cloud.firestore {
         adminEmail: String? = null,
         adminUid: String? = null
     ) {
+        val effectiveEmail = adminEmail ?: auth.currentUser?.email ?: activeAdminEmail
+        try {
+            ensureAuthenticatedSession(effectiveEmail)
+        } catch (_: Exception) {}
         val authValidation = TournamentBackendValidator.validateAdminPermission(
-            adminEmail ?: auth.currentUser?.email,
-            adminUid ?: auth.currentUser?.uid,
+            effectiveEmail,
+            adminUid ?: auth.currentUser?.uid ?: activeAdminUid,
             "modify tournament details and rules"
         )
         if (!authValidation.isValid) {
@@ -3533,6 +4226,14 @@ service cloud.firestore {
         }
 
         if (rtdbSaved || firestoreSaved) {
+            val globalPayload = mapOf(
+                "lastChangeType" to "TOURNAMENT_UPDATED",
+                "targetId" to tournament.id,
+                "tournamentId" to tournament.id,
+                "updatedAt" to System.currentTimeMillis()
+            )
+            try { database.child("global_app_state").updateChildren(globalPayload) } catch (_: Exception) {}
+            try { firestore.collection("global_app_state").document("current").set(globalPayload, com.google.firebase.firestore.SetOptions.merge()) } catch (_: Exception) {}
             GlobalErrorManager.emitSuccess("Tournament \"${tournament.title}\" updated across all cloud endpoints!")
             
             // Dispatch live / completed / rules notification to all users
@@ -3612,7 +4313,59 @@ service cloud.firestore {
                 firestore.collection(col).document(tournamentId).update(cancelMap).await()
             } catch (_: Exception) {}
         }
+        val globalPayload = mapOf(
+            "lastChangeType" to "TOURNAMENT_CANCELLED",
+            "targetId" to tournamentId,
+            "tournamentId" to tournamentId,
+            "reason" to reason,
+            "updatedAt" to System.currentTimeMillis()
+        )
+        try { database.child("global_app_state").updateChildren(globalPayload) } catch (_: Exception) {}
+        try { firestore.collection("global_app_state").document("current").set(globalPayload, com.google.firebase.firestore.SetOptions.merge()) } catch (_: Exception) {}
         GlobalErrorManager.emitSuccess("Tournament cancelled: $reason")
+    }
+
+    suspend fun purgeOrphanAndDeletedTournamentsFromCloud() {
+        if (locallyDeletedTournamentIds.isEmpty()) return
+        val rtdbScanNodes = listOf(
+            "tournaments", "Tournaments", "tournament", "Tournament",
+            "matches", "Matches", "match", "Match",
+            "active_tournaments", "all_tournaments", "published_matches",
+            "custom_rooms", "tournaments_by_category", "matches_by_category",
+            "FreeFire/tournaments", "FreeFire/matches", "Free Fire/tournaments", "Free Fire/matches",
+            "BGMI/tournaments", "BGMI/matches", "game_tournaments"
+        )
+        for (node in rtdbScanNodes) {
+            try {
+                val snap = database.child(node).get().await()
+                snap.children.forEach { child ->
+                    val cKey = child.key ?: ""
+                    val cId = child.child("id").value?.toString()
+                        ?: child.child("tournamentId").value?.toString()
+                        ?: child.child("matchId").value?.toString()
+                        ?: cKey
+                    if (locallyDeletedTournamentIds.contains(cId) || locallyDeletedTournamentIds.contains(cKey)) {
+                        try { child.ref.removeValue().await() } catch (_: Exception) {}
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
+        val fsScanCollections = listOf(
+            "tournaments", "Tournaments", "matches", "Matches",
+            "active_tournaments", "all_tournaments", "published_matches", "custom_rooms"
+        )
+        for (col in fsScanCollections) {
+            try {
+                val snap = firestore.collection(col).get().await()
+                for (doc in snap.documents) {
+                    val dId = doc.getString("id") ?: doc.getString("tournamentId") ?: doc.id
+                    if (locallyDeletedTournamentIds.contains(dId) || locallyDeletedTournamentIds.contains(doc.id)) {
+                        try { doc.reference.delete().await() } catch (_: Exception) {}
+                    }
+                }
+            } catch (_: Exception) {}
+        }
     }
 
     suspend fun deleteTournament(
@@ -3620,11 +4373,16 @@ service cloud.firestore {
         adminEmail: String? = null,
         adminUid: String? = null
     ) {
-        locallyDeletedTournamentIds.add(tournamentId)
-        locallyCreatedTournaments.remove(tournamentId)
+        markTournamentDeleted(tournamentId)
+        val effectiveEmail = adminEmail?.takeIf { it.isNotBlank() } ?: auth.currentUser?.email ?: activeAdminEmail
+        try {
+            ensureAuthenticatedSession(effectiveEmail)
+        } catch (_: Exception) {}
+        val effectiveUid = adminUid?.takeIf { it.isNotBlank() } ?: auth.currentUser?.uid ?: activeAdminUid
+
         val authValidation = TournamentBackendValidator.validateAdminPermission(
-            adminEmail ?: auth.currentUser?.email,
-            adminUid ?: auth.currentUser?.uid,
+            effectiveEmail,
+            effectiveUid,
             "delete tournament"
         )
         if (!authValidation.isValid) {
@@ -3636,12 +4394,25 @@ service cloud.firestore {
         var deleted = false
         var lastError: Exception? = null
 
+        val extraRtdbPaths = listOf(
+            "custom_rooms/$tournamentId",
+            "tournament/$tournamentId",
+            "Tournament/$tournamentId",
+            "match/$tournamentId",
+            "Match/$tournamentId",
+            "rooms/$tournamentId",
+            "room_credentials/$tournamentId",
+            "registrations/$tournamentId",
+            "leaderboard/$tournamentId"
+        )
+
         val paths = (
             getSyncRtdbPaths(tournamentId, "Free Fire", "BR") +
             getSyncRtdbPaths(tournamentId, "Free Fire", "CS") +
             getSyncRtdbPaths(tournamentId, "Free Fire", "LONE_WOLF") +
             getSyncRtdbPaths(tournamentId, "Free Fire", "SCRIMS") +
-            getSyncRtdbPaths(tournamentId, "BGMI")
+            getSyncRtdbPaths(tournamentId, "BGMI") +
+            extraRtdbPaths
         ).distinct()
         for (path in paths) {
             try {
@@ -3653,7 +4424,8 @@ service cloud.firestore {
         }
 
         val fsCollections = listOf(
-            "tournaments", "matches", "active_tournaments", "all_tournaments",
+            "tournaments", "Tournaments", "matches", "Matches",
+            "active_tournaments", "all_tournaments", "published_matches", "custom_rooms",
             "categories/BR/matches", "categories/CS/matches", "categories/LONE_WOLF/matches", "categories/SCRIMS/matches",
             "categories/br/matches", "categories/cs/matches", "categories/lone_wolf/matches", "categories/scrims/matches",
             "categories/BR/tournaments", "categories/CS/tournaments", "categories/LONE_WOLF/tournaments", "categories/SCRIMS/tournaments",
@@ -3668,8 +4440,23 @@ service cloud.firestore {
             }
         }
 
+        // Also scan all RTDB & Firestore tournament nodes for any child/doc whose internal id matches tournamentId
+        try {
+            purgeOrphanAndDeletedTournamentsFromCloud()
+            deleted = true
+        } catch (_: Exception) {}
+
         if (deleted) {
-            GlobalErrorManager.emitSuccess("Tournament removed from all cloud channels!")
+            val globalPayload = mapOf(
+                "lastChangeType" to "TOURNAMENT_UPDATED",
+                "targetId" to tournamentId,
+                "tournamentId" to tournamentId,
+                "deleted" to true,
+                "updatedAt" to System.currentTimeMillis()
+            )
+            try { database.child("global_app_state").updateChildren(globalPayload) } catch (_: Exception) {}
+            try { firestore.collection("global_app_state").document("current").set(globalPayload, com.google.firebase.firestore.SetOptions.merge()) } catch (_: Exception) {}
+            GlobalErrorManager.emitSuccess("Tournament permanently deleted from all cloud channels!")
         } else {
             GlobalErrorManager.emitError("Failed to delete tournament: ${lastError?.message ?: "Unknown error"}", lastError)
         }
@@ -4024,8 +4811,22 @@ service cloud.firestore {
         val reportsRef = database.child("reports")
         reportsRef.addValueEventListener(legacyComplaintsListener)
 
+        val problemRef = database.child("problem_reports")
+        problemRef.addValueEventListener(legacyComplaintsListener)
+
         val fsTicketsListener = try {
             firestore.collection("support_tickets").addSnapshotListener { snapshot, error ->
+                if (error == null && snapshot != null) {
+                    snapshot.documents.mapNotNull { it.toSupportTicket() }.forEach { ticket ->
+                        if (ticket.id.isNotBlank()) ticketsMap[ticket.id] = ticket
+                    }
+                    emitCombined()
+                }
+            }
+        } catch (_: Exception) { null }
+
+        val fsProblemListener = try {
+            firestore.collection("problem_reports").addSnapshotListener { snapshot, error ->
                 if (error == null && snapshot != null) {
                     snapshot.documents.mapNotNull { it.toSupportTicket() }.forEach { ticket ->
                         if (ticket.id.isNotBlank()) ticketsMap[ticket.id] = ticket
@@ -4061,7 +4862,9 @@ service cloud.firestore {
             rtdbRef.removeEventListener(rtdbListener)
             legacyRef.removeEventListener(legacyComplaintsListener)
             reportsRef.removeEventListener(legacyComplaintsListener)
+            problemRef.removeEventListener(legacyComplaintsListener)
             fsTicketsListener?.remove()
+            fsProblemListener?.remove()
             fsComplaintsListener?.remove()
             fsReportsListener?.remove()
         }
@@ -4069,10 +4872,13 @@ service cloud.firestore {
 
     suspend fun updateSupportTicket(ticket: SupportTicket) {
         try {
-            ticket.updatedAt = System.currentTimeMillis()
-            val userId = if (ticket.userEmail.isNotBlank()) "USR_${ticket.userEmail.hashCode()}" else ticket.id
+            val now = System.currentTimeMillis()
+            ticket.updatedAt = now
+            val userId = ticket.userId.ifBlank { if (ticket.userEmail.isNotBlank()) "USR_${ticket.userEmail.hashCode()}" else ticket.id }
+            val replyText = ticket.adminNote.ifBlank { ticket.adminReply }
             val payload = mapOf(
                 "id" to ticket.id,
+                "ticketId" to ticket.id,
                 "userId" to userId,
                 "userEmail" to ticket.userEmail,
                 "user_email" to ticket.userEmail,
@@ -4081,8 +4887,8 @@ service cloud.firestore {
                 "username" to ticket.username,
                 "freeFireId" to ticket.gameId,
                 "gameId" to ticket.gameId,
-                "subject" to ticket.tournamentTitle.ifBlank { "Support Ticket" },
-                "tournamentTitle" to ticket.tournamentTitle.ifBlank { "Support Ticket" },
+                "subject" to ticket.tournamentTitle.ifBlank { ticket.subject.ifBlank { "Support Ticket" } },
+                "tournamentTitle" to ticket.tournamentTitle.ifBlank { ticket.subject.ifBlank { "Support Ticket" } },
                 "category" to ticket.issueCategory,
                 "issueCategory" to ticket.issueCategory,
                 "description" to ticket.description,
@@ -4090,19 +4896,49 @@ service cloud.firestore {
                 "isHighPriority" to ticket.isHighPriority,
                 "status" to ticket.status,
                 "createdAt" to ticket.createdAt,
-                "updatedAt" to ticket.updatedAt,
-                "adminNote" to ticket.adminNote,
-                "admin_note" to ticket.adminNote,
+                "updatedAt" to now,
+                "repliedAt" to now,
+                "adminNote" to replyText,
+                "admin_note" to replyText,
+                "adminReply" to replyText,
                 "assignedTo" to ticket.assignedTo
             )
             database.child("support_tickets").child(ticket.id).updateChildren(payload).await()
+            database.child("reports").child(ticket.id).updateChildren(payload).await()
+            database.child("problem_reports").child(ticket.id).updateChildren(payload).await()
             database.child("complaints").child(ticket.id).updateChildren(payload).await()
+            try { database.child("admin_channels").child("support_tickets").child(ticket.id).updateChildren(payload).await() } catch (_: Exception) {}
+            try { firestore.collection("support_tickets").document(ticket.id).set(payload, com.google.firebase.firestore.SetOptions.merge()).await() } catch (_: Exception) {}
+            try { firestore.collection("reports").document(ticket.id).set(payload, com.google.firebase.firestore.SetOptions.merge()).await() } catch (_: Exception) {}
+            try { firestore.collection("problem_reports").document(ticket.id).set(payload, com.google.firebase.firestore.SetOptions.merge()).await() } catch (_: Exception) {}
+            try { firestore.collection("complaints").document(ticket.id).set(payload, com.google.firebase.firestore.SetOptions.merge()).await() } catch (_: Exception) {}
+            try { firestore.collection("admin_channels").document("support_tickets").collection("items").document(ticket.id).set(payload, com.google.firebase.firestore.SetOptions.merge()).await() } catch (_: Exception) {}
             try {
-                firestore.collection("support_tickets").document(ticket.id).set(payload).await()
-            } catch (ignored: Exception) {}
-            try {
-                firestore.collection("complaints").document(ticket.id).set(payload).await()
-            } catch (ignored: Exception) {}
+                val globalState = mapOf(
+                    "eventType" to "SUPPORT_TICKET_REPLIED",
+                    "source" to "ADMIN_PANEL",
+                    "tournamentId" to "",
+                    "affectedUserId" to userId,
+                    "timestamp" to now,
+                    "payload" to mapOf("ticketId" to ticket.id, "status" to ticket.status, "adminReply" to replyText)
+                )
+                database.child("global_app_state").setValue(globalState).await()
+                firestore.collection("global_app_state").document("current").set(globalState, com.google.firebase.firestore.SetOptions.merge()).await()
+            } catch (_: Exception) {}
+
+            if (userId.isNotBlank() && replyText.isNotBlank()) {
+                val notifId = "notif_sup_${now}"
+                val notifMap = mapOf(
+                    "id" to notifId,
+                    "title" to "Support Ticket Update (#${ticket.id.takeLast(6)})",
+                    "message" to "Admin replied: $replyText (Status: ${ticket.status})",
+                    "type" to "SUPPORT",
+                    "timestamp" to now,
+                    "isRead" to false
+                )
+                try { database.child("notifications").child(userId).child(notifId).setValue(notifMap).await() } catch (_: Exception) {}
+                try { firestore.collection("users").document(userId).collection("notifications").document(notifId).set(notifMap).await() } catch (_: Exception) {}
+            }
         } catch (e: Exception) {
             e.printStackTrace()
             GlobalErrorManager.emitError("Failed to update ticket: ${e.message}")
@@ -4112,13 +4948,12 @@ service cloud.firestore {
     suspend fun deleteSupportTicket(ticketId: String) {
         try {
             database.child("support_tickets").child(ticketId).removeValue().await()
+            database.child("problem_reports").child(ticketId).removeValue().await()
             database.child("complaints").child(ticketId).removeValue().await()
-            try {
-                firestore.collection("support_tickets").document(ticketId).delete().await()
-            } catch (ignored: Exception) {}
-            try {
-                firestore.collection("complaints").document(ticketId).delete().await()
-            } catch (ignored: Exception) {}
+            try { database.child("admin_channels").child("support_tickets").child(ticketId).removeValue().await() } catch (_: Exception) {}
+            try { firestore.collection("support_tickets").document(ticketId).delete().await() } catch (_: Exception) {}
+            try { firestore.collection("problem_reports").document(ticketId).delete().await() } catch (_: Exception) {}
+            try { firestore.collection("complaints").document(ticketId).delete().await() } catch (_: Exception) {}
         } catch (e: Exception) {
             e.printStackTrace()
             GlobalErrorManager.emitError("Failed to delete ticket: ${e.message}")
@@ -4238,16 +5073,20 @@ service cloud.firestore {
             success = true
         } catch (_: Exception) {}
 
-        // 3. Update ticket metadata (updatedAt, adminNote, status = in_progress)
+        // 3. Update ticket metadata (updatedAt, adminNote, adminReply, repliedAt, status = in_progress)
         try {
             val ticketUpdates = mapOf<String, Any>(
                 "updatedAt" to now,
+                "repliedAt" to now,
                 "adminNote" to cleanMsg,
-                "status" to "in_progress"
+                "adminReply" to cleanMsg,
+                "status" to "IN_PROGRESS"
             )
             database.child("support_tickets").child(ticketId).updateChildren(ticketUpdates).await()
+            database.child("problem_reports").child(ticketId).updateChildren(ticketUpdates).await()
             database.child("complaints").child(ticketId).updateChildren(ticketUpdates).await()
             try { firestore.collection("support_tickets").document(ticketId).update(ticketUpdates).await() } catch (_: Exception) {}
+            try { firestore.collection("problem_reports").document(ticketId).update(ticketUpdates).await() } catch (_: Exception) {}
             try { firestore.collection("complaints").document(ticketId).update(ticketUpdates).await() } catch (_: Exception) {}
         } catch (_: Exception) {}
 
@@ -4257,13 +5096,17 @@ service cloud.firestore {
     suspend fun getLivePayoutRequestsStream(): Flow<List<PayoutRequest>> = callbackFlow {
         val payoutsMap = mutableMapOf<String, PayoutRequest>()
 
+        try {
+            ensureAuthenticatedSession(activeAdminEmail)
+        } catch (_: Exception) {}
+
         fun emitPayouts() {
             trySend(payoutsMap.values.toList().sortedByDescending { it.requestedAt })
         }
 
         emitPayouts()
 
-        val rtdbNodes = listOf("payout_requests", "withdrawals", "withdraw_requests", "deposit_requests", "wallet_requests")
+        val rtdbNodes = listOf("withdrawal_requests", "payout_requests", "withdrawals", "withdraw_requests", "deposit_requests", "wallet_requests")
         rtdbNodes.forEach { nodeName ->
             database.child(nodeName).get().addOnSuccessListener { snapshot ->
                 snapshot.children.mapNotNull { it.toPayoutRequest() }.forEach { req ->
@@ -4315,24 +5158,85 @@ service cloud.firestore {
     suspend fun approvePayout(request: PayoutRequest, adminEmail: String) {
         try {
             val now = System.currentTimeMillis()
+            val reqAmount = request.vtAmount.toDouble()
+
+            // Strictly enforce that withdrawals ONLY come from Winning Money (winningFunds / winningsBalance) and clear lockedBalance
+            if (request.uid.isNotBlank()) {
+                val userRef = database.child("users").child(request.uid)
+                val snap = userRef.get().await()
+                val currentDeposit = safeDouble(snap.child("depositBalance").value ?: snap.child("depositFunds").value ?: snap.child("deposit_funds").value)
+                val currentWinning = safeDouble(snap.child("winningsBalance").value ?: snap.child("winningFunds").value ?: snap.child("winning_funds").value)
+                val currentBonus = safeDouble(snap.child("bonusBalance").value ?: snap.child("bonusFunds").value ?: snap.child("bonus_funds").value)
+                val currentLocked = safeDouble(snap.child("lockedBalance").value)
+                val currentVersion = safeInt(snap.child("version").value, 1)
+                val currentTotalWithdrawn = safeDouble(snap.child("totalWithdrawn").value ?: snap.child("walletAndFinanceSummary").child("totalWithdrawn").value)
+
+                // If funds were already moved into lockedBalance by the user app, clear lockedBalance; otherwise deduct from winningFunds
+                val updatedWinning = if (currentLocked >= reqAmount) {
+                    currentWinning.coerceAtLeast(0.0)
+                } else if (currentWinning >= reqAmount) {
+                    (currentWinning - reqAmount).coerceAtLeast(0.0)
+                } else {
+                    currentWinning.coerceAtLeast(0.0)
+                }
+                val updatedLocked = (currentLocked - reqAmount).coerceAtLeast(0.0)
+                val updatedTotal = (currentDeposit + updatedWinning + currentBonus).coerceAtLeast(0.0)
+                val updatedWithdrawn = currentTotalWithdrawn + reqAmount
+
+                val walletUpdates = mapOf<String, Any>(
+                    "depositBalance" to currentDeposit,
+                    "depositFunds" to currentDeposit,
+                    "deposit_funds" to currentDeposit,
+                    "winningsBalance" to updatedWinning,
+                    "winningFunds" to updatedWinning,
+                    "winning_funds" to updatedWinning,
+                    "bonusBalance" to currentBonus,
+                    "bonusFunds" to currentBonus,
+                    "bonus_funds" to currentBonus,
+                    "lockedBalance" to updatedLocked,
+                    "withdrawableBalance" to updatedWinning,
+                    "nonWithdrawableBalance" to (currentDeposit + currentBonus),
+                    "totalWithdrawn" to updatedWithdrawn,
+                    "balance" to updatedTotal,
+                    "funds" to updatedTotal,
+                    "walletBalance" to updatedTotal,
+                    "version" to (currentVersion + 1),
+                    "updatedAt" to now,
+                    "lastActive" to now
+                )
+                try { userRef.updateChildren(walletUpdates).await() } catch (_: Exception) {}
+                try { database.child("userProfiles").child(request.uid).updateChildren(walletUpdates).await() } catch (_: Exception) {}
+                try { database.child("players").child(request.uid).updateChildren(walletUpdates).await() } catch (_: Exception) {}
+                try { database.child("wallet_accounts").child(request.uid).updateChildren(walletUpdates).await() } catch (_: Exception) {}
+                try { firestore.collection("users").document(request.uid).set(walletUpdates, com.google.firebase.firestore.SetOptions.merge()).await() } catch (_: Exception) {}
+            }
+
             val payload = mapOf(
                 "id" to request.id,
                 "requestId" to request.id,
                 "userId" to request.uid,
+                "username" to request.username,
                 "userName" to request.username,
                 "amount" to request.vtAmount,
+                "walletBucket" to "WINNING",
+                "withdrawnFromBucket" to "WINNING_MONEY",
                 "payoutMethod" to request.paymentMethod,
+                "method" to request.paymentMethod,
                 "accountDetails" to request.paymentId,
-                "status" to "approved",
+                "upiId" to request.paymentId,
+                "status" to "APPROVED",
                 "createdAt" to request.requestedAt,
+                "requestedAt" to request.requestedAt,
                 "processedAt" to now,
                 "processedBy" to adminEmail
             )
-            val targets = listOf("payout_requests", "withdrawals", "withdraw_requests", "wallet_requests")
+            val targets = listOf("withdrawal_requests", "payout_requests", "withdrawals", "withdraw_requests", "wallet_requests")
             targets.forEach { target ->
                 try { database.child(target).child(request.id).updateChildren(payload).await() } catch (_: Exception) {}
-                try { firestore.collection(target).document(request.id).set(payload).await() } catch (_: Exception) {}
+                try { firestore.collection(target).document(request.id).set(payload, com.google.firebase.firestore.SetOptions.merge()).await() } catch (_: Exception) {}
             }
+            try { database.child("admin_channels").child("withdrawal_requests").child(request.id).updateChildren(payload).await() } catch (_: Exception) {}
+            try { firestore.collection("admin_channels").document("withdrawal_requests").collection("items").document(request.id).set(payload, com.google.firebase.firestore.SetOptions.merge()).await() } catch (_: Exception) {}
 
             if (request.uid.isNotBlank()) {
                 try { database.child("users").child(request.uid).child("withdraw_requests").child(request.id).updateChildren(payload).await() } catch (_: Exception) {}
@@ -4344,17 +5248,32 @@ service cloud.firestore {
                     "userId" to request.uid,
                     "amount" to request.vtAmount,
                     "type" to "WITHDRAWAL",
+                    "walletBucket" to "WINNING",
                     "timestamp" to now,
-                    "status" to "SUCCESS",
+                    "status" to "COMPLETED",
                     "referenceId" to request.id,
-                    "description" to "Payout approved via ${request.paymentMethod} (${request.paymentId})"
+                    "description" to "Winning Money Payout approved via ${request.paymentMethod} (${request.paymentId})"
                 )
+                try { database.child("transactions").child(request.uid).child(request.id).updateChildren(mapOf("status" to "COMPLETED", "processedAt" to now)).await() } catch (_: Exception) {}
                 try { database.child("transactions").child(txId).setValue(txPayload).await() } catch (_: Exception) {}
                 try { database.child("wallet_transactions").child(request.uid).child(txId).setValue(txPayload).await() } catch (_: Exception) {}
+                try { firestore.collection("transactions").document(request.id).set(txPayload, com.google.firebase.firestore.SetOptions.merge()).await() } catch (_: Exception) {}
                 try { firestore.collection("transactions").document(txId).set(txPayload).await() } catch (_: Exception) {}
+
+                val notifId = "notif_wd_ok_${now}"
+                val notifMap = mapOf(
+                    "id" to notifId,
+                    "title" to "Withdrawal Approved!",
+                    "message" to "Your payout of ₹${request.vtAmount.toInt()} via ${request.paymentMethod} (${request.paymentId}) has been processed!",
+                    "type" to "WALLET",
+                    "timestamp" to now,
+                    "isRead" to false
+                )
+                try { database.child("notifications").child(request.uid).child(notifId).setValue(notifMap).await() } catch (_: Exception) {}
+                try { firestore.collection("users").document(request.uid).collection("notifications").document(notifId).set(notifMap).await() } catch (_: Exception) {}
             }
 
-            GlobalErrorManager.emitSuccess("Payout of ₹${request.vtAmount.toInt()} approved for ${request.username}!")
+            GlobalErrorManager.emitSuccess("Winning Money Payout of ₹${request.vtAmount.toInt()} approved for ${request.username}!")
 
             context?.let { ctx ->
                 val notif = VelorixNotificationManager.dispatchPayoutNotification(
@@ -4362,7 +5281,8 @@ service cloud.firestore {
                     username = request.username,
                     amount = request.vtAmount.toDouble(),
                     approved = true,
-                    details = "${request.paymentMethod} (${request.paymentId})"
+                    details = "${request.paymentMethod} (${request.paymentId})",
+                    targetUserId = request.uid
                 )
                 syncNotificationToCloud(notif)
             }
@@ -4378,31 +5298,60 @@ service cloud.firestore {
                 "id" to request.id,
                 "requestId" to request.id,
                 "userId" to request.uid,
+                "username" to request.username,
                 "userName" to request.username,
                 "amount" to request.vtAmount,
+                "walletBucket" to "WINNING",
                 "payoutMethod" to request.paymentMethod,
+                "method" to request.paymentMethod,
                 "accountDetails" to request.paymentId,
-                "status" to "rejected",
+                "upiId" to request.paymentId,
+                "status" to "REJECTED",
                 "rejectionReason" to rejectionReason,
                 "createdAt" to request.requestedAt,
+                "requestedAt" to request.requestedAt,
                 "processedAt" to now,
                 "processedBy" to adminEmail
             )
-            val targets = listOf("payout_requests", "withdrawals", "withdraw_requests", "wallet_requests")
+            val targets = listOf("withdrawal_requests", "payout_requests", "withdrawals", "withdraw_requests", "wallet_requests")
             targets.forEach { target ->
                 try { database.child(target).child(request.id).updateChildren(payload).await() } catch (_: Exception) {}
-                try { firestore.collection(target).document(request.id).set(payload).await() } catch (_: Exception) {}
+                try { firestore.collection(target).document(request.id).set(payload, com.google.firebase.firestore.SetOptions.merge()).await() } catch (_: Exception) {}
             }
+            try { database.child("admin_channels").child("withdrawal_requests").child(request.id).updateChildren(payload).await() } catch (_: Exception) {}
+            try { firestore.collection("admin_channels").document("withdrawal_requests").collection("items").document(request.id).set(payload, com.google.firebase.firestore.SetOptions.merge()).await() } catch (_: Exception) {}
 
-            // Refund user balance
+            // Refund strictly to Winning Money (winningsBalance / winningFunds) and clear lockedBalance
             if (request.uid.isNotBlank()) {
                 val userRef = database.child("users").child(request.uid)
                 val snap = userRef.get().await()
-                val currentFunds = safeDouble(snap.child("balance").value ?: snap.child("funds").value)
-                val updatedBalance = currentFunds + request.vtAmount
-                userRef.child("balance").setValue(updatedBalance).await()
-                userRef.child("funds").setValue(updatedBalance).await()
-                try { firestore.collection("users").document(request.uid).update("balance", updatedBalance).await() } catch (_: Exception) {}
+                val currentDeposit = safeDouble(snap.child("depositBalance").value ?: snap.child("depositFunds").value ?: snap.child("deposit_funds").value)
+                val currentWinning = safeDouble(snap.child("winningsBalance").value ?: snap.child("winningFunds").value ?: snap.child("winning_funds").value)
+                val currentBonus = safeDouble(snap.child("bonusBalance").value ?: snap.child("bonusFunds").value ?: snap.child("bonus_funds").value)
+                val currentLocked = safeDouble(snap.child("lockedBalance").value)
+                val currentVersion = safeInt(snap.child("version").value, 1)
+                val updatedWinning = currentWinning + request.vtAmount
+                val updatedLocked = (currentLocked - request.vtAmount).coerceAtLeast(0.0)
+                val updatedBalance = currentDeposit + updatedWinning + currentBonus
+
+                val refundUpdates = mapOf<String, Any>(
+                    "winningsBalance" to updatedWinning,
+                    "winningFunds" to updatedWinning,
+                    "winning_funds" to updatedWinning,
+                    "withdrawableBalance" to updatedWinning,
+                    "lockedBalance" to updatedLocked,
+                    "balance" to updatedBalance,
+                    "funds" to updatedBalance,
+                    "walletBalance" to updatedBalance,
+                    "version" to (currentVersion + 1),
+                    "updatedAt" to now,
+                    "lastActive" to now
+                )
+                userRef.updateChildren(refundUpdates).await()
+                try { database.child("userProfiles").child(request.uid).updateChildren(refundUpdates).await() } catch (_: Exception) {}
+                try { database.child("players").child(request.uid).updateChildren(refundUpdates).await() } catch (_: Exception) {}
+                try { database.child("wallet_accounts").child(request.uid).updateChildren(refundUpdates).await() } catch (_: Exception) {}
+                try { firestore.collection("users").document(request.uid).set(refundUpdates, com.google.firebase.firestore.SetOptions.merge()).await() } catch (_: Exception) {}
                 try { database.child("users").child(request.uid).child("withdraw_requests").child(request.id).updateChildren(payload).await() } catch (_: Exception) {}
                 try { firestore.collection("users").document(request.uid).collection("withdraw_requests").document(request.id).set(payload).await() } catch (_: Exception) {}
 
@@ -4412,17 +5361,32 @@ service cloud.firestore {
                     "userId" to request.uid,
                     "amount" to request.vtAmount,
                     "type" to "REFUND",
+                    "walletBucket" to "WINNING",
                     "timestamp" to now,
-                    "status" to "SUCCESS",
+                    "status" to "REFUNDED",
                     "referenceId" to request.id,
-                    "description" to "Payout rejected & refunded: $rejectionReason"
+                    "description" to "Payout rejected & refunded to Winning Balance: $rejectionReason"
                 )
+                try { database.child("transactions").child(request.uid).child(request.id).updateChildren(mapOf("status" to "REFUNDED", "processedAt" to now)).await() } catch (_: Exception) {}
                 try { database.child("transactions").child(txId).setValue(txPayload).await() } catch (_: Exception) {}
                 try { database.child("wallet_transactions").child(request.uid).child(txId).setValue(txPayload).await() } catch (_: Exception) {}
+                try { firestore.collection("transactions").document(request.id).set(txPayload, com.google.firebase.firestore.SetOptions.merge()).await() } catch (_: Exception) {}
                 try { firestore.collection("transactions").document(txId).set(txPayload).await() } catch (_: Exception) {}
+
+                val notifId = "notif_wd_rej_${now}"
+                val notifMap = mapOf(
+                    "id" to notifId,
+                    "title" to "Withdrawal Rejected & Refunded",
+                    "message" to "Your withdrawal of ₹${request.vtAmount.toInt()} was rejected ($rejectionReason). Funds have been refunded to your Winnings Balance.",
+                    "type" to "WALLET",
+                    "timestamp" to now,
+                    "isRead" to false
+                )
+                try { database.child("notifications").child(request.uid).child(notifId).setValue(notifMap).await() } catch (_: Exception) {}
+                try { firestore.collection("users").document(request.uid).collection("notifications").document(notifId).set(notifMap).await() } catch (_: Exception) {}
             }
 
-            GlobalErrorManager.emitSuccess("Payout rejected and ₹${request.vtAmount.toInt()} refunded to ${request.username}.")
+            GlobalErrorManager.emitSuccess("Payout rejected and ₹${request.vtAmount.toInt()} refunded to ${request.username}'s Winning Balance.")
 
             context?.let { ctx ->
                 val notif = VelorixNotificationManager.dispatchPayoutNotification(
@@ -4430,7 +5394,8 @@ service cloud.firestore {
                     username = request.username,
                     amount = request.vtAmount.toDouble(),
                     approved = false,
-                    details = rejectionReason
+                    details = rejectionReason,
+                    targetUserId = request.uid
                 )
                 syncNotificationToCloud(notif)
             }
@@ -4446,31 +5411,144 @@ service cloud.firestore {
                 "id" to request.id,
                 "requestId" to request.id,
                 "userId" to request.uid,
+                "username" to request.username,
                 "userName" to request.username,
                 "amount" to request.vtAmount,
+                "walletBucket" to "DEPOSIT",
+                "withdrawable" to false,
                 "utrNumber" to request.paymentId,
                 "paymentRef" to request.paymentId,
-                "paymentMethod" to "UPI_MANUAL_UTR",
+                "paymentMethod" to request.paymentMethod.ifBlank { "UPI_MANUAL_UTR" },
                 "status" to "APPROVED",
                 "processedAt" to now,
                 "processedBy" to adminEmail
             )
             try { database.child("deposit_requests").child(request.id).updateChildren(payload).await() } catch (_: Exception) {}
             try { database.child("wallet_requests").child(request.id).updateChildren(payload).await() } catch (_: Exception) {}
-            try { firestore.collection("deposit_requests").document(request.id).set(payload).await() } catch (_: Exception) {}
-            try { firestore.collection("wallet_requests").document(request.id).set(payload).await() } catch (_: Exception) {}
+            try { database.child("admin_channels").child("deposit_requests").child(request.id).updateChildren(payload).await() } catch (_: Exception) {}
+            try { firestore.collection("deposit_requests").document(request.id).set(payload, com.google.firebase.firestore.SetOptions.merge()).await() } catch (_: Exception) {}
+            try { firestore.collection("wallet_requests").document(request.id).set(payload, com.google.firebase.firestore.SetOptions.merge()).await() } catch (_: Exception) {}
+            try { firestore.collection("admin_channels").document("deposit_requests").collection("items").document(request.id).set(payload, com.google.firebase.firestore.SetOptions.merge()).await() } catch (_: Exception) {}
 
-            // Credit balance
+            // Credit strictly into Deposited Money (depositBalance / depositFunds - non-withdrawable)
             if (request.uid.isNotBlank()) {
                 val userRef = database.child("users").child(request.uid)
                 val snap = userRef.get().await()
-                val currentFunds = safeDouble(snap.child("balance").value ?: snap.child("funds").value)
-                val updatedBalance = currentFunds + request.vtAmount
-                userRef.child("balance").setValue(updatedBalance).await()
-                userRef.child("funds").setValue(updatedBalance).await()
-                try { firestore.collection("users").document(request.uid).update("balance", updatedBalance).await() } catch (_: Exception) {}
+                val currentDeposit = safeDouble(snap.child("depositBalance").value ?: snap.child("depositFunds").value ?: snap.child("deposit_funds").value)
+                val currentWinning = safeDouble(snap.child("winningsBalance").value ?: snap.child("winningFunds").value ?: snap.child("winning_funds").value)
+                val currentBonus = safeDouble(snap.child("bonusBalance").value ?: snap.child("bonusFunds").value ?: snap.child("bonus_funds").value)
+                val currentLegacy = safeDouble(snap.child("balance").value ?: snap.child("funds").value)
+                val currentVersion = safeInt(snap.child("version").value, 1)
+                val currentTotalDeposited = safeDouble(snap.child("totalDeposited").value ?: snap.child("walletAndFinanceSummary").child("totalDeposited").value)
+                val referredByCodeOrUid = snap.child("referredBy").value?.toString()?.trim() ?: ""
+
+                val baseDeposit = if (currentDeposit == 0.0 && currentWinning == 0.0 && currentBonus == 0.0 && currentLegacy > 0.0) currentLegacy else currentDeposit
+                val updatedDeposit = baseDeposit + request.vtAmount
+                val updatedBalance = updatedDeposit + currentWinning + currentBonus
+                val updatedTotalDeposited = maxOf(currentTotalDeposited, baseDeposit) + request.vtAmount
+
+                val depUpdates = mapOf<String, Any>(
+                    "depositBalance" to updatedDeposit,
+                    "depositFunds" to updatedDeposit,
+                    "deposit_funds" to updatedDeposit,
+                    "winningsBalance" to currentWinning,
+                    "winningFunds" to currentWinning,
+                    "winning_funds" to currentWinning,
+                    "bonusBalance" to currentBonus,
+                    "bonusFunds" to currentBonus,
+                    "bonus_funds" to currentBonus,
+                    "withdrawableBalance" to currentWinning,
+                    "nonWithdrawableBalance" to (updatedDeposit + currentBonus),
+                    "totalDeposited" to updatedTotalDeposited,
+                    "balance" to updatedBalance,
+                    "funds" to updatedBalance,
+                    "walletBalance" to updatedBalance,
+                    "version" to (currentVersion + 1),
+                    "updatedAt" to now,
+                    "lastActive" to now
+                )
+                userRef.updateChildren(depUpdates).await()
+                try { database.child("userProfiles").child(request.uid).updateChildren(depUpdates).await() } catch (_: Exception) {}
+                try { database.child("players").child(request.uid).updateChildren(depUpdates).await() } catch (_: Exception) {}
+                try { database.child("wallet_accounts").child(request.uid).updateChildren(depUpdates).await() } catch (_: Exception) {}
+                try { firestore.collection("users").document(request.uid).set(depUpdates, com.google.firebase.firestore.SetOptions.merge()).await() } catch (_: Exception) {}
                 try { database.child("users").child(request.uid).child("deposit_requests").child(request.id).updateChildren(payload).await() } catch (_: Exception) {}
                 try { firestore.collection("users").document(request.uid).collection("deposit_requests").document(request.id).set(payload).await() } catch (_: Exception) {}
+
+                val userNotifId = "notif_dep_ok_${now}"
+                val userNotifMap = mapOf(
+                    "id" to userNotifId,
+                    "title" to "Deposit Approved!",
+                    "message" to "₹${request.vtAmount.toInt()} VT has been verified and credited to your Deposit Balance.",
+                    "type" to "WALLET",
+                    "timestamp" to now,
+                    "isRead" to false
+                )
+                try { database.child("notifications").child(request.uid).child(userNotifId).setValue(userNotifMap).await() } catch (_: Exception) {}
+                try { firestore.collection("users").document(request.uid).collection("notifications").document(userNotifId).set(userNotifMap).await() } catch (_: Exception) {}
+
+                // Referral Commission Check (10%–15% tier commission on deposit amount)
+                if (referredByCodeOrUid.isNotBlank()) {
+                    try {
+                        val allUsersSnap = database.child("users").get().await()
+                        var referrerSnap: DataSnapshot? = null
+                        for (uChild in allUsersSnap.children) {
+                            val uKey = uChild.key ?: ""
+                            val rCode = uChild.child("referralCode").value?.toString()?.trim() ?: ""
+                            if (uKey != request.uid && (uKey == referredByCodeOrUid || (rCode.isNotBlank() && rCode.equals(referredByCodeOrUid, true)))) {
+                                referrerSnap = uChild
+                                break
+                            }
+                        }
+                        if (referrerSnap != null) {
+                            val refUid = referrerSnap.key ?: ""
+                            val refCount = safeInt(referrerSnap.child("referralCount").value, 1)
+                            val commissionRate = when {
+                                refCount >= 25 -> 0.15 // 15% Diamond Tier
+                                refCount >= 10 -> 0.12 // 12% Gold Tier
+                                else -> 0.10           // 10% Standard Tier
+                            }
+                            val commissionVt = (request.vtAmount * commissionRate * 100.0).toInt() / 100.0
+                            if (commissionVt > 0.0 && refUid.isNotBlank()) {
+                                val rDep = safeDouble(referrerSnap.child("depositBalance").value ?: referrerSnap.child("depositFunds").value)
+                                val rWin = safeDouble(referrerSnap.child("winningsBalance").value ?: referrerSnap.child("winningFunds").value)
+                                val rBon = safeDouble(referrerSnap.child("bonusBalance").value ?: referrerSnap.child("bonusFunds").value)
+                                val rEarned = safeDouble(referrerSnap.child("referralEarnings").value ?: referrerSnap.child("referralBonusEarned").value)
+                                val rVer = safeInt(referrerSnap.child("version").value, 1)
+                                val newRBon = rBon + commissionVt
+                                val newRTotal = rDep + rWin + newRBon
+                                val newREarned = rEarned + commissionVt
+                                val refUpdates = mapOf<String, Any>(
+                                    "bonusBalance" to newRBon,
+                                    "bonusFunds" to newRBon,
+                                    "bonus_funds" to newRBon,
+                                    "referralBonus" to newRBon,
+                                    "referralEarnings" to newREarned,
+                                    "referralBonusEarned" to newREarned,
+                                    "balance" to newRTotal,
+                                    "funds" to newRTotal,
+                                    "version" to (rVer + 1),
+                                    "updatedAt" to now
+                                )
+                                try { database.child("users").child(refUid).updateChildren(refUpdates).await() } catch (_: Exception) {}
+                                try { database.child("userProfiles").child(refUid).updateChildren(refUpdates).await() } catch (_: Exception) {}
+                                try { firestore.collection("users").document(refUid).set(refUpdates, com.google.firebase.firestore.SetOptions.merge()).await() } catch (_: Exception) {}
+
+                                val refNotifId = "notif_ref_comm_${now}"
+                                val refNotif = mapOf(
+                                    "id" to refNotifId,
+                                    "title" to "Referral Commission Earned!",
+                                    "message" to "You earned +₹$commissionVt Referral Bonus (${(commissionRate * 100).toInt()}% commission) from ${request.username}'s deposit!",
+                                    "type" to "REFERRAL",
+                                    "timestamp" to now,
+                                    "isRead" to false
+                                )
+                                try { database.child("notifications").child(refUid).child(refNotifId).setValue(refNotif).await() } catch (_: Exception) {}
+                                try { firestore.collection("users").document(refUid).collection("notifications").document(refNotifId).set(refNotif).await() } catch (_: Exception) {}
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }
             }
 
             val cleanUtr = request.paymentId.trim()
@@ -4478,6 +5556,7 @@ service cloud.firestore {
                 val utrPayload = mapOf(
                     "userId" to request.uid,
                     "amount" to request.vtAmount,
+                    "walletBucket" to "DEPOSIT",
                     "verifiedAt" to now,
                     "requestId" to request.id,
                     "verifiedBy" to adminEmail
@@ -4492,15 +5571,19 @@ service cloud.firestore {
                 "userId" to request.uid,
                 "amount" to request.vtAmount,
                 "type" to "DEPOSIT",
-                "status" to "SUCCESS",
+                "walletBucket" to "DEPOSIT",
+                "withdrawable" to false,
+                "status" to "COMPLETED",
                 "timestamp" to now,
-                "description" to "Manual UTR Deposit verified (Ref: $cleanUtr)"
+                "description" to "Manual UTR Deposit verified into Deposited Money [Non-Withdrawable] (Ref: $cleanUtr)"
             )
+            try { database.child("transactions").child(request.uid).child(request.id).updateChildren(mapOf("status" to "COMPLETED", "processedAt" to now)).await() } catch (_: Exception) {}
             try { database.child("transactions").child(txId).setValue(txPayload).await() } catch (_: Exception) {}
             try { database.child("wallet_transactions").child(request.uid).child(txId).setValue(txPayload).await() } catch (_: Exception) {}
+            try { firestore.collection("transactions").document(request.id).set(txPayload, com.google.firebase.firestore.SetOptions.merge()).await() } catch (_: Exception) {}
             try { firestore.collection("transactions").document(txId).set(txPayload).await() } catch (_: Exception) {}
 
-            GlobalErrorManager.emitSuccess("Deposit of ₹${request.vtAmount.toInt()} verified & credited to ${request.username}!")
+            GlobalErrorManager.emitSuccess("Deposit of ₹${request.vtAmount.toInt()} verified & credited to ${request.username}'s Deposited Balance!")
         } catch (e: Exception) {
             GlobalErrorManager.emitError("Failed to approve deposit: ${e.message}", e)
         }
@@ -4513,6 +5596,7 @@ service cloud.firestore {
                 "id" to request.id,
                 "requestId" to request.id,
                 "userId" to request.uid,
+                "username" to request.username,
                 "userName" to request.username,
                 "amount" to request.vtAmount,
                 "utrNumber" to request.paymentId,
@@ -4524,11 +5608,24 @@ service cloud.firestore {
             )
             try { database.child("deposit_requests").child(request.id).updateChildren(payload).await() } catch (_: Exception) {}
             try { database.child("wallet_requests").child(request.id).updateChildren(payload).await() } catch (_: Exception) {}
-            try { firestore.collection("deposit_requests").document(request.id).set(payload).await() } catch (_: Exception) {}
-            try { firestore.collection("wallet_requests").document(request.id).set(payload).await() } catch (_: Exception) {}
+            try { database.child("admin_channels").child("deposit_requests").child(request.id).updateChildren(payload).await() } catch (_: Exception) {}
+            try { firestore.collection("deposit_requests").document(request.id).set(payload, com.google.firebase.firestore.SetOptions.merge()).await() } catch (_: Exception) {}
+            try { firestore.collection("wallet_requests").document(request.id).set(payload, com.google.firebase.firestore.SetOptions.merge()).await() } catch (_: Exception) {}
+            try { firestore.collection("admin_channels").document("deposit_requests").collection("items").document(request.id).set(payload, com.google.firebase.firestore.SetOptions.merge()).await() } catch (_: Exception) {}
             if (request.uid.isNotBlank()) {
                 try { database.child("users").child(request.uid).child("deposit_requests").child(request.id).updateChildren(payload).await() } catch (_: Exception) {}
                 try { firestore.collection("users").document(request.uid).collection("deposit_requests").document(request.id).set(payload).await() } catch (_: Exception) {}
+                val notifId = "notif_dep_rej_${now}"
+                val notifMap = mapOf(
+                    "id" to notifId,
+                    "title" to "Deposit Request Rejected",
+                    "message" to "Your deposit request of ₹${request.vtAmount.toInt()} (UTR: ${request.paymentId}) was rejected: $rejectionReason",
+                    "type" to "WALLET",
+                    "timestamp" to now,
+                    "isRead" to false
+                )
+                try { database.child("notifications").child(request.uid).child(notifId).setValue(notifMap).await() } catch (_: Exception) {}
+                try { firestore.collection("users").document(request.uid).collection("notifications").document(notifId).set(notifMap).await() } catch (_: Exception) {}
             }
             GlobalErrorManager.emitSuccess("Deposit request rejected.")
         } catch (e: Exception) {
@@ -4538,6 +5635,10 @@ service cloud.firestore {
 
     suspend fun getLiveAdminsStream(): Flow<List<AdminRecord>> = callbackFlow {
         val adminsMap = mutableMapOf<String, AdminRecord>()
+
+        try {
+            ensureAuthenticatedSession(activeAdminEmail)
+        } catch (_: Exception) {}
 
         fun emitAdmins() {
             val curr = auth.currentUser
@@ -5279,34 +6380,512 @@ service cloud.firestore {
         }
     }
 
+    /**
+     * Builds the comprehensive, structured database payload for a player (`accountLifecycle`,
+     * `combatAndMatchSummary`, `walletAndFinanceSummary`, and `joinedMatches`) so Firebase RTDB
+     * and Cloud Firestore contain dedicated sections for player join timestamps, match history,
+     * kills/winnings per match, and withdrawable vs non-withdrawable wallet buckets.
+     */
+    fun buildStructuredPlayerDatabaseMap(user: UserProfile): Map<String, Any> {
+        val now = System.currentTimeMillis()
+        val firstAppJoin = user.effectiveFirstAppJoinAt.takeIf { it > 0L } ?: now
+        val validJoinTimes = user.matchHistory.map { it.joinedAt }.filter { it > 0L }
+        val firstMatchJoin = when {
+            user.firstMatchJoinedAt > 0L && validJoinTimes.isNotEmpty() -> minOf(user.firstMatchJoinedAt, validJoinTimes.minOrNull()!!)
+            validJoinTimes.isNotEmpty() -> validJoinTimes.minOrNull()!!
+            else -> user.firstMatchJoinedAt
+        }
+        val lastMatchJoin = maxOf(user.lastMatchJoinedAt, validJoinTimes.maxOrNull() ?: 0L)
+        val joinedIds = (user.joinedMatchIds + user.matchHistory.map { it.tournamentId }).filter { it.isNotBlank() }.distinct()
+        val totalMatches = maxOf(user.totalMatchesJoined, joinedIds.size)
+        val hasJoinedMatch = totalMatches > 0 || firstMatchJoin > 0L
+
+        val depMoney = user.depositFunds.coerceAtLeast(0.0)
+        val winMoney = user.winningFunds.coerceAtLeast(0.0)
+        val bonMoney = user.bonusFunds.coerceAtLeast(0.0)
+        val totalWallet = (depMoney + winMoney + bonMoney).let { sum ->
+            if (sum > 0.0) sum else maxOf(user.funds, user.balance).coerceAtLeast(0.0)
+        }
+        val effectiveDepMoney = if (depMoney == 0.0 && winMoney == 0.0 && bonMoney == 0.0 && totalWallet > 0.0) totalWallet else depMoney
+
+        val totalDepositedLifetime = maxOf(user.totalDeposited, effectiveDepMoney)
+        val totalEntryFeesLifetime = maxOf(user.totalEntryFeesPaid, user.matchHistory.sumOf { it.entryFeePaid })
+        val totalEarningsLifetime = maxOf(user.totalEarnings, winMoney, user.matchHistory.sumOf { it.winningAmount })
+        val totalKillsLifetime = maxOf(user.kills, user.matchHistory.sumOf { it.kills })
+
+        val sdf = java.text.SimpleDateFormat("dd MMM yyyy, hh:mm a", java.util.Locale.getDefault())
+        val firstAppFormatted = if (firstAppJoin > 0L) sdf.format(java.util.Date(firstAppJoin)) else "Not Recorded"
+        val firstMatchFormatted = if (firstMatchJoin > 0L) sdf.format(java.util.Date(firstMatchJoin)) else "Never Joined Any Match"
+        val lastMatchFormatted = if (lastMatchJoin > 0L) sdf.format(java.util.Date(lastMatchJoin)) else "Never Joined Any Match"
+
+        val accountLifecycleSection = mapOf<String, Any>(
+            "firstAppJoinAt" to firstAppJoin,
+            "firstAppJoinFormatted" to firstAppFormatted,
+            "firstMatchJoinedAt" to firstMatchJoin,
+            "firstMatchJoinedFormatted" to firstMatchFormatted,
+            "lastMatchJoinedAt" to lastMatchJoin,
+            "lastMatchJoinedFormatted" to lastMatchFormatted,
+            "hasJoinedAnyMatch" to hasJoinedMatch,
+            "lastActiveAt" to now
+        )
+
+        val combatAndMatchSummarySection = mapOf<String, Any>(
+            "hasJoinedAnyMatch" to hasJoinedMatch,
+            "totalMatchesJoined" to totalMatches,
+            "joinedMatchIds" to joinedIds,
+            "kills" to totalKillsLifetime,
+            "totalKills" to totalKillsLifetime,
+            "wins" to user.wins,
+            "totalWins" to user.wins,
+            "supportCasesCount" to user.supportCasesCount,
+            "casesFiled" to user.supportCasesCount,
+            "activityPoints" to user.activityPoints
+        )
+
+        val referralBonusTotal = maxOf(user.referralBonusEarned, bonMoney)
+
+        val walletAndFinanceSummarySection = mapOf<String, Any>(
+            "depositedMoney" to effectiveDepMoney,
+            "depositFunds" to effectiveDepMoney,
+            "depositWithdrawable" to false,
+            "winningMoney" to winMoney,
+            "winningFunds" to winMoney,
+            "winningWithdrawable" to true,
+            "bonusMoney" to bonMoney,
+            "bonusFunds" to bonMoney,
+            "referralBonus" to bonMoney,
+            "referral_bonus" to bonMoney,
+            "referralBonusEarned" to referralBonusTotal,
+            "bonusWithdrawable" to false,
+            "withdrawableBalance" to winMoney,
+            "nonWithdrawableBalance" to (effectiveDepMoney + bonMoney),
+            "canSendWithdrawRequest" to (winMoney > 0.0 && !user.isBanned && !user.isSuspended),
+            "withdrawPolicyRule" to "ONLY_WINNING_MONEY_IS_WITHDRAWABLE_DEPOSITED_AND_REFERRAL_BONUS_LOCKED",
+            "totalWalletBalance" to totalWallet,
+            "totalDeposited" to totalDepositedLifetime,
+            "totalEarnings" to totalEarningsLifetime,
+            "totalWithdrawn" to user.totalWithdrawn,
+            "totalEntryFeesPaid" to totalEntryFeesLifetime
+        )
+
+        val joinedMatchesMap = user.matchHistory.associate { rec ->
+            rec.tournamentId to mapOf<String, Any>(
+                "tournamentId" to rec.tournamentId,
+                "tournamentTitle" to rec.tournamentTitle,
+                "game" to rec.game,
+                "category" to rec.category,
+                "format" to rec.format,
+                "map" to rec.map,
+                "joinedAt" to rec.joinedAt,
+                "joinedAtFormatted" to (if (rec.joinedAt > 0L) sdf.format(java.util.Date(rec.joinedAt)) else "Recorded"),
+                "entryFeePaid" to rec.entryFeePaid,
+                "paidFromDeposit" to rec.paidFromDeposit,
+                "paidFromWinning" to rec.paidFromWinning,
+                "paidFromBonus" to rec.paidFromBonus,
+                "kills" to rec.kills,
+                "rank" to rec.rank,
+                "winningAmount" to rec.winningAmount,
+                "netProfit" to (rec.winningAmount - rec.entryFeePaid),
+                "status" to rec.status
+            )
+        }
+
+        val nextVersion = (user.version + 1).coerceAtLeast(1)
+        val resolvedAccountStatus = when {
+            user.isBanned -> "BANNED"
+            user.isSuspended -> "SUSPENDED"
+            user.deletionRequested || user.accountStatus.equals("PENDING_DELETION", true) -> "PENDING_DELETION"
+            user.accountStatus.isNotBlank() -> user.accountStatus.uppercase()
+            else -> "ACTIVE"
+        }
+
+        val map = mutableMapOf<String, Any>(
+            "id" to user.id,
+            "uid" to user.id,
+            "username" to user.username,
+            "name" to user.username,
+            "displayName" to user.username,
+            "ign" to user.ign.ifBlank { user.username },
+            "inGameName" to user.ign.ifBlank { user.username },
+            "email" to user.email,
+            "phone" to user.phone,
+            "phoneNumber" to user.phone,
+            "gameId" to user.gameId,
+            "freeFireId" to user.gameId,
+            "bio" to user.bio,
+            "socialLink" to user.socialLink,
+            "avatarUrl" to (user.avatarUrl ?: "avatar_1"),
+            "role" to user.role,
+            "depositBalance" to effectiveDepMoney,
+            "depositFunds" to effectiveDepMoney,
+            "deposit_funds" to effectiveDepMoney,
+            "depositedMoney" to effectiveDepMoney,
+            "winningsBalance" to winMoney,
+            "winningFunds" to winMoney,
+            "winning_funds" to winMoney,
+            "winningMoney" to winMoney,
+            "bonusBalance" to bonMoney,
+            "bonusFunds" to bonMoney,
+            "bonus_funds" to bonMoney,
+            "bonusMoney" to bonMoney,
+            "lockedBalance" to user.lockedBalance,
+            "referralBonus" to bonMoney,
+            "referral_bonus" to bonMoney,
+            "referralBonusEarned" to referralBonusTotal,
+            "referralEarnings" to referralBonusTotal,
+            "referralCode" to user.referralCode,
+            "referredBy" to user.referredBy,
+            "referralCount" to user.referralCount,
+            "withdrawableBalance" to winMoney,
+            "nonWithdrawableBalance" to (effectiveDepMoney + bonMoney),
+            "funds" to totalWallet,
+            "balance" to totalWallet,
+            "walletBalance" to totalWallet,
+            "wallet_balance" to totalWallet,
+            "totalWalletBalance" to totalWallet,
+            "tokens" to user.tokens,
+            "kycVerified" to user.kycVerified,
+            "dataExported" to user.dataExported,
+            "lastExportedAt" to user.lastExportedAt,
+            "lastExportId" to user.lastExportId,
+            "wins" to user.wins,
+            "kills" to totalKillsLifetime,
+            "activityPoints" to user.activityPoints,
+            "totalEarnings" to totalEarningsLifetime,
+            "totalDeposited" to totalDepositedLifetime,
+            "totalWithdrawn" to user.totalWithdrawn,
+            "totalEntryFeesPaid" to totalEntryFeesLifetime,
+            "supportCasesCount" to user.supportCasesCount,
+            "createdAt" to firstAppJoin,
+            "firstAppJoinAt" to firstAppJoin,
+            "firstMatchJoinedAt" to firstMatchJoin,
+            "lastMatchJoinedAt" to lastMatchJoin,
+            "totalMatchesJoined" to totalMatches,
+            "joinedMatchIds" to joinedIds,
+            "accountLifecycle" to accountLifecycleSection,
+            "combatAndMatchSummary" to combatAndMatchSummarySection,
+            "walletAndFinanceSummary" to walletAndFinanceSummarySection,
+            "isBanned" to user.isBanned,
+            "banned" to user.isBanned,
+            "status" to resolvedAccountStatus,
+            "accountStatus" to resolvedAccountStatus,
+            "active" to (!user.isBanned && !user.isSuspended),
+            "isAuthorized" to (!user.isBanned && !user.isSuspended),
+            "walletFrozen" to (user.isBanned || user.isSuspended),
+            "banReason" to user.banReason,
+            "banCaseId" to user.banCaseId,
+            "bannedAt" to user.bannedAt,
+            "isSuspended" to user.isSuspended,
+            "suspendedUntil" to user.suspendedUntil,
+            "suspensionEndTimeMillis" to user.suspendedUntil,
+            "suspensionReason" to user.suspensionReason,
+            "deletionRequested" to user.deletionRequested,
+            "deletionRequestId" to user.deletionRequestId,
+            "deletionReason" to user.deletionReason,
+            "deletionDetails" to user.deletionDetails,
+            "deletionRequestedAt" to user.deletionRequestedAt,
+            "isVpnBlocked" to user.isVpnBlocked,
+            "vpnBlocked" to user.isVpnBlocked,
+            "isForceUpdateRequired" to user.isForceUpdateRequired,
+            "forceUpdate" to user.isForceUpdateRequired,
+            "minVersionRequired" to user.minVersionRequired,
+            "isMaintenanceBypass" to user.isMaintenanceBypass,
+            "deviceModel" to user.deviceModel,
+            "ipAddress" to user.ipAddress,
+            "version" to nextVersion,
+            "updatedAt" to now,
+            "lastActive" to now
+        )
+        if (joinedMatchesMap.isNotEmpty()) {
+            map["joinedMatches"] = joinedMatchesMap
+        }
+        return map
+    }
+
+    suspend fun syncPlayerStructuredDatabaseRecord(user: UserProfile) {
+        if (user.id.isBlank()) return
+        val structuredMap = buildStructuredPlayerDatabaseMap(user)
+        try { database.child("users").child(user.id).updateChildren(structuredMap).await() } catch (_: Exception) {}
+        try { database.child("userProfiles").child(user.id).updateChildren(structuredMap).await() } catch (_: Exception) {}
+        try { database.child("players").child(user.id).updateChildren(structuredMap).await() } catch (_: Exception) {}
+        try { database.child("player_database_records").child(user.id).updateChildren(structuredMap).await() } catch (_: Exception) {}
+        try {
+            val walletOnly = structuredMap["walletAndFinanceSummary"] as? Map<String, Any> ?: emptyMap()
+            database.child("wallet_accounts").child(user.id).updateChildren(walletOnly + mapOf(
+                "uid" to user.id,
+                "username" to user.username,
+                "gameId" to user.gameId,
+                "updatedAt" to System.currentTimeMillis()
+            )).await()
+        } catch (_: Exception) {}
+        try { firestore.collection("users").document(user.id).set(structuredMap, com.google.firebase.firestore.SetOptions.merge()).await() } catch (_: Exception) {}
+        try { firestore.collection("userProfiles").document(user.id).set(structuredMap, com.google.firebase.firestore.SetOptions.merge()).await() } catch (_: Exception) {}
+        try { firestore.collection("player_database_records").document(user.id).set(structuredMap, com.google.firebase.firestore.SetOptions.merge()).await() } catch (_: Exception) {}
+    }
+
     suspend fun adjustUserBalance(uid: String, newBalance: Double, reason: String, adminEmail: String) {
         try {
+            val now = System.currentTimeMillis()
+            val userRef = database.child("users").child(uid)
+            val snap = userRef.get().await()
+            val currentWinning = safeDouble(snap.child("winningFunds").value ?: snap.child("winning_funds").value)
+            val currentBonus = safeDouble(snap.child("bonusFunds").value ?: snap.child("bonus_funds").value)
+            val updatedDeposit = (newBalance - currentWinning - currentBonus).coerceAtLeast(0.0)
+            val total = updatedDeposit + currentWinning + currentBonus
+
             val balanceUpdates = mapOf<String, Any>(
-                "balance" to newBalance,
-                "funds" to newBalance,
-                "walletBalance" to newBalance,
-                "wallet_balance" to newBalance,
-                "totalWalletBalance" to newBalance
+                "depositFunds" to updatedDeposit,
+                "deposit_funds" to updatedDeposit,
+                "winningFunds" to currentWinning,
+                "winning_funds" to currentWinning,
+                "bonusFunds" to currentBonus,
+                "bonus_funds" to currentBonus,
+                "withdrawableBalance" to currentWinning,
+                "nonWithdrawableBalance" to (updatedDeposit + currentBonus),
+                "balance" to total,
+                "funds" to total,
+                "walletBalance" to total,
+                "wallet_balance" to total,
+                "totalWalletBalance" to total,
+                "lastActive" to now
             )
             try { database.child("users").child(uid).updateChildren(balanceUpdates).await() } catch (_: Exception) {}
             try { database.child("userProfiles").child(uid).updateChildren(balanceUpdates).await() } catch (_: Exception) {}
             try { database.child("players").child(uid).updateChildren(balanceUpdates).await() } catch (_: Exception) {}
+            try { database.child("wallet_accounts").child(uid).updateChildren(balanceUpdates).await() } catch (_: Exception) {}
 
-            val now = System.currentTimeMillis()
             val txId = "TX-ADJ-${now}"
             val txPayload = mapOf(
-                "amount" to newBalance,
+                "id" to txId,
+                "uid" to uid,
+                "amount" to total,
                 "type" to "deposit",
+                "walletBucket" to "DEPOSIT",
                 "timestamp" to now,
                 "status" to "completed",
                 "referenceId" to "ADMIN_ADJUSTMENT",
                 "description" to "Admin balance adjustment ($reason) by $adminEmail"
             )
             try { database.child("wallet_transactions").child(uid).child(txId).setValue(txPayload).await() } catch (_: Exception) {}
-            try { firestore.collection("users").document(uid).update(balanceUpdates).await() } catch (_: Exception) {}
-            try { firestore.collection("userProfiles").document(uid).update(balanceUpdates).await() } catch (_: Exception) {}
+            try { firestore.collection("users").document(uid).set(balanceUpdates, com.google.firebase.firestore.SetOptions.merge()).await() } catch (_: Exception) {}
+            try { firestore.collection("userProfiles").document(uid).set(balanceUpdates, com.google.firebase.firestore.SetOptions.merge()).await() } catch (_: Exception) {}
         } catch (e: Exception) {
             GlobalErrorManager.emitError("Failed to adjust balance: ${e.message}", e)
+        }
+    }
+
+    suspend fun adjustUserWalletByBucket(
+        user: UserProfile,
+        deltaAmount: Double,
+        bucket: com.example.domain.model.WalletBucket,
+        reason: String,
+        adminEmail: String
+    ): UserProfile? {
+        return try {
+            val uid = user.id
+            if (uid.isBlank()) return null
+
+            val overrideBase = recentAdminWalletOverrides[uid]?.takeIf { System.currentTimeMillis() - it.second < 60_000L }?.first
+            val baseUser = overrideBase ?: user
+
+            val baseDeposit = baseUser.depositFunds.coerceAtLeast(0.0)
+            val baseWinning = baseUser.winningFunds.coerceAtLeast(0.0)
+            val baseBonus = baseUser.bonusFunds.coerceAtLeast(0.0)
+
+            val newDeposit = when (bucket) {
+                com.example.domain.model.WalletBucket.DEPOSIT -> (baseDeposit + deltaAmount).coerceAtLeast(0.0)
+                else -> baseDeposit
+            }
+            val newWinning = when (bucket) {
+                com.example.domain.model.WalletBucket.WINNING -> (baseWinning + deltaAmount).coerceAtLeast(0.0)
+                else -> baseWinning
+            }
+            val newBonus = when (bucket) {
+                com.example.domain.model.WalletBucket.BONUS -> (baseBonus + deltaAmount).coerceAtLeast(0.0)
+                else -> baseBonus
+            }
+            val newTotal = newDeposit + newWinning + newBonus
+
+            val newTotalDeposited = if (bucket == com.example.domain.model.WalletBucket.DEPOSIT && deltaAmount > 0.0) {
+                maxOf(baseUser.totalDeposited, baseDeposit) + deltaAmount
+            } else {
+                maxOf(baseUser.totalDeposited, newDeposit)
+            }
+            val newTotalEarnings = if (bucket == com.example.domain.model.WalletBucket.WINNING && deltaAmount > 0.0) {
+                maxOf(baseUser.totalEarnings, baseWinning) + deltaAmount
+            } else {
+                maxOf(baseUser.totalEarnings, newWinning)
+            }
+            val newReferralBonusEarned = if (bucket == com.example.domain.model.WalletBucket.BONUS && deltaAmount > 0.0) {
+                maxOf(baseUser.referralBonusEarned, baseBonus) + deltaAmount
+            } else {
+                maxOf(baseUser.referralBonusEarned, newBonus)
+            }
+
+            val now = System.currentTimeMillis()
+            val updatedUser = baseUser.copy(
+                depositFunds = newDeposit,
+                winningFunds = newWinning,
+                bonusFunds = newBonus,
+                referralBonusEarned = newReferralBonusEarned,
+                funds = newTotal,
+                balance = newTotal,
+                totalDeposited = newTotalDeposited,
+                totalEarnings = newTotalEarnings,
+                lastActive = now
+            )
+
+            recentAdminWalletOverrides[uid] = updatedUser to now
+            syncPlayerStructuredDatabaseRecord(updatedUser)
+
+            val txId = "TX-BUCKET-${bucket.name}-${now}"
+            val sign = if (deltaAmount >= 0) "+" else ""
+            val txPayload = mapOf(
+                "id" to txId,
+                "uid" to uid,
+                "userId" to uid,
+                "amount" to deltaAmount,
+                "walletBucket" to bucket.name,
+                "withdrawable" to bucket.isWithdrawable,
+                "type" to if (deltaAmount >= 0) "ADMIN_${bucket.name}_CREDIT" else "ADMIN_${bucket.name}_DEBIT",
+                "status" to "COMPLETED",
+                "timestamp" to now,
+                "referenceId" to "ADMIN_${bucket.name}_ADJUSTMENT",
+                "description" to "${bucket.displayName}: ${sign}₹${deltaAmount.toInt()} ($reason) by $adminEmail [New Balances -> Dep: ₹${newDeposit.toInt()}, Win: ₹${newWinning.toInt()}, RefBonus: ₹${newBonus.toInt()}]"
+            )
+            try { database.child("wallet_transactions").child(uid).child(txId).setValue(txPayload).await() } catch (_: Exception) {}
+            try { database.child("transactions").child(txId).setValue(txPayload).await() } catch (_: Exception) {}
+            try { firestore.collection("transactions").document(txId).set(txPayload).await() } catch (_: Exception) {}
+
+            logAuditAction(
+                action = "WALLET_BUCKET_ADJUST",
+                details = "Adjusted ${updatedUser.username} (${bucket.displayName}) by ${sign}₹${deltaAmount.toInt()}: $reason. New Dep=₹${newDeposit.toInt()}, Win=₹${newWinning.toInt()}, RefBonus=₹${newBonus.toInt()}",
+                targetUid = uid,
+                category = "FINANCE"
+            )
+            GlobalErrorManager.emitSuccess("${sign}₹${deltaAmount.toInt()} sent to ${updatedUser.username}'s ${bucket.shortLabel}!")
+            updatedUser
+        } catch (e: Exception) {
+            GlobalErrorManager.emitError("Failed to adjust ${bucket.displayName}: ${e.message}", e)
+            null
+        }
+    }
+
+    suspend fun recordPlayerMatchStatsAndWinning(
+        user: UserProfile,
+        tournamentId: String,
+        tournamentTitle: String,
+        kills: Int,
+        rank: Int,
+        winningAmount: Double,
+        entryFeePaid: Double,
+        adminEmail: String
+    ): UserProfile? {
+        return try {
+            val now = System.currentTimeMillis()
+            val cleanTourneyId = tournamentId.trim().ifBlank { "MATCH_${now}" }
+            val existingRec = user.matchHistory.find { it.tournamentId == cleanTourneyId }
+            val previousWinningForMatch = existingRec?.winningAmount ?: 0.0
+            val previousKillsForMatch = existingRec?.kills ?: 0
+
+            val winningDelta = (winningAmount - previousWinningForMatch).coerceAtLeast(0.0)
+            val killsDelta = (kills - previousKillsForMatch).coerceAtLeast(0)
+
+            val joinedTime = existingRec?.joinedAt?.takeIf { it > 0L } ?: now
+            val newRec = com.example.domain.model.PlayerMatchRecord(
+                tournamentId = cleanTourneyId,
+                tournamentTitle = tournamentTitle.ifBlank { existingRec?.tournamentTitle ?: "Match #$cleanTourneyId" },
+                game = existingRec?.game ?: "Free Fire",
+                category = existingRec?.category ?: "BR",
+                format = existingRec?.format ?: "SOLO",
+                map = existingRec?.map ?: "Bermuda",
+                joinedAt = joinedTime,
+                entryFeePaid = if (entryFeePaid >= 0.0) entryFeePaid else (existingRec?.entryFeePaid ?: 0.0),
+                paidFromDeposit = existingRec?.paidFromDeposit ?: entryFeePaid.coerceAtLeast(0.0),
+                paidFromWinning = existingRec?.paidFromWinning ?: 0.0,
+                paidFromBonus = existingRec?.paidFromBonus ?: 0.0,
+                kills = kills.coerceAtLeast(0),
+                rank = rank.coerceAtLeast(0),
+                winningAmount = winningAmount.coerceAtLeast(0.0),
+                status = if (winningAmount > 0.0) "WON" else "COMPLETED"
+            )
+
+            val updatedHistory = (user.matchHistory.filterNot { it.tournamentId == cleanTourneyId } + newRec)
+                .sortedByDescending { it.joinedAt }
+            val updatedJoinedIds = (user.joinedMatchIds + cleanTourneyId).distinct()
+
+            val newWinningFunds = (user.winningFunds + winningDelta).coerceAtLeast(0.0)
+            val newTotalWallet = user.depositFunds + newWinningFunds + user.bonusFunds
+            val newTotalEarnings = maxOf(user.totalEarnings + winningDelta, updatedHistory.sumOf { it.winningAmount })
+            val newTotalKills = maxOf(user.kills + killsDelta, updatedHistory.sumOf { it.kills })
+            val newWins = if (rank == 1 && (existingRec?.rank ?: 0) != 1) user.wins + 1 else user.wins
+
+            val updatedUser = user.copy(
+                winningFunds = newWinningFunds,
+                funds = newTotalWallet,
+                balance = newTotalWallet,
+                totalEarnings = newTotalEarnings,
+                kills = newTotalKills,
+                wins = newWins,
+                firstMatchJoinedAt = if (user.firstMatchJoinedAt > 0L) minOf(user.firstMatchJoinedAt, joinedTime) else joinedTime,
+                lastMatchJoinedAt = maxOf(user.lastMatchJoinedAt, joinedTime),
+                totalMatchesJoined = maxOf(user.totalMatchesJoined, updatedJoinedIds.size),
+                joinedMatchIds = updatedJoinedIds,
+                matchHistory = updatedHistory,
+                lastActive = now
+            )
+
+            syncPlayerStructuredDatabaseRecord(updatedUser)
+
+            val matchNodeMap = mapOf<String, Any>(
+                "tournamentId" to newRec.tournamentId,
+                "tournamentTitle" to newRec.tournamentTitle,
+                "game" to newRec.game,
+                "category" to newRec.category,
+                "format" to newRec.format,
+                "map" to newRec.map,
+                "joinedAt" to newRec.joinedAt,
+                "entryFeePaid" to newRec.entryFeePaid,
+                "paidFromDeposit" to newRec.paidFromDeposit,
+                "paidFromWinning" to newRec.paidFromWinning,
+                "paidFromBonus" to newRec.paidFromBonus,
+                "kills" to newRec.kills,
+                "rank" to newRec.rank,
+                "winningAmount" to newRec.winningAmount,
+                "netProfit" to (newRec.winningAmount - newRec.entryFeePaid),
+                "status" to newRec.status,
+                "updatedAt" to now,
+                "updatedBy" to adminEmail
+            )
+            try { database.child("users").child(user.id).child("joinedMatches").child(cleanTourneyId).setValue(matchNodeMap).await() } catch (_: Exception) {}
+            try { database.child("user_match_history").child(user.id).child(cleanTourneyId).setValue(matchNodeMap).await() } catch (_: Exception) {}
+            try { database.child("tournaments").child(cleanTourneyId).child("participants").child(user.id).updateChildren(matchNodeMap).await() } catch (_: Exception) {}
+            try { firestore.collection("users").document(user.id).collection("joinedMatches").document(cleanTourneyId).set(matchNodeMap).await() } catch (_: Exception) {}
+
+            if (winningDelta > 0.0) {
+                val txId = "TX-MATCH-WIN-${now}"
+                val txPayload = mapOf(
+                    "id" to txId,
+                    "uid" to user.id,
+                    "userId" to user.id,
+                    "amount" to winningDelta,
+                    "walletBucket" to "WINNING",
+                    "withdrawable" to true,
+                    "type" to "MATCH_WINNING",
+                    "status" to "COMPLETED",
+                    "timestamp" to now,
+                    "referenceId" to cleanTourneyId,
+                    "description" to "Match Winning credited to Withdrawable Winning Balance for ${newRec.tournamentTitle} (Rank #${newRec.rank}, ${newRec.kills} Kills)"
+                )
+                try { database.child("wallet_transactions").child(user.id).child(txId).setValue(txPayload).await() } catch (_: Exception) {}
+                try { database.child("transactions").child(txId).setValue(txPayload).await() } catch (_: Exception) {}
+            }
+
+            GlobalErrorManager.emitSuccess("Match stats & ₹${winningAmount.toInt()} Winning Money recorded for ${user.username}!")
+            updatedUser
+        } catch (e: Exception) {
+            GlobalErrorManager.emitError("Failed to record match result: ${e.message}", e)
+            null
         }
     }
 
@@ -5321,12 +6900,14 @@ service cloud.firestore {
             val credUpdates = mapOf<String, Any>(
                 "roomId" to roomId,
                 "room_id" to roomId,
+                "roomPass" to roomPassword,
                 "roomPassword" to roomPassword,
                 "room_password" to roomPassword,
                 "password" to roomPassword,
                 "roomDetails" to mapOf(
                     "roomId" to roomId,
                     "room_id" to roomId,
+                    "roomPass" to roomPassword,
                     "roomPassword" to roomPassword,
                     "room_password" to roomPassword,
                     "password" to roomPassword,
@@ -5336,8 +6917,24 @@ service cloud.firestore {
             val targets = listOf("tournaments", "matches", "active_tournaments", "all_tournaments")
             targets.forEach { target ->
                 try { database.child(target).child(tournamentId).updateChildren(credUpdates).await() } catch (_: Exception) {}
-                try { firestore.collection(target).document(tournamentId).update(credUpdates).await() } catch (_: Exception) {}
+                try { firestore.collection(target).document(tournamentId).set(credUpdates, com.google.firebase.firestore.SetOptions.merge()).await() } catch (_: Exception) {}
             }
+            try {
+                val globalState = mapOf(
+                    "eventType" to "ROOM_CREDENTIALS_RELEASED",
+                    "source" to "ADMIN_PANEL",
+                    "tournamentId" to tournamentId,
+                    "affectedUserId" to "",
+                    "timestamp" to now,
+                    "payload" to mapOf(
+                        "tournamentTitle" to "Tournament #$tournamentId",
+                        "roomId" to roomId,
+                        "roomPass" to roomPassword
+                    )
+                )
+                database.child("global_app_state").setValue(globalState).await()
+                firestore.collection("global_app_state").document("current").set(globalState, com.google.firebase.firestore.SetOptions.merge()).await()
+            } catch (_: Exception) {}
             GlobalErrorManager.emitSuccess("Room credentials updated and synchronized to players.")
         } catch (e: Exception) {
             e.printStackTrace()
@@ -5564,53 +7161,6 @@ service cloud.firestore {
             return
         }
         try {
-            val map = mutableMapOf<String, Any>(
-                "id" to user.id,
-                "uid" to user.id,
-                "username" to user.username,
-                "name" to user.username,
-                "displayName" to user.username,
-                "email" to user.email,
-                "phone" to user.phone,
-                "phoneNumber" to user.phone,
-                "gameId" to user.gameId,
-                "role" to user.role,
-                "depositFunds" to user.depositFunds,
-                "winningFunds" to user.winningFunds,
-                "bonusFunds" to user.bonusFunds,
-                "funds" to user.totalWalletBalance,
-                "balance" to user.totalWalletBalance,
-                "wins" to user.wins,
-                "kills" to user.kills,
-                "activityPoints" to user.activityPoints,
-                "totalEarnings" to user.totalEarnings,
-                "isBanned" to user.isBanned,
-                "banned" to user.isBanned,
-                "status" to if (user.isBanned) "BANNED" else if (user.isSuspended) "SUSPENDED" else "ACTIVE",
-                "accountStatus" to if (user.isBanned) "BANNED" else if (user.isSuspended) "SUSPENDED" else "ACTIVE",
-                "active" to (!user.isBanned && !user.isSuspended),
-                "isAuthorized" to (!user.isBanned && !user.isSuspended),
-                "walletFrozen" to (user.isBanned || user.isSuspended),
-                "banReason" to user.banReason,
-                "banCaseId" to user.banCaseId,
-                "bannedAt" to user.bannedAt,
-                "isSuspended" to user.isSuspended,
-                "suspendedUntil" to user.suspendedUntil,
-                "suspensionReason" to user.suspensionReason,
-                "isVpnBlocked" to user.isVpnBlocked,
-                "vpnBlocked" to user.isVpnBlocked,
-                "isForceUpdateRequired" to user.isForceUpdateRequired,
-                "forceUpdate" to user.isForceUpdateRequired,
-                "minVersionRequired" to user.minVersionRequired,
-                "isMaintenanceBypass" to user.isMaintenanceBypass,
-                "deviceModel" to user.deviceModel,
-                "ipAddress" to user.ipAddress,
-                "walletBalance" to user.totalWalletBalance,
-                "wallet_balance" to user.totalWalletBalance,
-                "lastActive" to System.currentTimeMillis()
-            )
-            if (user.createdAt > 0) map["createdAt"] = user.createdAt
-
             if (user.isBanned) {
                 try {
                     banPlayer(
@@ -5630,21 +7180,16 @@ service cloud.firestore {
                     )
                 } catch (_: Exception) {}
             }
-            
-            try { database.child("users").child(user.id).updateChildren(map).await() } catch (_: Exception) {}
-            try { database.child("userProfiles").child(user.id).updateChildren(map).await() } catch (_: Exception) {}
-            try { database.child("players").child(user.id).updateChildren(map).await() } catch (_: Exception) {}
-            try { firestore.collection("users").document(user.id).set(map, com.google.firebase.firestore.SetOptions.merge()).await() } catch (ignored: Exception) {}
-            try { firestore.collection("userProfiles").document(user.id).set(map, com.google.firebase.firestore.SetOptions.merge()).await() } catch (ignored: Exception) {}
-            try { firestore.collection("players").document(user.id).set(map, com.google.firebase.firestore.SetOptions.merge()).await() } catch (ignored: Exception) {}
+
+            syncPlayerStructuredDatabaseRecord(user)
 
             logAuditAction(
                 action = "UPDATE_USER_CONTROLS",
-                details = "Updated controls for ${user.username} (${user.id}): banned=${user.isBanned}, suspended=${user.isSuspended}, vpnBlocked=${user.isVpnBlocked}",
+                details = "Updated profile & structured telemetry for ${user.username} (${user.id}): Win=₹${user.winningFunds.toInt()}, Dep=₹${user.depositFunds.toInt()}, Bon=₹${user.bonusFunds.toInt()}, Matches=${user.totalMatchesJoined}",
                 targetUid = user.id,
                 category = "USER_MANAGEMENT"
             )
-            GlobalErrorManager.emitSuccess("User profile & controls successfully saved to Firebase!")
+            GlobalErrorManager.emitSuccess("User profile & structured database sections saved to Firebase!")
         } catch (e: Exception) {
             GlobalErrorManager.emitError("Failed to update user profile: ${e.message}", e)
         }
@@ -5666,27 +7211,35 @@ service cloud.firestore {
             val currentBonus = safeDouble(snap.child("bonusFunds").value ?: snap.child("bonus_funds").value)
             val currentLegacy = safeDouble(snap.child("balance").value ?: snap.child("funds").value)
 
-            val baseDeposit = if (currentDeposit == 0.0 && currentLegacy > 0.0) currentLegacy else currentDeposit
+            val baseDeposit = if (currentDeposit == 0.0 && currentWinning == 0.0 && currentBonus == 0.0 && currentLegacy > 0.0) currentLegacy else currentDeposit
             val newDeposit = (baseDeposit + depositDelta).coerceAtLeast(0.0)
             val newWinning = (currentWinning + winningDelta).coerceAtLeast(0.0)
             val newBonus = (currentBonus + bonusDelta).coerceAtLeast(0.0)
             val newTotal = newDeposit + newWinning + newBonus
+            val now = System.currentTimeMillis()
 
             val updates = mapOf<String, Any>(
                 "depositFunds" to newDeposit,
+                "deposit_funds" to newDeposit,
                 "winningFunds" to newWinning,
+                "winning_funds" to newWinning,
                 "bonusFunds" to newBonus,
+                "bonus_funds" to newBonus,
+                "withdrawableBalance" to newWinning,
+                "nonWithdrawableBalance" to (newDeposit + newBonus),
                 "funds" to newTotal,
-                "balance" to newTotal
+                "balance" to newTotal,
+                "walletBalance" to newTotal,
+                "lastActive" to now
             )
             userRef.updateChildren(updates).await()
             database.child("userProfiles").child(uid).updateChildren(updates).await()
             database.child("players").child(uid).updateChildren(updates).await()
+            database.child("wallet_accounts").child(uid).updateChildren(updates).await()
             try {
-                firestore.collection("users").document(uid).update(updates).await()
+                firestore.collection("users").document(uid).set(updates, com.google.firebase.firestore.SetOptions.merge()).await()
             } catch (ignored: Exception) {}
 
-            val now = System.currentTimeMillis()
             val txId = "TX-ADJ-2D-${now}"
             val totalDelta = depositDelta + winningDelta + bonusDelta
             val txPayload = mapOf(
@@ -5697,12 +7250,12 @@ service cloud.firestore {
                 "status" to "COMPLETED",
                 "timestamp" to now,
                 "referenceId" to "ADMIN_2D_ADJUSTMENT",
-                "description" to "2D Wallet adjusted [Dep: ₹$depositDelta, Win: ₹$winningDelta, Bon: ₹$bonusDelta] Reason: $reason (by $adminEmail)"
+                "description" to "3-Bucket Wallet adjusted [Dep: ₹$depositDelta, Win: ₹$winningDelta, Bon: ₹$bonusDelta] Reason: $reason (by $adminEmail)"
             )
             database.child("wallet_transactions").child(uid).child(txId).setValue(txPayload).await()
-            GlobalErrorManager.emitSuccess("2D Wallet balance adjusted successfully.")
+            GlobalErrorManager.emitSuccess("Wallet buckets adjusted successfully.")
         } catch (e: Exception) {
-            GlobalErrorManager.emitError("Failed to adjust 2D wallet: ${e.message}", e)
+            GlobalErrorManager.emitError("Failed to adjust wallet buckets: ${e.message}", e)
         }
     }
 
@@ -5903,10 +7456,17 @@ service cloud.firestore {
                 }
             }
 
-            // If entry fee > 0, safely deduct from 2D wallet (Bonus -> Deposit -> Winnings)
+            val nowJoin = System.currentTimeMillis()
+            val userId = player.userId.ifBlank { player.playerId.ifBlank { player.id } }
+            val userRef = database.child("users").child(userId)
+            val userSnap = userRef.get().await()
+
+            var bonusToDeduct = 0.0
+            var depositToDeduct = 0.0
+            var winningToDeduct = 0.0
+
+            // If entry fee > 0, safely deduct from 3-bucket wallet (Bonus -> Deposit -> Winnings)
             if (entryFee > 0f) {
-                val userRef = database.child("users").child(player.id)
-                val userSnap = userRef.get().await()
                 val depositFunds = safeDouble(userSnap.child("depositFunds").value ?: userSnap.child("deposit_funds").value)
                 val winningFunds = safeDouble(userSnap.child("winningFunds").value ?: userSnap.child("winning_funds").value)
                 val bonusFunds = safeDouble(userSnap.child("bonusFunds").value ?: userSnap.child("bonus_funds").value)
@@ -5925,55 +7485,76 @@ service cloud.firestore {
 
                 var remaining = entryFee.toDouble()
 
-                val bonusToDeduct = minOf(bonusFunds, remaining)
+                bonusToDeduct = minOf(bonusFunds, remaining)
                 val newBonus = bonusFunds - bonusToDeduct
                 remaining -= bonusToDeduct
 
-                val depositToDeduct = if (depositFunds > 0.0) minOf(depositFunds, remaining) else minOf(legacyFunds, remaining)
+                depositToDeduct = if (depositFunds > 0.0) minOf(depositFunds, remaining) else minOf(legacyFunds, remaining)
                 val newDeposit = (depositFunds - depositToDeduct).coerceAtLeast(0.0)
                 remaining -= depositToDeduct
 
-                val winningToDeduct = minOf(winningFunds, remaining)
+                winningToDeduct = minOf(winningFunds, remaining)
                 val newWinning = (winningFunds - winningToDeduct).coerceAtLeast(0.0)
                 remaining -= winningToDeduct
 
                 val newTotal = (newDeposit + newWinning + newBonus).coerceAtLeast(0.0)
+                val prevEntryFeesPaid = safeDouble(userSnap.child("totalEntryFeesPaid").value ?: userSnap.child("walletAndFinanceSummary").child("totalEntryFeesPaid").value)
+                val newEntryFeesPaid = prevEntryFeesPaid + entryFee.toDouble()
 
                 val updates = mapOf<String, Any>(
                     "depositFunds" to newDeposit,
+                    "deposit_funds" to newDeposit,
                     "winningFunds" to newWinning,
+                    "winning_funds" to newWinning,
                     "bonusFunds" to newBonus,
+                    "bonus_funds" to newBonus,
+                    "withdrawableBalance" to newWinning,
+                    "nonWithdrawableBalance" to (newDeposit + newBonus),
+                    "totalEntryFeesPaid" to newEntryFeesPaid,
                     "funds" to newTotal,
-                    "balance" to newTotal
+                    "balance" to newTotal,
+                    "walletBalance" to newTotal,
+                    "lastActive" to nowJoin
                 )
                 userRef.updateChildren(updates).await()
-                database.child("userProfiles").child(player.id).updateChildren(updates).await()
+                database.child("userProfiles").child(userId).updateChildren(updates).await()
+                database.child("players").child(userId).updateChildren(updates).await()
+                database.child("wallet_accounts").child(userId).updateChildren(updates).await()
                 try {
-                    firestore.collection("users").document(player.id).update(updates).await()
+                    firestore.collection("users").document(userId).set(updates, com.google.firebase.firestore.SetOptions.merge()).await()
                 } catch (ignored: Exception) {}
 
-                // Record debit transaction with 2D wallet breakdown
-                val now = System.currentTimeMillis()
-                val txId = "TX-REG-${now}"
+                // Record debit transaction with 3-bucket breakdown
+                val txId = "TX-REG-${nowJoin}"
                 val txPayload = mapOf(
                     "id" to txId,
-                    "uid" to player.id,
+                    "uid" to userId,
+                    "userId" to userId,
                     "amount" to -entryFee.toDouble(),
+                    "paidFromBonus" to bonusToDeduct,
+                    "paidFromDeposit" to depositToDeduct,
+                    "paidFromWinning" to winningToDeduct,
                     "type" to "TOURNAMENT_ENTRY",
                     "status" to "COMPLETED",
-                    "timestamp" to now,
+                    "timestamp" to nowJoin,
                     "referenceId" to tournamentId,
                     "description" to "Entry fee for tournament ID: $tournamentId [Deducted: Bonus ₹$bonusToDeduct, Deposit ₹$depositToDeduct, Winnings ₹$winningToDeduct]"
                 )
-                database.child("wallet_transactions").child(player.id).child(txId).setValue(txPayload).await()
+                database.child("wallet_transactions").child(userId).child(txId).setValue(txPayload).await()
             }
 
-            // Register player
-            val regId = if (player.id.isNotBlank()) player.id else "${tournamentId}_${player.userId.ifBlank { "P" }}"
-            val userId = player.userId.ifBlank { player.id }
+            // Register player with per-match fee and telemetry fields
+            val regId = if (player.id.isNotBlank()) player.id else "${tournamentId}_${userId.ifBlank { "P" }}"
+            val tourneyTitle = tourneySnap.child("title").value?.toString() ?: "Tournament #$tournamentId"
+            val tourneyGame = tourneySnap.child("game").value?.toString() ?: "Free Fire"
+            val tourneyCategory = tourneySnap.child("category").value?.toString() ?: "BR"
+            val tourneyFormat = tourneySnap.child("format").value?.toString() ?: "SOLO"
+            val tourneyMap = tourneySnap.child("map").value?.toString() ?: "Bermuda"
+
             val regPayload = mapOf(
                 "id" to regId,
                 "tournamentId" to tournamentId,
+                "tournamentTitle" to tourneyTitle,
                 "userId" to userId,
                 "playerId" to userId,
                 "playerName" to player.playerName.ifBlank { player.gameUsername },
@@ -5984,11 +7565,59 @@ service cloud.firestore {
                 "age" to (player.age ?: 0),
                 "paymentStatus" to player.paymentStatus.ifBlank { "confirmed" },
                 "status" to player.status.ifBlank { "confirmed" },
-                "registeredAt" to System.currentTimeMillis()
+                "registeredAt" to nowJoin,
+                "joinedAt" to nowJoin,
+                "entryFeePaid" to entryFee.toDouble(),
+                "paidFromDeposit" to depositToDeduct,
+                "paidFromWinning" to winningToDeduct,
+                "paidFromBonus" to bonusToDeduct,
+                "kills" to 0,
+                "rank" to 0,
+                "winningAmount" to 0.0
             )
 
             database.child("tournament_registrations").child(regId).setValue(regPayload).await()
             database.child("tournaments").child(tournamentId).child("participants").child(userId).setValue(regPayload).await()
+
+            // Persist player's match participation record & lifecycle join timestamps in database
+            if (userId.isNotBlank()) {
+                val existingFirstAppJoin = safeLong(userSnap.child("firstAppJoinAt").value ?: userSnap.child("createdAt").value, nowJoin)
+                val existingFirstMatchJoin = safeLong(userSnap.child("firstMatchJoinedAt").value, 0L)
+                val firstMatchJoin = if (existingFirstMatchJoin > 0L) minOf(existingFirstMatchJoin, nowJoin) else nowJoin
+                val prevMatchesJoined = safeInt(userSnap.child("totalMatchesJoined").value, 0) + 1
+
+                val matchHistoryEntry = mapOf<String, Any>(
+                    "tournamentId" to tournamentId,
+                    "tournamentTitle" to tourneyTitle,
+                    "game" to tourneyGame,
+                    "category" to tourneyCategory,
+                    "format" to tourneyFormat,
+                    "map" to tourneyMap,
+                    "joinedAt" to nowJoin,
+                    "entryFeePaid" to entryFee.toDouble(),
+                    "paidFromDeposit" to depositToDeduct,
+                    "paidFromWinning" to winningToDeduct,
+                    "paidFromBonus" to bonusToDeduct,
+                    "kills" to 0,
+                    "rank" to 0,
+                    "winningAmount" to 0.0,
+                    "status" to "JOINED"
+                )
+                val lifecycleUpdates = mapOf<String, Any>(
+                    "firstAppJoinAt" to existingFirstAppJoin,
+                    "firstMatchJoinedAt" to firstMatchJoin,
+                    "lastMatchJoinedAt" to nowJoin,
+                    "totalMatchesJoined" to prevMatchesJoined,
+                    "lastActive" to nowJoin
+                )
+                try { database.child("users").child(userId).updateChildren(lifecycleUpdates).await() } catch (_: Exception) {}
+                try { database.child("users").child(userId).child("joinedMatches").child(tournamentId).setValue(matchHistoryEntry).await() } catch (_: Exception) {}
+                try { database.child("userProfiles").child(userId).updateChildren(lifecycleUpdates).await() } catch (_: Exception) {}
+                try { database.child("userProfiles").child(userId).child("joinedMatches").child(tournamentId).setValue(matchHistoryEntry).await() } catch (_: Exception) {}
+                try { database.child("user_match_history").child(userId).child(tournamentId).setValue(matchHistoryEntry).await() } catch (_: Exception) {}
+                try { firestore.collection("users").document(userId).set(lifecycleUpdates, com.google.firebase.firestore.SetOptions.merge()).await() } catch (_: Exception) {}
+                try { firestore.collection("users").document(userId).collection("joinedMatches").document(tournamentId).set(matchHistoryEntry).await() } catch (_: Exception) {}
+            }
 
             // Update registered players count and slots across all multi-node paths
             currentCount += 1
@@ -6178,27 +7807,34 @@ service cloud.firestore {
         try {
             val now = System.currentTimeMillis()
 
+            val tourneySnap = try { database.child("tournaments").child(tournamentId).get().await() } catch (_: Exception) { null }
+            val tourneyTitle = tourneySnap?.child("title")?.value?.toString() ?: "Tournament #$tournamentId"
+            val tourneyEntryFee = safeDouble(tourneySnap?.child("entryFee")?.value)
+
             awards.forEach { award ->
                 if (award.userId.isNotBlank()) {
                     val totalAward = award.prizeAmount + award.killPrize
-                    if (totalAward > 0) {
+                    if (totalAward > 0 || award.kills > 0) {
                         val userRef = database.child("users").child(award.userId)
                         val snap = userRef.get().await()
-                        val currentBalance = safeDouble(snap.child("balance").value ?: snap.child("funds").value)
+                        val currentDeposit = safeDouble(snap.child("depositFunds").value ?: snap.child("deposit_funds").value)
+                        val currentWinning = safeDouble(snap.child("winningFunds").value ?: snap.child("winning_funds").value)
+                        val currentBonus = safeDouble(snap.child("bonusFunds").value ?: snap.child("bonus_funds").value)
                         val currentWins = safeInt(snap.child("wins").value) + (if (award.placement == 1) 1 else 0)
                         val currentKills = safeInt(snap.child("kills").value) + award.kills
                         val currentEarnings = safeDouble(snap.child("totalEarnings").value) + totalAward
 
-                        val newBalance = currentBalance + totalAward
-
-                        val currentWinning = safeDouble(snap.child("winningFunds").value ?: snap.child("winning_funds").value)
                         val newWinning = currentWinning + totalAward
+                        val newBalance = currentDeposit + newWinning + currentBonus
 
                         val userUpdates = mapOf<String, Any>(
                             "balance" to newBalance,
                             "funds" to newBalance,
+                            "walletBalance" to newBalance,
                             "winningFunds" to newWinning,
                             "winning_funds" to newWinning,
+                            "withdrawableBalance" to newWinning,
+                            "nonWithdrawableBalance" to (currentDeposit + currentBonus),
                             "wins" to currentWins,
                             "kills" to currentKills,
                             "totalEarnings" to currentEarnings,
@@ -6206,20 +7842,42 @@ service cloud.firestore {
                         )
                         userRef.updateChildren(userUpdates).await()
                         database.child("userProfiles").child(award.userId).updateChildren(userUpdates).await()
+                        database.child("players").child(award.userId).updateChildren(userUpdates).await()
+                        database.child("wallet_accounts").child(award.userId).updateChildren(userUpdates).await()
                         try {
-                            firestore.collection("users").document(award.userId).update(userUpdates).await()
+                            firestore.collection("users").document(award.userId).set(userUpdates, com.google.firebase.firestore.SetOptions.merge()).await()
                         } catch (ignored: Exception) {}
 
-                        // Record prize transaction
+                        // Update per-match history record for this player
+                        val matchWinUpdates = mapOf<String, Any>(
+                            "tournamentId" to tournamentId,
+                            "tournamentTitle" to tourneyTitle,
+                            "kills" to award.kills,
+                            "rank" to award.placement,
+                            "winningAmount" to totalAward,
+                            "entryFeePaid" to tourneyEntryFee,
+                            "status" to if (totalAward > 0.0) "WON" else "COMPLETED",
+                            "updatedAt" to now
+                        )
+                        try { database.child("users").child(award.userId).child("joinedMatches").child(tournamentId).updateChildren(matchWinUpdates).await() } catch (_: Exception) {}
+                        try { database.child("user_match_history").child(award.userId).child(tournamentId).updateChildren(matchWinUpdates).await() } catch (_: Exception) {}
+                        try { database.child("tournaments").child(tournamentId).child("participants").child(award.userId).updateChildren(matchWinUpdates).await() } catch (_: Exception) {}
+                        try { firestore.collection("users").document(award.userId).collection("joinedMatches").document(tournamentId).set(matchWinUpdates, com.google.firebase.firestore.SetOptions.merge()).await() } catch (_: Exception) {}
+
+                        // Record prize transaction into Winning Money
                         val txId = "TX-PRIZE-${now}-${award.userId.take(5)}"
                         val txPayload = mapOf(
                             "id" to txId,
+                            "uid" to award.userId,
+                            "userId" to award.userId,
                             "amount" to totalAward,
+                            "walletBucket" to "WINNING",
+                            "withdrawable" to true,
                             "type" to "PRIZE",
                             "status" to "COMPLETED",
                             "timestamp" to now,
                             "referenceId" to tournamentId,
-                            "description" to "Prize for #${award.placement} rank in Tournament ($tournamentId). Kill bounty: ${award.killPrize} VT."
+                            "description" to "Prize for #${award.placement} rank in $tourneyTitle ($tournamentId) credited to Withdrawable Winning Money. Kill bounty: ₹${award.killPrize.toInt()} (${award.kills} kills)."
                         )
                         database.child("wallet_transactions").child(award.userId).child(txId).setValue(txPayload).await()
                     }
@@ -6498,22 +8156,105 @@ service cloud.firestore {
                 updatedAt = now
             )
 
-            // Save to RTDB
-            val tourneyRef = database.child("tournaments").child(tournamentId)
-            tourneyRef.child("roomDetails").setValue(roomDetails).await()
-            tourneyRef.child("status").setValue("LIVE").await()
+            val roomMap = mapOf<String, Any>(
+                "roomId" to roomId.trim(),
+                "room_id" to roomId.trim(),
+                "roomPass" to roomPass.trim(),
+                "roomPassword" to roomPass.trim(),
+                "room_password" to roomPass.trim(),
+                "password" to roomPass.trim(),
+                "updatedAt" to now
+            )
+            val credUpdates = mapOf<String, Any>(
+                "roomDetails" to roomMap,
+                "roomId" to roomId.trim(),
+                "room_id" to roomId.trim(),
+                "roomPass" to roomPass.trim(),
+                "roomPassword" to roomPass.trim(),
+                "room_password" to roomPass.trim(),
+                "password" to roomPass.trim(),
+                "status" to "LIVE",
+                "updatedAt" to now
+            )
 
-            // Save to Firestore
+            var firestoreSaved = false
             try {
-                firestore.collection("tournaments").document(tournamentId).update(
-                    mapOf(
-                        "roomDetails" to roomDetails,
-                        "status" to "LIVE"
-                    )
+                firestore.collection("tournaments").document(tournamentId).set(
+                    credUpdates,
+                    com.google.firebase.firestore.SetOptions.merge()
                 ).await()
-            } catch (ignored: Exception) {}
+                firestoreSaved = true
+            } catch (fe: Exception) {
+                Log.w(TAG, "Firestore credentials update: ${fe.message}")
+            }
+            try {
+                firestore.collection("matches").document(tournamentId).set(
+                    credUpdates,
+                    com.google.firebase.firestore.SetOptions.merge()
+                ).await()
+            } catch (_: Exception) {}
 
-            // Dispatch instant room credentials notification to all players
+            // Sync to RTDB
+            var rtdbSaved = false
+            try {
+                database.child("tournaments").child(tournamentId).updateChildren(credUpdates).await()
+                rtdbSaved = true
+            } catch (re: Exception) {
+                Log.w(TAG, "RTDB tournaments node broadcast: ${re.message}")
+            }
+
+            try {
+                database.child("custom_rooms").child(tournamentId).updateChildren(credUpdates).await()
+                rtdbSaved = true
+            } catch (_: Exception) {}
+
+            try {
+                database.child("matches").child(tournamentId).updateChildren(credUpdates).await()
+            } catch (_: Exception) {}
+
+            // Broadcast ROOM_CREDENTIALS_RELEASED to /global_app_state (RTDB + Firestore)
+            try {
+                val globalState = mapOf(
+                    "eventType" to "ROOM_CREDENTIALS_RELEASED",
+                    "source" to "ADMIN_PANEL",
+                    "tournamentId" to tournamentId,
+                    "affectedUserId" to "",
+                    "timestamp" to now,
+                    "payload" to mapOf(
+                        "tournamentTitle" to "Tournament #$tournamentId",
+                        "roomId" to roomId.trim(),
+                        "roomPass" to roomPass.trim()
+                    )
+                )
+                database.child("global_app_state").setValue(globalState).await()
+                firestore.collection("global_app_state").document("current").set(globalState, com.google.firebase.firestore.SetOptions.merge()).await()
+            } catch (_: Exception) {}
+
+            // Dispatch instant room credentials notification to all joined players in RTDB & Firestore
+            try {
+                val participants = getTournamentParticipants(tournamentId)
+                val notifId = "notif_room_${tournamentId}_${now}"
+                val roomNotifPayload = mapOf(
+                    "id" to notifId,
+                    "title" to "Room ID & Password Live!",
+                    "message" to "Room ID: ${roomId.trim()} | Pass: ${roomPass.trim()}. Join lobby immediately!",
+                    "type" to "ROOM_CREDENTIALS",
+                    "targetTournamentId" to tournamentId,
+                    "roomId" to roomId.trim(),
+                    "roomPassword" to roomPass.trim(),
+                    "timestamp" to now,
+                    "isRead" to false
+                )
+                participants.forEach { p ->
+                    val uid = p.userId.ifBlank { p.playerId }
+                    if (uid.isNotBlank()) {
+                        try { database.child("notifications").child(uid).child(notifId).setValue(roomNotifPayload).await() } catch (_: Exception) {}
+                        try { firestore.collection("users").document(uid).collection("notifications").document(notifId).set(roomNotifPayload).await() } catch (_: Exception) {}
+                    }
+                }
+                try { database.child("notifications").child("global").child(notifId).setValue(roomNotifPayload).await() } catch (_: Exception) {}
+            } catch (_: Exception) {}
+
             context?.let { ctx ->
                 val notif = VelorixNotificationManager.dispatchRoomCredentialsNotification(
                     context = ctx,
@@ -6522,6 +8263,11 @@ service cloud.firestore {
                     roomPass = roomPass.trim()
                 )
                 syncNotificationToCloud(notif)
+            }
+
+            if (!firestoreSaved && !rtdbSaved) {
+                GlobalErrorManager.emitError("Failed to broadcast credentials: Could not sync to Firebase backend.")
+                return false
             }
 
             GlobalErrorManager.emitSuccess("Room ID & Password broadcasted to checked-in players!")
@@ -6600,39 +8346,66 @@ service cloud.firestore {
             if (proof.userId.isNotBlank()) {
                 val userRef = database.child("users").child(proof.userId)
                 val userSnap = userRef.get().await()
-                val currentBal = safeDouble(userSnap.child("balance").value ?: userSnap.child("funds").value)
+                val currentDeposit = safeDouble(userSnap.child("depositFunds").value ?: userSnap.child("deposit_funds").value)
+                val currentWinning = safeDouble(userSnap.child("winningFunds").value ?: userSnap.child("winning_funds").value)
+                val currentBonus = safeDouble(userSnap.child("bonusFunds").value ?: userSnap.child("bonus_funds").value)
                 val currentWins = safeInt(userSnap.child("wins").value) + (if (proof.claimedRank == 1) 1 else 0)
                 val currentKills = safeInt(userSnap.child("kills").value) + killsCount
                 val currentEarnings = safeDouble(userSnap.child("totalEarnings").value) + prizeAmount
 
-                val currentWinning = safeDouble(userSnap.child("winningFunds").value ?: userSnap.child("winning_funds").value)
                 val newWinning = currentWinning + prizeAmount
+                val newBal = currentDeposit + newWinning + currentBonus
 
                 val userUpdates = mapOf<String, Any>(
-                    "balance" to (currentBal + prizeAmount),
-                    "funds" to (currentBal + prizeAmount),
+                    "balance" to newBal,
+                    "funds" to newBal,
+                    "walletBalance" to newBal,
                     "winningFunds" to newWinning,
                     "winning_funds" to newWinning,
+                    "withdrawableBalance" to newWinning,
+                    "nonWithdrawableBalance" to (currentDeposit + currentBonus),
                     "wins" to currentWins,
                     "kills" to currentKills,
-                    "totalEarnings" to currentEarnings
+                    "totalEarnings" to currentEarnings,
+                    "lastActive" to now
                 )
                 userRef.updateChildren(userUpdates).await()
                 database.child("userProfiles").child(proof.userId).updateChildren(userUpdates).await()
+                database.child("players").child(proof.userId).updateChildren(userUpdates).await()
+                database.child("wallet_accounts").child(proof.userId).updateChildren(userUpdates).await()
                 try {
-                    firestore.collection("users").document(proof.userId).update(userUpdates).await()
+                    firestore.collection("users").document(proof.userId).set(userUpdates, com.google.firebase.firestore.SetOptions.merge()).await()
                 } catch (ignored: Exception) {}
+
+                if (proof.tournamentId.isNotBlank()) {
+                    val matchProofUpdates = mapOf<String, Any>(
+                        "tournamentId" to proof.tournamentId,
+                        "tournamentTitle" to proof.tournamentTitle,
+                        "kills" to killsCount,
+                        "rank" to proof.claimedRank,
+                        "winningAmount" to prizeAmount,
+                        "status" to if (prizeAmount > 0.0) "WON" else "COMPLETED",
+                        "updatedAt" to now
+                    )
+                    try { database.child("users").child(proof.userId).child("joinedMatches").child(proof.tournamentId).updateChildren(matchProofUpdates).await() } catch (_: Exception) {}
+                    try { database.child("user_match_history").child(proof.userId).child(proof.tournamentId).updateChildren(matchProofUpdates).await() } catch (_: Exception) {}
+                    try { database.child("tournaments").child(proof.tournamentId).child("participants").child(proof.userId).updateChildren(matchProofUpdates).await() } catch (_: Exception) {}
+                }
 
                 // Transaction log
                 val txId = "TX-WIN-${now}"
                 val txPayload = mapOf(
                     "id" to txId,
+                    "uid" to proof.userId,
+                    "userId" to proof.userId,
                     "amount" to prizeAmount,
+                    "walletBucket" to "WINNING",
+                    "withdrawable" to true,
                     "type" to "PRIZE",
                     "status" to "COMPLETED",
                     "timestamp" to now,
                     "referenceId" to proof.tournamentId,
-                    "description" to "Prize verified for ${proof.tournamentTitle} (Rank #${proof.claimedRank}, $killsCount Kills)"
+                    "description" to "Prize verified for ${proof.tournamentTitle} (Rank #${proof.claimedRank}, $killsCount Kills) credited to Winning Money"
                 )
                 database.child("wallet_transactions").child(proof.userId).child(txId).setValue(txPayload).await()
             }
@@ -6645,7 +8418,8 @@ service cloud.firestore {
                     username = proof.username,
                     prizeAmount = prizeAmount,
                     approved = true,
-                    tournamentTitle = proof.tournamentTitle
+                    tournamentTitle = proof.tournamentTitle,
+                    targetUserId = proof.userId
                 )
                 syncNotificationToCloud(notif)
             }
@@ -6676,7 +8450,8 @@ service cloud.firestore {
                     username = username,
                     prizeAmount = 0.0,
                     approved = false,
-                    tournamentTitle = tourneyTitle
+                    tournamentTitle = tourneyTitle,
+                    targetUserId = proof?.userId ?: ""
                 )
                 syncNotificationToCloud(notif)
             }

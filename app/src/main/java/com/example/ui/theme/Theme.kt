@@ -1,9 +1,6 @@
 package com.example.ui.theme
 
 import android.os.Build
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
@@ -12,36 +9,45 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
 private val DarkColorScheme = darkColorScheme(
-    primary = Color(0xFF8B5CF6),
-    secondary = Color(0xFFA78BFA),
-    tertiary = Color(0xFF38BDF8),
+    primary = VelorixAccent,
+    onPrimary = Color(0xFF000000),
+    primaryContainer = Color(0xFF121216),
+    onPrimaryContainer = VelorixTextPrimary,
+    secondary = VelorixAccentViolet,
+    onSecondary = Color(0xFF000000),
+    secondaryContainer = Color(0xFF121216),
+    onSecondaryContainer = VelorixTextPrimary,
+    tertiary = VelorixEmerald,
+    onTertiary = Color(0xFF000000),
     background = Color(0xFF000000),
-    surface = Color(0xFF0C0C0E),
-    surfaceVariant = Color(0xFF141416),
-    onBackground = Color(0xFFEDEDED),
-    onSurface = Color(0xFFEDEDED),
-    onSurfaceVariant = Color(0xFFA1A1AA),
-    outline = Color(0xFF27272A),
-    outlineVariant = Color(0xFF3F3F46)
+    surface = Color(0xFF000000),
+    surfaceVariant = Color(0xFF0A0A0D),
+    onBackground = VelorixTextPrimary,
+    onSurface = VelorixTextPrimary,
+    onSurfaceVariant = VelorixTextSecondary,
+    error = VelorixRose,
+    outline = VelorixBorderSubtle,
+    outlineVariant = VelorixBorderLight
 )
 
 private val LightColorScheme = lightColorScheme(
-    primary = Color(0xFF7C3AED),
-    secondary = Color(0xFF6D28D9),
-    tertiary = Color(0xFF0284C7),
-    background = Color(0xFFF8FAFC),
+    primary = Color(0xFF0284C7),
+    onPrimary = Color(0xFFFFFFFF),
+    secondary = Color(0xFF4F46E5),
+    tertiary = Color(0xFF059669),
+    background = Color(0xFFF4F6F9),
     surface = Color(0xFFFFFFFF),
-    surfaceVariant = Color(0xFFF1F5F9),
-    onBackground = Color(0xFF0F172A),
-    onSurface = Color(0xFF0F172A),
+    surfaceVariant = Color(0xFFE9EEF5),
+    onBackground = Color(0xFF1E293B),
+    onSurface = Color(0xFF1E293B),
     onSurfaceVariant = Color(0xFF475569),
-    outline = Color(0xFFE2E8F0),
-    outlineVariant = Color(0xFFCBD5E1)
+    error = Color(0xFFE11D48),
+    outline = Color(0xFFCBD5E1),
+    outlineVariant = Color(0xFF94A3B8)
 )
 
 @Composable
@@ -63,4 +69,3 @@ fun MyApplicationTheme(
         MaterialTheme(colorScheme = colorScheme, typography = Typography, content = content)
     }
 }
-

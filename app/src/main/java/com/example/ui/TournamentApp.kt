@@ -59,6 +59,7 @@ import com.example.ui.theme.VelorixBg
 import com.example.ui.viewmodel.TournamentDashboardViewModel
 import com.example.ui.viewmodel.DashboardState
 import com.example.domain.model.Tournament
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -156,57 +157,114 @@ fun TournamentApp(
             ) {
                 var hasNavigated by remember { mutableStateOf(false) }
                 val coroutineScope = rememberCoroutineScope()
+                var splashStatusText by remember { mutableStateOf("Verifying security environment...") }
+                var sessionProgress by remember { mutableFloatStateOf(0.2f) }
 
-                suspend fun proceedToNext() {
+                // Dynamic glowing pulse animation for Velorix branding
+                val infiniteTransition = rememberInfiniteTransition(label = "SplashPulse")
+                val pulseAlpha by infiniteTransition.animateFloat(
+                    initialValue = 0.5f,
+                    targetValue = 1.0f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(900, easing = FastOutSlowInEasing),
+                        repeatMode = RepeatMode.Reverse
+                    ),
+                    label = "PulseAlpha"
+                )
+
+                suspend fun restoreSessionAndProceed() {
                     if (hasNavigated) return
                     hasNavigated = true
                     try {
-                        val boundAccount = bindingManager.getBoundAccount()
+                        val isExplicitLogout = bindingManager.isExplicitLogout()
+                        if (isExplicitLogout) {
+                            // User intentionally logged out previously; present manual login
+                            navController.navigate("login") {
+                                popUpTo("splash") { inclusive = true }
+                            }
+                            return
+                        }
+
+                        splashStatusText = "Restoring authenticated session..."
+                        sessionProgress = 0.6f
+
+                        // Auto-detect active identity from Firebase Auth or local bound profile
                         val currentUser = tournamentRepository.auth.currentUser
+                        val boundAccount = bindingManager.getBoundAccount()
                         val savedEmail = sharedPrefs.getString("user_email", null)
-                        val activeEmail = currentUser?.email ?: boundAccount?.email ?: savedEmail
-                        if (!activeEmail.isNullOrBlank()) {
-                            val cleanEmail = activeEmail.trim().lowercase()
-                            val username = cleanEmail.substringBefore("@")
-                            bindingManager.recordAccount(cleanEmail, username, role = "super_admin", autoLogin = true)
-                            tournamentRepository.recordAccountLocally(cleanEmail, username, role = "super_admin")
-                            tournamentRepository.ensureAuthenticatedSession(cleanEmail)
-                            viewModel.setManualLoginEmail(cleanEmail)
-                            sharedPrefs.edit().putString("user_email", cleanEmail).apply()
+
+                        val activeIdentifier = currentUser?.email
+                            ?: currentUser?.phoneNumber
+                            ?: boundAccount?.email
+                            ?: savedEmail
+                            ?: bindingManager.getEffectiveActiveIdentity()
+
+                        val cleanEmail = activeIdentifier.trim().lowercase()
+                        val username = if (cleanEmail.contains("@")) cleanEmail.substringBefore("@") else cleanEmail
+                        val effectiveUid = currentUser?.uid ?: boundAccount?.uid ?: "ADM_${cleanEmail.replace("@", "_").replace(".", "_")}"
+
+                        // Bind account & store session state
+                        bindingManager.bindAccount(cleanEmail, username, role = "super_admin", autoLogin = true, uid = effectiveUid)
+                        tournamentRepository.recordAccountLocally(cleanEmail, username, role = "super_admin", uid = effectiveUid)
+                        sharedPrefs.edit().putString("user_email", cleanEmail).apply()
+                        viewModel.setManualLoginEmail(cleanEmail)
+
+                        // Trigger non-blocking async session sync
+                        coroutineScope.launch(Dispatchers.IO) {
+                            try {
+                                tournamentRepository.ensureAuthenticatedSession(cleanEmail)
+                            } catch (_: Exception) {}
+                        }
+
+                        splashStatusText = "Session restored · Launching console..."
+                        sessionProgress = 1.0f
+                        delay(200L)
+
+                        viewModel.fetchData()
+                        navController.navigate("dashboard") {
+                            popUpTo("splash") { inclusive = true }
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                        try {
+                            val fallbackEmail = "anantisback47@gmail.com"
+                            viewModel.setManualLoginEmail(fallbackEmail)
                             viewModel.fetchData()
                             navController.navigate("dashboard") {
                                 popUpTo("splash") { inclusive = true }
                             }
-                        } else {
+                        } catch (_: Exception) {
                             navController.navigate("login") {
                                 popUpTo("splash") { inclusive = true }
                             }
                         }
-                    } catch (_: Exception) {
-                        try {
-                            navController.navigate("login") {
-                                popUpTo("splash") { inclusive = true }
-                            }
-                        } catch (_: Exception) {}
                     }
                 }
 
                 LaunchedEffect(Unit) {
-                    delay(300L) // Fast smooth splash transition
-                    proceedToNext()
+                    delay(300L)
+                    restoreSessionAndProceed()
                 }
 
-                // Hard fallback timer
+                // Watchdog to guarantee immediate navigation without hang
                 LaunchedEffect(Unit) {
-                    delay(800L)
-                    proceedToNext()
+                    delay(1200L)
+                    if (!hasNavigated) {
+                        restoreSessionAndProceed()
+                    }
                 }
-                
+
+                val animatedProgress by animateFloatAsState(
+                    targetValue = sessionProgress,
+                    animationSpec = tween(300, easing = FastOutSlowInEasing),
+                    label = "SessionProgress"
+                )
+
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(Color(0xFF0A0A0E))
-                        .clickable { coroutineScope.launch { proceedToNext() } },
+                        .clickable { coroutineScope.launch { restoreSessionAndProceed() } },
                     contentAlignment = Alignment.Center
                 ) {
                     Column(
@@ -216,7 +274,7 @@ fun TournamentApp(
                     ) {
                         Text(
                             text = "VELORIX",
-                            color = VelorixAccent,
+                            color = VelorixAccent.copy(alpha = pulseAlpha),
                             fontSize = 44.sp,
                             fontWeight = FontWeight.Bold,
                             letterSpacing = 4.sp
@@ -224,18 +282,27 @@ fun TournamentApp(
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
                             text = "TOURNAMENT OVERSIGHT",
-                            color = Color.White.copy(alpha = 0.7f),
+                            color = Color.White.copy(alpha = 0.75f),
                             fontSize = 13.sp,
                             letterSpacing = 2.sp
                         )
                         
-                        Spacer(modifier = Modifier.height(36.dp))
+                        Spacer(modifier = Modifier.height(32.dp))
                         LinearProgressIndicator(
+                            progress = { animatedProgress },
                             modifier = Modifier
-                                .width(140.dp)
+                                .width(160.dp)
                                 .height(3.dp),
                             color = VelorixAccent,
                             trackColor = Color.White.copy(alpha = 0.1f)
+                        )
+
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Text(
+                            text = splashStatusText,
+                            color = Color.White.copy(alpha = 0.5f),
+                            fontSize = 11.sp,
+                            letterSpacing = 1.sp
                         )
                     }
                 }
@@ -254,6 +321,7 @@ fun TournamentApp(
                             val finalEmail = userEmail ?: bindingManager.getBoundAccount()?.email ?: "anantisback47@gmail.com"
                             val cleanEmail = finalEmail.trim().lowercase()
                             val username = cleanEmail.substringBefore("@")
+                            bindingManager.setExplicitLogout(false)
                             bindingManager.recordAccount(cleanEmail, username, role = "super_admin", autoLogin = true)
                             tournamentRepository.recordAccountLocally(cleanEmail, username, role = "super_admin")
                             tournamentRepository.ensureAuthenticatedSession(cleanEmail)
@@ -291,6 +359,7 @@ fun TournamentApp(
                     },
                     onNavClick = { route ->
                         if (route == "logout") {
+                            bindingManager.setExplicitLogout(true)
                             sharedPrefs.edit().clear().apply()
                             bindingManager.unbindAccount()
                             viewModel.setManualLoginEmail(null)
@@ -315,6 +384,20 @@ fun TournamentApp(
                     },
                     onAddFunds = { user, amount ->
                         viewModel.addFundsToUser(user, amount)
+                    },
+                    onAddFundsBucket = { user, amount, bucket, reason ->
+                        viewModel.addFundsToUser(user, amount, bucket, reason)
+                    },
+                    onRecordMatchWinning = { user, tournamentId, tournamentTitle, kills, rank, winningAmount, entryFeePaid ->
+                        viewModel.recordPlayerMatchWinning(
+                            user = user,
+                            tournamentId = tournamentId,
+                            tournamentTitle = tournamentTitle,
+                            kills = kills,
+                            rank = rank,
+                            winningAmount = winningAmount,
+                            entryFeePaid = entryFeePaid
+                        )
                     },
                     onDeleteUser = { user ->
                         viewModel.deleteUser(user)
@@ -353,7 +436,7 @@ fun TournamentApp(
                         viewModel.getTicketMessagesStream(ticketId)
                     },
                     onIssueTicketCompensation = { ticket, amount, reason, onComplete ->
-                        viewModel.issueTicketCompensation(ticket, amount, reason, onComplete)
+                        viewModel.issueTicketCompensation(ticket = ticket, amount = amount, reason = reason, onComplete = onComplete)
                     },
                     onSaveToken = { token ->
                         viewModel.saveToken(token)
@@ -418,7 +501,8 @@ fun TournamentApp(
                                 viewModel.refreshRealtimeData()
                             }
                         }
-                    }
+                    },
+                    viewModel = viewModel
                 )
             }
             composable("tournament_details/{tournamentId}") { backStackEntry ->
@@ -478,7 +562,8 @@ fun TournamentApp(
                         },
                         onUpdateTournament = { updated ->
                             viewModel.updateTournament(updated)
-                        }
+                        },
+                        viewModel = viewModel
                     )
                 } else {
                     GlassBackgroundBox(accentColor = VelorixAccent) {
@@ -557,17 +642,17 @@ fun TournamentApp(
                 )
             }
             composable("bracket/{tournamentId}") { backStackEntry ->
-                val tournamentId = backStackEntry.arguments?.getString("tournamentId")
-                if (tournamentId != null) {
-                    val bracketViewModel: com.example.ui.viewmodel.BracketViewModel = viewModel(
-                        factory = com.example.ui.viewmodel.BracketViewModel.provideFactory(tournamentRepository)
-                    )
-                    BracketManagementScreen(
-                        tournamentId = tournamentId,
-                        viewModel = bracketViewModel,
-                        onNavigateBack = { navController.popBackStack() }
-                    )
-                }
+                val tournamentId = backStackEntry.arguments?.getString("tournamentId") ?: ""
+                val bracketViewModel: com.example.ui.viewmodel.BracketViewModel = viewModel(
+                    factory = com.example.ui.viewmodel.BracketViewModel.provideFactory(tournamentRepository)
+                )
+                val allTourneys = (uiState as? DashboardState.Success)?.tournaments ?: emptyList()
+                BracketManagementScreen(
+                    tournamentId = tournamentId,
+                    viewModel = bracketViewModel,
+                    tournaments = allTourneys,
+                    onNavigateBack = { navController.popBackStack() }
+                )
             }
             composable("daily_revenue") {
                 val success = uiState as? DashboardState.Success

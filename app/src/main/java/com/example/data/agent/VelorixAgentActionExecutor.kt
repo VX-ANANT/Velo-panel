@@ -246,7 +246,7 @@ object VelorixAgentActionExecutor {
 
                     ExecutionResult(
                         success = true,
-                        message = "🎫 Support Ticket $ticketId updated to $status."
+                        message = "Support Ticket $ticketId updated to $status."
                     )
                 }
 
@@ -275,7 +275,7 @@ object VelorixAgentActionExecutor {
 
                     ExecutionResult(
                         success = true,
-                        message = "📢 Global Announcement \"$title\" broadcasted to all active players."
+                        message = "Global Announcement \"$title\" broadcasted to all active players."
                     )
                 }
 

@@ -27,14 +27,14 @@ object VelorixLocalAgentEngine {
         // 2. Sync architecture inquiries between Admin & User panel
         if (lower.contains("sink") || lower.contains("sync") || (lower.contains("user panel") && lower.contains("admin"))) {
             return """
-🔄 **Velorix Dual-Database Sync Architecture**
+**Velorix Dual-Database Sync Architecture**
 
 Admin panel aur User panel 100% real-time sync me kaise rehte hain:
 
 1. **Firebase Realtime Database (RTDB)**:
    • Live match slots & active player joins
    • Instant Room ID & Password broadcast (5-10 minutes before match start)
-   • Real-time match status (UPCOMING ➔ LIVE ➔ COMPLETED)
+   • Real-time match status (UPCOMING -> LIVE -> COMPLETED)
 
 2. **Cloud Firestore**:
    • Tournament catalog, rules, map, & prize distribution
@@ -63,7 +63,7 @@ Bataiye, aaj kya schedule ya match action deploy karna hai?
         // 4. Inquiries about competitive Free Fire rules
         if (lower.contains("rule") || lower.contains("niyam") || lower.contains("guideline")) {
             return """
-📋 **Standard Velorix Competitive Free Fire Rules**:
+**Standard Velorix Competitive Free Fire Rules**:
 
 1. **Gun Attributes**: Strictly **OFF** in custom room settings.
 2. **Character Skills**: Enabled (except Chrono/active skill restrictions if tournament format specifies).
@@ -129,7 +129,7 @@ Kya aap isme koi tournament configure karna chahte hain ya live stats dekhna cha
 
     private fun generateContextualStatusResponse(liveContext: String): String {
         return """
-📊 **Live Tournament & Operations Overview**
+**Live Tournament & Operations Overview**
 
 Backend real-time sync active hai:
 • **Tournaments**: Upcoming matches schedule me ready hain.
@@ -208,7 +208,7 @@ Aap specific tournament ki details dekhne ke liye top-right me **Inspect Live Da
         }
 
         return """
-⚔️ **Tournament Draft Configured**
+**TOURNAMENT DRAFT CONFIGURED**
 Tournament details configure kar di gayi hain:
 • **Mode**: $title
 • **Format**: $format ($map)

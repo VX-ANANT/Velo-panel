@@ -54,6 +54,7 @@ fun ComplaintsSupportScreen(
     users: List<UserProfile>,
     initialTickets: List<ComplaintTicket> = emptyList(),
     onAddFundsToUser: (UserProfile, Double) -> Unit,
+    onAddFundsBucket: ((UserProfile, Double, com.example.domain.model.WalletBucket, String) -> Unit)? = null,
     onSaveTicket: ((ComplaintTicket) -> Unit)? = null,
     onDeleteTicket: ((String) -> Unit)? = null,
     onSendTicketMessage: ((ticketId: String, message: String, onComplete: (Boolean) -> Unit) -> Unit)? = null,
@@ -74,6 +75,7 @@ fun ComplaintsSupportScreen(
     var ticketToDissolve by remember { mutableStateOf<ComplaintTicket?>(null) }
     var refundAmountInput by remember { mutableStateOf("250") }
     var refundReasonInput by remember { mutableStateOf("Support ticket compensation resolution") }
+    var selectedCompensationBucket by remember { mutableStateOf(com.example.domain.model.WalletBucket.DEPOSIT) }
 
     val filteredTickets = remember(tickets, filterStatus) {
         when (filterStatus) {
@@ -171,13 +173,52 @@ fun ComplaintsSupportScreen(
                 }
             },
             text = {
-                Column {
-                    Text("Issue compensation directly to ${ticket.username} (${ticket.userEmail})", color = Color.LightGray, fontSize = 13.sp)
-                    Spacer(modifier = Modifier.height(12.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Issue compensation directly to ${ticket.username} (${ticket.userEmail})", color = Color.LightGray, fontSize = 12.5.sp)
+                    Text("Select Wallet Bucket:", color = Color(0xFFA1A1AA), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        com.example.domain.model.WalletBucket.values().forEach { bucketOpt ->
+                            val isSel = selectedCompensationBucket == bucketOpt
+                            val bucketAccent = when (bucketOpt) {
+                                com.example.domain.model.WalletBucket.WINNING -> Color(0xFF30D158)
+                                com.example.domain.model.WalletBucket.DEPOSIT -> Color(0xFF0A84FF)
+                                com.example.domain.model.WalletBucket.BONUS -> Color(0xFFFFD60A)
+                            }
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable { selectedCompensationBucket = bucketOpt }
+                                    .padding(vertical = 6.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = bucketOpt.shortLabel.uppercase(),
+                                    color = if (isSel) bucketAccent else Color(0xFF71717A),
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium
+                                )
+                                Text(
+                                    text = if (bucketOpt.isWithdrawable) "Withdrawable" else "Locked",
+                                    color = if (isSel) Color.White else Color(0xFF52525B),
+                                    fontSize = 9.sp
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth(0.75f)
+                                        .height(1.5.dp)
+                                        .background(if (isSel) bucketAccent else Color.Transparent)
+                                )
+                            }
+                        }
+                    }
                     OutlinedTextField(
                         value = refundAmountInput,
                         onValueChange = { refundAmountInput = it },
-                        label = { Text("Amount in INR (₹)", color = Color.Gray) },
+                        label = { Text("Amount in INR (₹) -> ${selectedCompensationBucket.shortLabel}", color = Color.Gray) },
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = Color.White,
                             unfocusedTextColor = Color.White,
@@ -186,7 +227,6 @@ fun ComplaintsSupportScreen(
                         ),
                         modifier = Modifier.fillMaxWidth()
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(
                         value = refundReasonInput,
                         onValueChange = { refundReasonInput = it },
@@ -206,29 +246,35 @@ fun ComplaintsSupportScreen(
                     onClick = {
                         val amount = refundAmountInput.toDoubleOrNull() ?: 0.0
                         if (amount > 0) {
-                            if (onIssueTicketCompensation != null) {
-                                onIssueTicketCompensation(ticket, amount, refundReasonInput) { ok ->
+                            val matchedUser = users.find { it.email.equals(ticket.userEmail, ignoreCase = true) || it.id == ticket.userId }
+                            if (matchedUser != null && onAddFundsBucket != null) {
+                                onAddFundsBucket(matchedUser, amount, selectedCompensationBucket, "$refundReasonInput (Ticket #${ticket.id})")
+                                val updated = ticket.copy(
+                                    status = "RESOLVED",
+                                    adminNote = "Compensated ₹$amount to ${selectedCompensationBucket.displayName}: $refundReasonInput"
+                                )
+                                tickets = tickets.map { if (it.id == ticket.id) updated else it }
+                                onSaveTicket?.invoke(updated)
+                            } else if (onIssueTicketCompensation != null) {
+                                onIssueTicketCompensation(ticket, amount, "$refundReasonInput [${selectedCompensationBucket.shortLabel}]") { ok ->
                                     if (ok) {
-                                        val updated = ticket.copy(status = "RESOLVED", adminNote = "Compensated ₹$amount")
+                                        val updated = ticket.copy(status = "RESOLVED", adminNote = "Compensated ₹$amount (${selectedCompensationBucket.shortLabel})")
                                         tickets = tickets.map { if (it.id == ticket.id) updated else it }
                                     }
                                 }
-                            } else {
-                                val matchedUser = users.find { it.email.equals(ticket.userEmail, ignoreCase = true) }
-                                if (matchedUser != null) {
-                                    onAddFundsToUser(matchedUser, amount)
-                                }
+                            } else if (matchedUser != null) {
+                                onAddFundsToUser(matchedUser, amount)
                                 val updated = ticket.copy(status = "REFUNDED", adminNote = "Refunded ₹$amount: $refundReasonInput")
                                 tickets = tickets.map { if (it.id == ticket.id) updated else it }
                                 onSaveTicket?.invoke(updated)
                             }
-                            Toast.makeText(context, "₹$amount compensation issued to ${ticket.username}!", Toast.LENGTH_LONG).show()
+                            Toast.makeText(context, "₹$amount credited to ${selectedCompensationBucket.displayName} for ${ticket.username}!", Toast.LENGTH_LONG).show()
                         }
                         showRefundDialog = null
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent)
                 ) {
-                    Text("Grant ₹ Credit", color = Color.Black, fontWeight = FontWeight.Bold)
+                    Text("Credit ${selectedCompensationBucket.shortLabel}", color = Color.Black, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -458,37 +504,40 @@ fun ComplaintsSupportScreen(
 fun StatBadge(modifier: Modifier = Modifier, label: String, value: String, icon: androidx.compose.ui.graphics.vector.ImageVector, color: Color) {
     Column(
         modifier = modifier
-            .background(CardLiveBg, RoundedCornerShape(12.dp))
-            .border(1.dp, color.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
-            .padding(10.dp)
+            .background(Color.Black)
+            .padding(vertical = 8.dp, horizontal = 4.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(16.dp))
+            Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(15.dp))
             Spacer(modifier = Modifier.width(4.dp))
-            Text(label, color = Color.Gray, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(label.uppercase(), color = Color.Gray, fontSize = 9.5.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Spacer(modifier = Modifier.height(4.dp))
-        Text(value, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        Text(value, color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 17.sp)
     }
 }
 
 @Composable
 fun FilterChipTab(label: String, isSelected: Boolean, onClick: () -> Unit) {
-    Box(
+    Column(
         modifier = Modifier
-            .background(
-                if (isSelected) VelorixAccent else CardLiveBg,
-                RoundedCornerShape(20.dp)
-            )
-            .border(1.dp, if (isSelected) VelorixAccent else CardVerifyBorder, RoundedCornerShape(20.dp))
             .clickable { onClick() }
-            .padding(horizontal = 14.dp, vertical = 6.dp)
+            .padding(horizontal = 4.dp, vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text = label,
-            color = if (isSelected) Color.Black else Color.LightGray,
-            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-            fontSize = 12.sp
+            text = label.uppercase(),
+            color = if (isSelected) VelorixAccent else Color.Gray,
+            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+            fontSize = 11.sp,
+            letterSpacing = 0.6.sp
+        )
+        Spacer(modifier = Modifier.height(5.dp))
+        Box(
+            modifier = Modifier
+                .width(36.dp)
+                .height(2.dp)
+                .background(if (isSelected) VelorixAccent else Color.Transparent)
         )
     }
 }
@@ -504,30 +553,23 @@ fun ComplaintCard(
     onDissolve: () -> Unit
 ) {
     val isResolved = ticket.status.equals("RESOLVED", ignoreCase = true) || ticket.status.equals("CLOSED", ignoreCase = true)
-    val statusBg = when {
-        isResolved -> Color.Green.copy(alpha = 0.2f)
-        ticket.status == "INVESTIGATING" -> Color(0xFFFFB74D).copy(alpha = 0.2f)
-        ticket.status == "REFUNDED" -> VelorixAccent.copy(alpha = 0.2f)
-        else -> Color.Red.copy(alpha = 0.2f)
-    }
     val statusTextColor = when {
-        isResolved -> Color.Green
+        isResolved -> Color(0xFF4ADE80)
         ticket.status == "INVESTIGATING" -> Color(0xFFFFB74D)
         ticket.status == "REFUNDED" -> VelorixAccent
-        else -> Color.Red
+        else -> Color(0xFFF87171)
     }
 
-    Surface(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .clickable { onClick() },
-        color = CardLiveBg,
-        shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, if (ticket.isHighPriority) Color.Red.copy(alpha = 0.6f) else CardVerifyBorder)
+            .background(Color.Black)
+            .clickable { onClick() }
     ) {
         Column(
-            modifier = Modifier.padding(14.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 14.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -535,137 +577,137 @@ fun ComplaintCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(ticket.id, color = VelorixAccent, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("#${ticket.id}", color = VelorixAccent, fontWeight = FontWeight.Bold, fontSize = 13.5.sp)
                     if (ticket.isHighPriority) {
-                        Box(
-                            modifier = Modifier
-                                .background(Color.Red, RoundedCornerShape(4.dp))
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        ) {
-                            Text("HIGH PRIORITY", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                        }
+                        Text(
+                            text = "  •  HIGH PRIORITY",
+                            color = Color(0xFFEF4444),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            letterSpacing = 0.5.sp
+                        )
                     }
                 }
-                Box(
-                    modifier = Modifier
-                        .background(statusBg, RoundedCornerShape(6.dp))
-                        .padding(horizontal = 8.dp, vertical = 3.dp)
-                ) {
-                    Text(ticket.status, color = statusTextColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                }
+                Text(
+                    text = ticket.status.uppercase(),
+                    color = statusTextColor,
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 0.6.sp
+                )
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(6.dp))
             Text(
                 text = "${ticket.username} (${ticket.gameId.ifEmpty { "No IGN" }})",
                 color = Color.White,
                 fontWeight = FontWeight.Bold,
                 fontSize = 15.sp
             )
-            Text(ticket.userEmail, color = Color.Gray, fontSize = 12.sp)
+            Text(ticket.userEmail, color = Color.Gray, fontSize = 11.5.sp)
 
-            Spacer(modifier = Modifier.height(6.dp))
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color(0xFF181818), RoundedCornerShape(8.dp))
-                    .padding(10.dp)
-            ) {
-                Column {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.SportsEsports, contentDescription = null, tint = VelorixAccent, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = ticket.tournamentTitle.ifEmpty { "General Tournament Inquiry" },
-                            color = VelorixTextPrimary,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.weight(1f, fill = false),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Spacer(modifier = Modifier.weight(1f))
-                        Text(ticket.issueCategory, color = Color(0xFF64B5F6), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(ticket.description, color = Color.LightGray, fontSize = 12.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
-                }
-            }
+            Spacer(modifier = Modifier.height(8.dp))
 
-            Spacer(modifier = Modifier.height(10.dp))
+            // Flat inline tournament + category row (zero nested box)
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                // Live Chat Primary Action
-                Button(
-                    onClick = onLiveChat,
-                    modifier = Modifier.weight(1.3f).height(36.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
-                    contentPadding = PaddingValues(horizontal = 8.dp)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f, fill = false)
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Chat, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                    Icon(Icons.Default.SportsEsports, contentDescription = null, tint = VelorixAccent, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(5.dp))
+                    Text(
+                        text = ticket.tournamentTitle.ifEmpty { "General Tournament Inquiry" },
+                        color = VelorixTextPrimary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Text(
+                    text = ticket.issueCategory.uppercase(),
+                    color = Color(0xFF60A5FA),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.5.sp
+                )
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = ticket.description,
+                color = Color(0xFFA1A1AA),
+                fontSize = 12.sp,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Flat inline action bar
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        modifier = Modifier.clickable { onLiveChat() }.padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Chat, contentDescription = null, tint = Color(0xFF60A5FA), modifier = Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Live Chat", fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                        Text("LIVE CHAT", fontSize = 11.sp, color = Color(0xFF60A5FA), fontWeight = FontWeight.Bold)
                     }
-                }
 
-                // Issue Compensation / Refund
-                Button(
-                    onClick = onIssueRefund,
-                    modifier = Modifier.weight(1f).height(36.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent),
-                    contentPadding = PaddingValues(0.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Payments, contentDescription = null, tint = Color.Black, modifier = Modifier.size(13.dp))
-                        Spacer(modifier = Modifier.width(3.dp))
-                        Text("₹ Credit", fontSize = 11.sp, color = Color.Black, fontWeight = FontWeight.Bold)
+                    Row(
+                        modifier = Modifier.clickable { onIssueRefund() }.padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Payments, contentDescription = null, tint = VelorixAccent, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("₹ CREDIT", fontSize = 11.sp, color = VelorixAccent, fontWeight = FontWeight.Bold)
                     }
-                }
 
-                // Resolve / Reopen Toggle
-                Button(
-                    onClick = onToggleResolve,
-                    modifier = Modifier.weight(1.1f).height(36.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isResolved) Color(0xFF374151) else Color(0xFF16A34A)
-                    ),
-                    contentPadding = PaddingValues(0.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        modifier = Modifier.clickable { onToggleResolve() }.padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Icon(
                             if (isResolved) Icons.Default.Refresh else Icons.Default.CheckCircle,
                             contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(13.dp)
+                            tint = if (isResolved) Color.Gray else Color(0xFF4ADE80),
+                            modifier = Modifier.size(14.dp)
                         )
-                        Spacer(modifier = Modifier.width(3.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = if (isResolved) "Reopen" else "Resolve",
+                            text = if (isResolved) "REOPEN" else "RESOLVE",
                             fontSize = 11.sp,
-                            color = Color.White,
+                            color = if (isResolved) Color.Gray else Color(0xFF4ADE80),
                             fontWeight = FontWeight.Bold
                         )
                     }
                 }
 
-                // Dissolve / Delete Button
                 IconButton(
                     onClick = onDissolve,
-                    modifier = Modifier.size(36.dp).background(Color(0xFF27272A), CircleShape)
+                    modifier = Modifier.size(28.dp)
                 ) {
                     Icon(Icons.Default.DeleteOutline, contentDescription = "Dissolve Ticket", tint = Color(0xFFEF4444), modifier = Modifier.size(16.dp))
                 }
             }
         }
+        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
     }
 }
 
 /**
- * Real-Time Ticket Live Chat Dialog with bidirectional message streaming
+ * Real-Time Ticket Live Chat Dialog with flat pure AMOLED black layout
  */
 @Composable
 fun TicketLiveChatDialog(
@@ -678,7 +720,6 @@ fun TicketLiveChatDialog(
     onUpdateStatus: (String) -> Unit
 ) {
     var inputText by remember { mutableStateOf("") }
-    val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
     var messages by remember { mutableStateOf<List<TicketMessage>>(emptyList()) }
@@ -710,119 +751,96 @@ fun TicketLiveChatDialog(
             modifier = Modifier
                 .fillMaxWidth(0.96f)
                 .fillMaxHeight(0.92f),
-            shape = RoundedCornerShape(24.dp),
-            color = Color(0xFF0F0F12),
-            border = BorderStroke(1.dp, CardVerifyBorder)
+            shape = RoundedCornerShape(16.dp),
+            color = Color.Black,
+            border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.12f))
         ) {
             Column(
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black)
             ) {
                 // Top Chat Header
-                Surface(
-                    color = Color(0xFF18181F),
-                    modifier = Modifier.fillMaxWidth()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .background(Color(0xFF2563EB).copy(alpha = 0.2f), CircleShape)
-                                    .border(1.dp, Color(0xFF2563EB), CircleShape),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(Icons.Default.SupportAgent, contentDescription = null, tint = Color(0xFF60A5FA), modifier = Modifier.size(22.dp))
-                            }
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        text = ticket.username.ifEmpty { "Player" },
-                                        color = Color.White,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 15.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Surface(
-                                        shape = RoundedCornerShape(4.dp),
-                                        color = when (ticket.status) {
-                                            "RESOLVED" -> Color.Green.copy(alpha = 0.2f)
-                                            "INVESTIGATING" -> Color(0xFFFFB74D).copy(alpha = 0.2f)
-                                            else -> Color.Red.copy(alpha = 0.2f)
-                                        }
-                                    ) {
-                                        Text(
-                                            text = ticket.status,
-                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                            color = when (ticket.status) {
-                                                "RESOLVED" -> Color.Green
-                                                "INVESTIGATING" -> Color(0xFFFFB74D)
-                                                else -> Color.Red
-                                            },
-                                            fontSize = 9.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                }
+                        Icon(Icons.Default.SupportAgent, contentDescription = null, tint = Color(0xFF60A5FA), modifier = Modifier.size(22.dp))
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
-                                    text = "Ticket #${ticket.id} • ${ticket.issueCategory}",
-                                    color = Color.Gray,
-                                    fontSize = 11.sp,
+                                    text = ticket.username.ifEmpty { "Player" },
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
+                                Text(
+                                    text = "  •  ${ticket.status}",
+                                    color = when (ticket.status) {
+                                        "RESOLVED" -> Color(0xFF4ADE80)
+                                        "INVESTIGATING" -> Color(0xFFFFB74D)
+                                        else -> Color(0xFFF87171)
+                                    },
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
                             }
+                            Text(
+                                text = "Ticket #${ticket.id} • ${ticket.issueCategory}",
+                                color = Color.Gray,
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
+                    }
 
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(onClick = onIssueRefund, modifier = Modifier.size(32.dp)) {
-                                Icon(Icons.Default.Payments, contentDescription = "Refund", tint = VelorixAccent, modifier = Modifier.size(20.dp))
-                            }
-                            IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
-                                Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.LightGray, modifier = Modifier.size(20.dp))
-                            }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = onIssueRefund, modifier = Modifier.size(32.dp)) {
+                            Icon(Icons.Default.Payments, contentDescription = "Refund", tint = VelorixAccent, modifier = Modifier.size(20.dp))
+                        }
+                        IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
+                            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.LightGray, modifier = Modifier.size(20.dp))
                         }
                     }
                 }
 
-                // Initial Complaint Context Card
-                Surface(
-                    color = Color(0xFF14141A),
+                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+
+                // Initial Complaint Context Section (flat with bottom hairline)
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 8.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, Color(0xFF27272A))
+                        .padding(horizontal = 16.dp, vertical = 10.dp)
                 ) {
-                    Column(modifier = Modifier.padding(10.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text("Initial Complaint Context", color = Color(0xFF60A5FA), fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
-                            Text(ticket.userEmail, color = Color.Gray, fontSize = 10.5.sp)
-                        }
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = ticket.description,
-                            color = Color.LightGray,
-                            fontSize = 12.sp,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("INITIAL REPORT", color = Color(0xFF60A5FA), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp)
+                        Text(ticket.userEmail, color = Color.Gray, fontSize = 10.5.sp)
                     }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = ticket.description,
+                        color = Color.LightGray,
+                        fontSize = 12.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
+
+                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
 
                 // Real-Time Chat Message Stream
                 LazyColumn(
@@ -830,8 +848,9 @@ fun TicketLiveChatDialog(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .padding(horizontal = 14.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(vertical = 10.dp)
                 ) {
                     if (messages.isEmpty()) {
                         item {
@@ -842,7 +861,7 @@ fun TicketLiveChatDialog(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Icon(Icons.Default.ChatBubbleOutline, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(32.dp))
+                                    Icon(Icons.Default.ChatBubbleOutline, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(28.dp))
                                     Spacer(modifier = Modifier.height(8.dp))
                                     Text("No messages in this ticket yet.", color = Color.Gray, fontSize = 12.sp)
                                     Text("Type a response below to connect live with ${ticket.username}.", color = Color.DarkGray, fontSize = 11.sp)
@@ -856,76 +875,67 @@ fun TicketLiveChatDialog(
                     }
                 }
 
-                // Quick Response Chips
+                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+
+                // Quick Response Row
                 LazyRow(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     items(quickReplies) { reply ->
-                        Surface(
-                            shape = RoundedCornerShape(14.dp),
-                            color = Color(0xFF1E1E26),
-                            border = BorderStroke(1.dp, Color(0xFF33333E)),
-                            modifier = Modifier.clickable {
-                                onSendMessage(reply)
-                            }
-                        ) {
-                            Text(
-                                text = reply,
-                                color = Color(0xFFE2E8F0),
-                                fontSize = 10.5.sp,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                            )
-                        }
+                        Text(
+                            text = reply,
+                            color = VelorixAccent,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier
+                                .clickable { onSendMessage(reply) }
+                                .padding(vertical = 4.dp)
+                        )
                     }
                 }
 
+                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+
                 // Text Input & Send Row
-                Surface(
-                    color = Color(0xFF18181F),
-                    modifier = Modifier.fillMaxWidth()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                    OutlinedTextField(
+                        value = inputText,
+                        onValueChange = { inputText = it },
+                        placeholder = { Text("Type reply to player...", color = Color.Gray, fontSize = 13.sp) },
+                        modifier = Modifier.weight(1f),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = VelorixAccent,
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.12f),
+                            focusedContainerColor = Color.Black,
+                            unfocusedContainerColor = Color.Black
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        maxLines = 3
+                    )
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    IconButton(
+                        onClick = {
+                            val text = inputText.trim()
+                            if (text.isNotBlank()) {
+                                onSendMessage(text)
+                                inputText = ""
+                            }
+                        },
+                        modifier = Modifier.size(42.dp)
                     ) {
-                        OutlinedTextField(
-                            value = inputText,
-                            onValueChange = { inputText = it },
-                            placeholder = { Text("Type reply to player...", color = Color.Gray, fontSize = 13.sp) },
-                            modifier = Modifier.weight(1f),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedBorderColor = VelorixAccent,
-                                unfocusedBorderColor = Color(0xFF2E2E38),
-                                focusedContainerColor = Color(0xFF0F0F12),
-                                unfocusedContainerColor = Color(0xFF0F0F12)
-                            ),
-                            shape = RoundedCornerShape(20.dp),
-                            maxLines = 3
-                        )
-
-                        Spacer(modifier = Modifier.width(8.dp))
-
-                        IconButton(
-                            onClick = {
-                                val text = inputText.trim()
-                                if (text.isNotBlank()) {
-                                    onSendMessage(text)
-                                    inputText = ""
-                                }
-                            },
-                            modifier = Modifier
-                                .size(44.dp)
-                                .background(VelorixAccent, CircleShape)
-                        ) {
-                            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send", tint = Color.Black, modifier = Modifier.size(20.dp))
-                        }
+                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send", tint = VelorixAccent, modifier = Modifier.size(20.dp))
                     }
                 }
             }
@@ -945,79 +955,49 @@ fun ChatMessageBubble(message: TicketMessage) {
         }
     }
 
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = if (isAdminOrSystem) Arrangement.End else Arrangement.Start
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        horizontalAlignment = if (isAdminOrSystem) Alignment.End else Alignment.Start
     ) {
-        Column(
-            horizontalAlignment = if (isAdminOrSystem) Alignment.End else Alignment.Start,
-            modifier = Modifier.widthIn(max = 280.dp)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
+            Text(
+                text = if (isAdminOrSystem) message.senderName.ifEmpty { "Velorix Support" } else message.senderName.ifEmpty { "Player" },
+                color = if (isAdminOrSystem) VelorixAccent else Color(0xFF60A5FA),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold
+            )
+            if (message.senderRole.isNotBlank()) {
                 Text(
-                    text = if (isAdminOrSystem) message.senderName.ifEmpty { "Velorix Support" } else message.senderName.ifEmpty { "Player" },
-                    color = if (isAdminOrSystem) VelorixAccent else Color(0xFF60A5FA),
-                    fontSize = 10.sp,
+                    text = message.senderRole.uppercase(),
+                    color = Color.Gray,
+                    fontSize = 8.5.sp,
                     fontWeight = FontWeight.Bold
                 )
-                if (message.senderRole.isNotBlank()) {
-                    Surface(
-                        shape = RoundedCornerShape(3.dp),
-                        color = if (isAdminOrSystem) VelorixAccent.copy(alpha = 0.2f) else Color(0xFF2563EB).copy(alpha = 0.2f)
-                    ) {
-                        Text(
-                            text = message.senderRole,
-                            color = if (isAdminOrSystem) VelorixAccent else Color(0xFF60A5FA),
-                            fontSize = 8.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                        )
-                    }
-                }
-                if (timeFormatted.isNotEmpty()) {
-                    Text(timeFormatted, color = Color.DarkGray, fontSize = 9.sp)
-                }
             }
-
-            Spacer(modifier = Modifier.height(2.dp))
-
-            Surface(
-                shape = RoundedCornerShape(
-                    topStart = 14.dp,
-                    topEnd = 14.dp,
-                    bottomStart = if (isAdminOrSystem) 14.dp else 2.dp,
-                    bottomEnd = if (isAdminOrSystem) 2.dp else 14.dp
-                ),
-                color = if (message.senderRole == "SYSTEM") {
-                    Color(0xFF2D1F00)
-                } else if (isAdminOrSystem) {
-                    Color(0xFF1E293B)
-                } else {
-                    Color(0xFF18181F)
-                },
-                border = BorderStroke(
-                    1.dp,
-                    if (message.senderRole == "SYSTEM") VelorixAccent.copy(alpha = 0.4f)
-                    else if (isAdminOrSystem) Color(0xFF3B82F6).copy(alpha = 0.3f)
-                    else Color(0xFF27272A)
-                )
-            ) {
-                Text(
-                    text = message.messageText,
-                    color = Color.White,
-                    fontSize = 12.5.sp,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-                )
+            if (timeFormatted.isNotEmpty()) {
+                Text(timeFormatted, color = Color.DarkGray, fontSize = 9.sp)
             }
         }
+
+        Spacer(modifier = Modifier.height(3.dp))
+
+        Text(
+            text = message.messageText,
+            color = Color.White,
+            fontSize = 13.sp,
+            modifier = Modifier.padding(vertical = 2.dp)
+        )
+        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.06f))
     }
 }
 
 /**
- * Full Detailed Ticket Adjudication Modal Dialog
+ * Full Detailed Ticket Adjudication Modal Dialog (Flat pure AMOLED black with 0.5.dp hairline dividers)
  */
 @Composable
 fun ComplaintTicketDetailDialog(
@@ -1041,12 +1021,13 @@ fun ComplaintTicketDetailDialog(
                 .fillMaxWidth()
                 .wrapContentHeight()
                 .padding(vertical = 16.dp),
-            shape = RoundedCornerShape(20.dp),
-            color = Color(0xFF121215),
-            border = BorderStroke(1.dp, CardVerifyBorder)
+            shape = RoundedCornerShape(16.dp),
+            color = Color.Black,
+            border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.14f))
         ) {
             Column(
                 modifier = Modifier
+                    .background(Color.Black)
                     .padding(20.dp)
                     .verticalScroll(rememberScrollState())
             ) {
@@ -1057,7 +1038,7 @@ fun ComplaintTicketDetailDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.SupportAgent, contentDescription = null, tint = VelorixAccent, modifier = Modifier.size(24.dp))
+                        Icon(Icons.Default.SupportAgent, contentDescription = null, tint = VelorixAccent, modifier = Modifier.size(22.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Column {
                             Text("Ticket #${ticket.id}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
@@ -1069,128 +1050,91 @@ fun ComplaintTicketDetailDialog(
                     }
                 }
 
-                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), color = Color(0xFF27272A))
+                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
 
-                // Priority & Status Banner
+                // Priority & Status Inline Row
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
+                    Text(
+                        text = "STATUS: ${ticket.status.uppercase()}",
                         color = when {
-                            isResolved -> Color.Green.copy(alpha = 0.2f)
-                            ticket.status == "INVESTIGATING" -> Color(0xFFFFB74D).copy(alpha = 0.2f)
-                            ticket.status == "REFUNDED" -> VelorixAccent.copy(alpha = 0.2f)
-                            else -> Color.Red.copy(alpha = 0.2f)
-                        }
-                    ) {
-                        Text(
-                            text = "STATUS: ${ticket.status}",
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                            color = when {
-                                isResolved -> Color.Green
-                                ticket.status == "INVESTIGATING" -> Color(0xFFFFB74D)
-                                ticket.status == "REFUNDED" -> VelorixAccent
-                                else -> Color.Red
-                            },
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 11.sp
-                        )
-                    }
+                            isResolved -> Color(0xFF4ADE80)
+                            ticket.status == "INVESTIGATING" -> Color(0xFFFFB74D)
+                            ticket.status == "REFUNDED" -> VelorixAccent
+                            else -> Color(0xFFF87171)
+                        },
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 11.sp,
+                        letterSpacing = 0.6.sp
+                    )
 
                     if (ticket.isHighPriority) {
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = Color(0xFFEF4444)
-                        ) {
-                            Text(
-                                text = "CRITICAL / HIGH PRIORITY",
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 10.sp
-                            )
-                        }
+                        Text(
+                            text = "CRITICAL / HIGH PRIORITY",
+                            color = Color(0xFFEF4444),
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 10.sp,
+                            letterSpacing = 0.6.sp
+                        )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
 
-                // Player Information Card
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = Color(0xFF1C1C22),
-                    border = BorderStroke(1.dp, Color(0xFF2E2E38)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text("Player Information", color = VelorixAccent, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Name / User:", color = Color.Gray, fontSize = 12.sp)
-                            Text(ticket.username, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-                        }
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Email:", color = Color.Gray, fontSize = 12.sp)
-                            Text(ticket.userEmail, color = Color.White, fontSize = 12.sp)
-                        }
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Text("Game ID / IGN:", color = Color.Gray, fontSize = 12.sp)
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(ticket.gameId.ifEmpty { "Not linked" }, color = VelorixAccent, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                if (ticket.gameId.isNotEmpty()) {
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    IconButton(
-                                        onClick = {
-                                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                            clipboard.setPrimaryClip(ClipData.newPlainText("Game ID", ticket.gameId))
-                                            Toast.makeText(context, "Copied Game ID: ${ticket.gameId}", Toast.LENGTH_SHORT).show()
-                                        },
-                                        modifier = Modifier.size(20.dp)
-                                    ) {
-                                        Icon(Icons.Default.ContentCopy, contentDescription = "Copy", tint = Color.Gray, modifier = Modifier.size(14.dp))
-                                    }
-                                }
-                            }
-                        }
-                        if (user != null) {
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("Current Wallet Balance:", color = Color.Gray, fontSize = 12.sp)
-                                Text("₹${user.totalWalletBalance.toInt()} (Deposit ₹${user.depositFunds.toInt()} | Win ₹${user.winningFunds.toInt()})", color = Color(0xFF4ADE80), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                // Player Information Section (flat, no nested box)
+                Text("PLAYER INFORMATION", color = VelorixAccent, fontWeight = FontWeight.Bold, fontSize = 10.5.sp, letterSpacing = 0.8.sp)
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Name / User", color = Color.Gray, fontSize = 12.sp)
+                    Text(ticket.username, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                }
+                Row(modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Email", color = Color.Gray, fontSize = 12.sp)
+                    Text(ticket.userEmail, color = Color.White, fontSize = 12.sp)
+                }
+                Row(modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text("Game ID / IGN", color = Color.Gray, fontSize = 12.sp)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(ticket.gameId.ifEmpty { "Not linked" }, color = VelorixAccent, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        if (ticket.gameId.isNotEmpty()) {
+                            Spacer(modifier = Modifier.width(4.dp))
+                            IconButton(
+                                onClick = {
+                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                    clipboard.setPrimaryClip(ClipData.newPlainText("Game ID", ticket.gameId))
+                                    Toast.makeText(context, "Copied Game ID: ${ticket.gameId}", Toast.LENGTH_SHORT).show()
+                                },
+                                modifier = Modifier.size(20.dp)
+                            ) {
+                                Icon(Icons.Default.ContentCopy, contentDescription = "Copy", tint = Color.Gray, modifier = Modifier.size(14.dp))
                             }
                         }
                     }
                 }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Tournament & Issue Description
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = Color(0xFF1C1C22),
-                    border = BorderStroke(1.dp, Color(0xFF2E2E38)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Category, contentDescription = null, tint = Color(0xFF60A5FA), modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Category: ${ticket.issueCategory}", color = Color(0xFF60A5FA), fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                        }
-                        if (ticket.tournamentTitle.isNotEmpty()) {
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text("Tournament: ${ticket.tournamentTitle}", color = Color.White, fontWeight = FontWeight.Medium, fontSize = 12.sp)
-                        }
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color(0xFF2E2E38))
-                        Text("Player Report Details:", color = Color.Gray, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(ticket.description, color = Color.White, fontSize = 13.sp, lineHeight = 18.sp)
+                if (user != null) {
+                    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Wallet Balance", color = Color.Gray, fontSize = 12.sp)
+                        Text("₹${user.totalWalletBalance.toInt()} (Dep ₹${user.depositFunds.toInt()} | Win ₹${user.winningFunds.toInt()})", color = Color(0xFF4ADE80), fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+
+                // Tournament & Issue Description (flat, no nested box)
+                Text("ISSUE REPORT", color = Color(0xFF60A5FA), fontWeight = FontWeight.Bold, fontSize = 10.5.sp, letterSpacing = 0.8.sp)
+                Spacer(modifier = Modifier.height(6.dp))
+                Text("Category: ${ticket.issueCategory}", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 12.5.sp)
+                if (ticket.tournamentTitle.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text("Tournament: ${ticket.tournamentTitle}", color = Color.Gray, fontSize = 12.sp)
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(ticket.description, color = Color(0xFFD4D4D8), fontSize = 12.5.sp, lineHeight = 18.sp)
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
 
                 // Admin Adjudication Note Input
                 OutlinedTextField(
@@ -1203,94 +1147,71 @@ fun ComplaintTicketDetailDialog(
                         focusedTextColor = Color.White,
                         unfocusedTextColor = Color.White,
                         focusedBorderColor = VelorixAccent,
-                        unfocusedBorderColor = Color(0xFF2E2E38)
+                        unfocusedBorderColor = Color.White.copy(alpha = 0.12f)
                     ),
                     maxLines = 3
                 )
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
                 // Actions Section
-                Text("Action & Adjudication Controls", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Live Chat Dedicated Button
                 Button(
                     onClick = onOpenLiveChat,
                     modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB))
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+                    shape = RoundedCornerShape(8.dp)
                 ) {
                     Icon(Icons.Default.Chat, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Open Real-Time Live Support Chat", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text("Open Real-Time Live Support Chat", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.5.sp)
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(
+                    TextButton(
                         onClick = onDirectEmail,
-                        modifier = Modifier.weight(1f),
-                        border = BorderStroke(1.dp, Color(0xFF60A5FA))
+                        modifier = Modifier.weight(1f)
                     ) {
                         Icon(Icons.Default.Email, contentDescription = null, tint = Color(0xFF60A5FA), modifier = Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Send Email", color = Color(0xFF60A5FA), fontSize = 11.sp)
+                        Text("SEND EMAIL", color = Color(0xFF60A5FA), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
 
-                    Button(
+                    TextButton(
                         onClick = onIssueRefund,
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent)
+                        modifier = Modifier.weight(1f)
                     ) {
-                        Icon(Icons.Default.Payments, contentDescription = null, tint = Color.Black, modifier = Modifier.size(14.dp))
+                        Icon(Icons.Default.Payments, contentDescription = null, tint = VelorixAccent, modifier = Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("₹ Compensation", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        Text("₹ COMPENSATION", color = VelorixAccent, fontWeight = FontWeight.Bold, fontSize = 11.sp)
                     }
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp), thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
 
-                // Status Change Buttons
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(
-                        onClick = { onUpdateStatus("INVESTIGATING", adminNote) },
-                        modifier = Modifier.weight(1f),
-                        border = BorderStroke(1.dp, Color(0xFFFFB74D))
-                    ) {
-                        Text("Investigating", color = Color(0xFFFFB74D), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    TextButton(onClick = { onUpdateStatus("INVESTIGATING", adminNote) }) {
+                        Text("INVESTIGATING", color = Color(0xFFFFB74D), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
 
-                    Button(
+                    TextButton(
                         onClick = {
                             val next = if (isResolved) "PENDING" else "RESOLVED"
                             onUpdateStatus(next, adminNote)
-                        },
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(containerColor = if (isResolved) Color(0xFF374151) else Color(0xFF16A34A))
+                        }
                     ) {
-                        Icon(
-                            if (isResolved) Icons.Default.Refresh else Icons.Default.CheckCircle,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(14.dp)
+                        Text(
+                            if (isResolved) "REOPEN TICKET" else "MARK RESOLVED",
+                            color = if (isResolved) Color.Gray else Color(0xFF4ADE80),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
                         )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(if (isResolved) "Reopen Ticket" else "Mark Resolved", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
-                }
 
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Dissolve / Permanently Delete Action Button
-                Button(
-                    onClick = onDissolveTicket,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
-                ) {
-                    Icon(Icons.Default.DeleteForever, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Permanently Dissolve / Delete Ticket", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    TextButton(onClick = onDissolveTicket) {
+                        Text("DELETE", color = Color(0xFFEF4444), fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    }
                 }
             }
         }

@@ -14,26 +14,33 @@ class VelorixApplication : Application() {
     override fun onCreate() {
         super.onCreate()
 
-        // Set global uncaught exception handler to prevent hard crashes
+        // Initialize Firebase Core, Crashlytics, RTDB 50MB disk persistence, and Firestore 100MB cache first
+        try {
+            com.example.firebase.VelorixFirebaseSuite.initializeCore(this)
+        } catch (e: Exception) {
+            Log.e("VelorixApp", "Firebase core suite initialization error: ${e.message}", e)
+        }
+
+        // Set global uncaught exception handler to record fatal crashes in Crashlytics and prevent silent failures
         val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             Log.e("VelorixApp", "Uncaught exception on thread ${thread.name}: ${throwable.message}", throwable)
             try {
+                com.example.firebase.VelorixFirebaseSuite.recordNonFatal(
+                    tag = "UncaughtException",
+                    throwable = throwable,
+                    metadata = mapOf("thread_name" to thread.name),
+                    isFatal = true
+                )
                 GlobalErrorManager.emitError("Unexpected error occurred: ${throwable.localizedMessage ?: throwable.message}")
             } catch (_: Exception) {}
-            // Fallback to default handler only if necessary
             defaultHandler?.uncaughtException(thread, throwable)
         }
 
-        try {
-            FirebaseApp.initializeApp(this)
-        } catch (e: Exception) {
-            Log.e("VelorixApp", "Firebase core initialization error: ${e.message}", e)
-        }
-
         // Asynchronously initialize secondary background services to prevent blocking the main UI thread during cold start
-        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+        CoroutineScope(Dispatchers.IO).launch {
             try {
+                com.example.firebase.VelorixFirebaseSuite.initializeSecondaryServices(this@VelorixApplication)
                 com.example.data.ai.FirebaseAiManager.initializeAppCheck(this@VelorixApplication)
                 com.example.analytics.VelorixAnalytics.initialize(this@VelorixApplication)
                 com.example.notification.VelorixNotificationManager.initChannels(this@VelorixApplication)
@@ -43,6 +50,7 @@ class VelorixApplication : Application() {
                 com.example.data.repository.ApiKeyManager.initialize(this@VelorixApplication)
             } catch (e: Exception) {
                 Log.e("VelorixApp", "Async background services init error: ${e.message}", e)
+                com.example.firebase.VelorixFirebaseSuite.recordNonFatal("AsyncInitError", e)
             }
         }
 

@@ -50,12 +50,23 @@ object GlobalErrorManager {
             if (rawDetails.contains("datastore/setup") || rawDetails.contains("does not exist")) null else rawDetails
         } else null
 
+        val isActualError = !cleanMessage.contains("Realtime Database is active")
+        if (isActualError) {
+            try {
+                com.example.firebase.VelorixFirebaseSuite.recordNonFatal(
+                    tag = "GlobalError",
+                    throwable = throwable ?: IllegalStateException(cleanMessage),
+                    metadata = mapOf("ui_message" to cleanMessage)
+                )
+            } catch (_: Exception) {}
+        }
+
         _errorState.value = GlobalErrorUiState(
             message = cleanMessage,
             details = details,
             actionLabel = actionLabel,
             onAction = onAction,
-            isError = !cleanMessage.contains("Realtime Database is active"),
+            isError = isActualError,
             timestamp = System.currentTimeMillis()
         )
     }
@@ -105,6 +116,9 @@ object GlobalErrorManager {
     }
 
     fun emitSuccess(message: String) {
+        try {
+            com.example.firebase.VelorixFirebaseSuite.logBreadcrumb("Success", message)
+        } catch (_: Exception) {}
         _errorState.value = GlobalErrorUiState(
             message = message,
             isError = false,

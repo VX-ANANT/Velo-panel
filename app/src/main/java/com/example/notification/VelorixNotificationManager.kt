@@ -2,22 +2,23 @@ package com.example.notification
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.Context
-import android.content.Intent
-import android.media.RingtoneManager
 import android.os.Build
 import android.util.Log
-import androidx.core.app.NotificationCompat
-import com.example.MainActivity
-import com.example.R
 import com.example.domain.model.AppNotification
 import com.example.domain.model.Tournament
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import java.util.concurrent.atomic.AtomicInteger
 
+/**
+ * VelorixNotificationManager (Admin Panel):
+ * Builds structured player notifications and dispatches them directly to the User Panel
+ * (`com.tournaments.velorix` and `com.tournaments.velorix.mskqap`) via Firebase RTDB & Firestore.
+ *
+ * IMPORTANT: Does NOT trigger local Android system notifications or player banners on this
+ * Admin Panel device (`com.admin.velorix`) when sending pushes to players.
+ */
 object VelorixNotificationManager {
     private const val TAG = "VelorixNotifMgr"
 
@@ -25,39 +26,13 @@ object VelorixNotificationManager {
     const val CHANNEL_CAMPAIGNS = "velorix_campaigns_channel"
     const val CHANNEL_ADMIN = "velorix_admin_channel"
 
-    private val notificationIdCounter = AtomicInteger(1000)
-
-    // In-app real-time notification event bus
+    // In-app real-time notification event bus (reserved only for incoming admin-specific events)
     private val _inAppNotificationEvents = MutableSharedFlow<AppNotification>(extraBufferCapacity = 64)
     val inAppNotificationEvents: SharedFlow<AppNotification> = _inAppNotificationEvents.asSharedFlow()
 
     fun initChannels(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
-
-            val tourneyChannel = NotificationChannel(
-                CHANNEL_TOURNAMENTS,
-                "Tournaments & Matches",
-                NotificationManager.IMPORTANCE_HIGH
-            ).apply {
-                description = "Live tournament announcements, match schedules, and bracket updates"
-                enableLights(true)
-                enableVibration(true)
-                vibrationPattern = longArrayOf(0, 250, 100, 250)
-                setShowBadge(true)
-            }
-
-            val campaignChannel = NotificationChannel(
-                CHANNEL_CAMPAIGNS,
-                "Campaigns & Broadcasts",
-                NotificationManager.IMPORTANCE_HIGH
-            ).apply {
-                description = "Promotional campaigns, urgent esports broadcasts, and server notices"
-                enableLights(true)
-                enableVibration(true)
-                vibrationPattern = longArrayOf(0, 300, 150, 300)
-                setShowBadge(true)
-            }
 
             val adminChannel = NotificationChannel(
                 CHANNEL_ADMIN,
@@ -68,16 +43,13 @@ object VelorixNotificationManager {
                 setShowBadge(true)
             }
 
-            notificationManager.createNotificationChannel(tourneyChannel)
-            notificationManager.createNotificationChannel(campaignChannel)
             notificationManager.createNotificationChannel(adminChannel)
-            Log.d(TAG, "Notification channels initialized successfully.")
+            Log.d(TAG, "Admin notification channel initialized.")
         }
     }
 
     /**
-     * Dispatches both a real System Push/Status Bar Notification and an In-App Heads-Up Banner
-     * when a tournament is created, published, or announced.
+     * Dispatches a tournament announcement push directly to the User Panel (`com.tournaments.velorix`).
      */
     fun dispatchTournamentCampaignNotification(
         context: Context,
@@ -89,7 +61,7 @@ object VelorixNotificationManager {
         val gameName = tournament.game
         val prizeStr = if (tournament.prizePool > 0) "₹${tournament.prizePool.toInt()}" else "Free / Points"
         val entryStr = if (tournament.entryFee > 0) "₹${tournament.entryFee.toInt()}" else "FREE ENTRY"
-        
+
         val title = customTitle ?: "New Tournament Announced: ${tournament.title}"
         val message = customMessage ?: "$gameName • Prize Pool: $prizeStr • Entry: $entryStr • ${tournament.maxPlayers} Slots (${tournament.format}). Join now!"
 
@@ -105,28 +77,24 @@ object VelorixNotificationManager {
             isRead = false
         )
 
-        _inAppNotificationEvents.tryEmit(appNotification)
-
-        try {
-            val startTimeStr = tournament.startsAt ?: "Upcoming"
-            sendSystemNotification(
-                context = context,
-                channelId = CHANNEL_TOURNAMENTS,
-                notificationId = notificationIdCounter.incrementAndGet(),
-                title = title,
-                shortText = "$gameName • $prizeStr Prize • $entryStr",
-                expandedText = "Game: $gameName (${tournament.format})\nPrize Pool: $prizeStr | Entry: $entryStr\nMax Slots: ${tournament.maxPlayers}\nSchedule: $startTimeStr\nTap to inspect tournament bracket and live status.",
-                targetTournamentId = tournament.id
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed sending system notification: ${e.message}", e)
-        }
+        VelorixFcmManager.dispatchToUserPanel(
+            notification = appNotification,
+            audience = "ALL",
+            targetTournamentId = tournament.id,
+            extraData = mapOf(
+                "tournament_id" to tournament.id,
+                "tournament_title" to tournament.title,
+                "prizePool" to tournament.prizePool,
+                "entryFee" to tournament.entryFee
+            ),
+            pinToGlobalAnnouncements = true
+        )
 
         return appNotification
     }
 
     /**
-     * Dispatches notification when a tournament turns LIVE.
+     * Dispatches notification to User Panel when a tournament turns LIVE.
      */
     fun dispatchTournamentLiveNotification(
         context: Context,
@@ -153,27 +121,23 @@ object VelorixNotificationManager {
             isRead = false
         )
 
-        _inAppNotificationEvents.tryEmit(appNotification)
-
-        try {
-            sendSystemNotification(
-                context = context,
-                channelId = CHANNEL_TOURNAMENTS,
-                notificationId = notificationIdCounter.incrementAndGet(),
-                title = title,
-                shortText = "Match is LIVE! Tap to get Room ID & Password.",
-                expandedText = "${tournament.title} is now LIVE!\n$roomInfo\nDo not delay, match lobby starts shortly!",
-                targetTournamentId = tournament.id
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed sending live system notification: ${e.message}", e)
-        }
+        VelorixFcmManager.dispatchToUserPanel(
+            notification = appNotification,
+            audience = "TOURNAMENT",
+            targetTournamentId = tournament.id,
+            extraData = mapOf(
+                "tournament_id" to tournament.id,
+                "tournament_title" to tournament.title,
+                "status" to "LIVE"
+            ),
+            pinToGlobalAnnouncements = true
+        )
 
         return appNotification
     }
 
     /**
-     * Dispatches notification when Room ID & Password are published.
+     * Dispatches notification to User Panel when Room ID & Password are published.
      */
     fun dispatchRoomCredentialsNotification(
         context: Context,
@@ -189,7 +153,7 @@ object VelorixNotificationManager {
             id = notifId,
             title = title,
             message = message,
-            type = "TOURNAMENT",
+            type = "ROOM_DETAILS",
             targetTournamentId = tournament.id,
             game = tournament.game,
             timestamp = System.currentTimeMillis(),
@@ -197,27 +161,26 @@ object VelorixNotificationManager {
             isRead = false
         )
 
-        _inAppNotificationEvents.tryEmit(appNotification)
-
-        try {
-            sendSystemNotification(
-                context = context,
-                channelId = CHANNEL_TOURNAMENTS,
-                notificationId = notificationIdCounter.incrementAndGet(),
-                title = title,
-                shortText = "Room ID: $roomId | Pass: $roomPass",
-                expandedText = "${tournament.title}\nRoom ID: $roomId\nPassword: $roomPass\nRules: Join immediately to reserve your allocated slot!",
-                targetTournamentId = tournament.id
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed sending room credentials notification: ${e.message}", e)
-        }
+        VelorixFcmManager.dispatchToUserPanel(
+            notification = appNotification,
+            audience = "TOURNAMENT",
+            targetTournamentId = tournament.id,
+            extraData = mapOf(
+                "room_id" to roomId,
+                "roomId" to roomId,
+                "room_password" to roomPass,
+                "roomPassword" to roomPass,
+                "tournament_id" to tournament.id,
+                "tournament_title" to tournament.title
+            ),
+            pinToGlobalAnnouncements = true
+        )
 
         return appNotification
     }
 
     /**
-     * Dispatches notification when tournament rules/specs are updated.
+     * Dispatches notification to User Panel when tournament rules/specs are updated.
      */
     fun dispatchTournamentRulesUpdatedNotification(
         context: Context,
@@ -225,7 +188,7 @@ object VelorixNotificationManager {
     ): AppNotification {
         val notifId = "rules_${System.currentTimeMillis()}_${tournament.id.takeLast(4)}"
         val title = "RULES UPDATED: ${tournament.title}"
-        val message = "Tournament rules & weapon specs updated: ${tournament.allowedGuns.take(50)}..."
+        val message = "Tournament rules & weapon specs updated: ${tournament.allowedGuns.take(50)}"
 
         val appNotification = AppNotification(
             id = notifId,
@@ -239,12 +202,17 @@ object VelorixNotificationManager {
             isRead = false
         )
 
-        _inAppNotificationEvents.tryEmit(appNotification)
+        VelorixFcmManager.dispatchToUserPanel(
+            notification = appNotification,
+            audience = "TOURNAMENT",
+            targetTournamentId = tournament.id,
+            pinToGlobalAnnouncements = false
+        )
         return appNotification
     }
 
     /**
-     * Dispatches notification when tournament completes.
+     * Dispatches notification to User Panel when tournament completes.
      */
     fun dispatchTournamentCompletedNotification(
         context: Context,
@@ -266,19 +234,25 @@ object VelorixNotificationManager {
             isRead = false
         )
 
-        _inAppNotificationEvents.tryEmit(appNotification)
+        VelorixFcmManager.dispatchToUserPanel(
+            notification = appNotification,
+            audience = "TOURNAMENT",
+            targetTournamentId = tournament.id,
+            pinToGlobalAnnouncements = false
+        )
         return appNotification
     }
 
     /**
-     * Dispatches notification for match proof review.
+     * Dispatches notification to User Panel for match proof review.
      */
     fun dispatchMatchProofNotification(
         context: Context,
         username: String,
         prizeAmount: Double,
         approved: Boolean,
-        tournamentTitle: String
+        tournamentTitle: String,
+        targetUserId: String = ""
     ): AppNotification {
         val notifId = "proof_${System.currentTimeMillis()}"
         val title = if (approved) "Victory Proof Approved: $tournamentTitle" else "Match Proof Rejected"
@@ -300,19 +274,25 @@ object VelorixNotificationManager {
             isRead = false
         )
 
-        _inAppNotificationEvents.tryEmit(appNotification)
+        VelorixFcmManager.dispatchToUserPanel(
+            notification = appNotification,
+            audience = if (targetUserId.isNotBlank()) "USER" else "ALL",
+            targetUserId = targetUserId,
+            pinToGlobalAnnouncements = false
+        )
         return appNotification
     }
 
     /**
-     * Dispatches a Wallet / Payout Status notification (Push + In-App).
+     * Dispatches a Wallet / Payout Status notification strictly to the User Panel (`com.tournaments.velorix`).
      */
     fun dispatchPayoutNotification(
         context: Context,
         username: String,
         amount: Double,
         approved: Boolean,
-        details: String
+        details: String,
+        targetUserId: String = ""
     ): AppNotification {
         val notifId = "payout_${System.currentTimeMillis()}"
         val title = if (approved) "Payout Approved: ₹${amount.toInt()}" else "Payout Request Rejected"
@@ -326,7 +306,7 @@ object VelorixNotificationManager {
             id = notifId,
             title = title,
             message = message,
-            type = "PAYOUT",
+            type = "TRANSACTION_ALERT",
             targetTournamentId = "",
             game = "Velorix Wallet",
             timestamp = System.currentTimeMillis(),
@@ -334,36 +314,32 @@ object VelorixNotificationManager {
             isRead = false
         )
 
-        // 1. In-app banner
-        _inAppNotificationEvents.tryEmit(appNotification)
-
-        // 2. Android Status Bar System Notification
-        try {
-            sendSystemNotification(
-                context = context,
-                channelId = CHANNEL_CAMPAIGNS,
-                notificationId = notificationIdCounter.incrementAndGet(),
-                title = title,
-                shortText = message.take(80),
-                expandedText = message,
-                targetTournamentId = null
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed sending payout notification: ${e.message}", e)
-        }
+        VelorixFcmManager.dispatchToUserPanel(
+            notification = appNotification,
+            audience = if (targetUserId.isNotBlank()) "USER" else "ALL",
+            targetUserId = targetUserId,
+            extraData = mapOf(
+                "username" to username,
+                "amount" to amount.toString(),
+                "status" to if (approved) "APPROVED" else "REJECTED",
+                "details" to details
+            ),
+            pinToGlobalAnnouncements = false
+        )
 
         return appNotification
     }
 
     /**
-     * Dispatches a general Broadcast / Campaign notification (System Push + In-App).
+     * Dispatches a general Broadcast / Campaign notification strictly to the User Panel (`com.tournaments.velorix`).
      */
     fun dispatchCampaignBroadcast(
         context: Context,
         title: String,
         message: String,
         level: String = "HIGH",
-        tournamentId: String? = null
+        tournamentId: String? = null,
+        targetUserId: String? = null
     ): AppNotification {
         val notifId = "camp_${System.currentTimeMillis()}"
         val appNotification = AppNotification(
@@ -378,75 +354,18 @@ object VelorixNotificationManager {
             isRead = false
         )
 
-        // 1. In-app banner
-        _inAppNotificationEvents.tryEmit(appNotification)
-
-        // 2. Android Status Bar System Notification
-        try {
-            sendSystemNotification(
-                context = context,
-                channelId = CHANNEL_CAMPAIGNS,
-                notificationId = notificationIdCounter.incrementAndGet(),
-                title = title,
-                shortText = message.take(80),
-                expandedText = message,
-                targetTournamentId = tournamentId
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed sending campaign system notification: ${e.message}", e)
-        }
-
-        return appNotification
-    }
-
-    private fun sendSystemNotification(
-        context: Context,
-        channelId: String,
-        notificationId: Int,
-        title: String,
-        shortText: String,
-        expandedText: String,
-        targetTournamentId: String? = null
-    ) {
-        initChannels(context)
-
-        val intent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-            putExtra("tournament_id", targetTournamentId)
-            putExtra("opened_from_notification", true)
-        }
-
-        val pendingIntent = PendingIntent.getActivity(
-            context,
-            notificationId,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        VelorixFcmManager.dispatchToUserPanel(
+            notification = appNotification,
+            audience = when {
+                !targetUserId.isNullOrBlank() -> "USER"
+                !tournamentId.isNullOrBlank() -> "TOURNAMENT"
+                else -> "ALL"
+            },
+            targetUserId = targetUserId,
+            targetTournamentId = tournamentId,
+            pinToGlobalAnnouncements = targetUserId.isNullOrBlank()
         )
 
-        val defaultSoundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-
-        // Use standard system app icon
-        val smallIcon = R.mipmap.ic_launcher
-
-        val notificationBuilder = NotificationCompat.Builder(context, channelId)
-            .setSmallIcon(smallIcon)
-            .setContentTitle(title)
-            .setContentText(shortText)
-            .setStyle(
-                NotificationCompat.BigTextStyle()
-                    .setBigContentTitle(title)
-                    .bigText(expandedText)
-            )
-            .setAutoCancel(true)
-            .setSound(defaultSoundUri)
-            .setVibrate(longArrayOf(0, 250, 100, 250))
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setCategory(NotificationCompat.CATEGORY_EVENT)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setContentIntent(pendingIntent)
-
-        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-        notificationManager?.notify(notificationId, notificationBuilder.build())
-        Log.d(TAG, "Dispatched system notification #$notificationId: $title")
+        return appNotification
     }
 }

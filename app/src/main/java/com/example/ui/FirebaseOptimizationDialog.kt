@@ -6,23 +6,19 @@ import android.content.Context
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -32,11 +28,12 @@ import androidx.compose.ui.window.DialogProperties
 import com.example.analytics.VelorixAnalytics
 import com.example.config.VelorixRemoteConfigManager
 import com.example.domain.model.Tournament
+import com.example.firebase.VelorixFirebaseSuite
 import com.example.notification.VelorixFcmManager
-import com.example.ui.theme.VelorixAccent
-import com.example.ui.theme.VelorixTextPrimary
 import com.example.ui.theme.VelorixTextSecondary
-import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun FirebaseOptimizationDialog(
@@ -44,12 +41,16 @@ fun FirebaseOptimizationDialog(
     tournaments: List<Tournament> = emptyList()
 ) {
     val context = LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
+    val suiteState by VelorixFirebaseSuite.suiteState.collectAsState()
     val remoteConfigState by VelorixRemoteConfigManager.configState.collectAsState()
     val fcmToken by VelorixFcmManager.fcmToken.collectAsState()
 
-    var selectedTab by remember { mutableStateOf(0) } // 0: FCM, 1: Remote Config, 2: A/B Testing
-    val tabs = listOf("FCM Messaging", "Remote Config", "A/B Testing")
+    LaunchedEffect(Unit) {
+        VelorixFirebaseSuite.refreshDiagnosticsState()
+    }
+
+    var selectedTab by remember { mutableStateOf(0) }
+    val tabs = listOf("Crashlytics", "FCM Push", "Remote Config", "Analytics")
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -58,577 +59,682 @@ fun FirebaseOptimizationDialog(
         Surface(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = 32.dp, bottom = 20.dp, start = 14.dp, end = 14.dp),
-            color = Color(0xFF0D0D11),
-            shape = RoundedCornerShape(24.dp),
-            border = BorderStroke(1.dp, Color(0xFF27272A))
+                .padding(top = 28.dp, bottom = 16.dp, start = 12.dp, end = 12.dp),
+            color = Color.Black,
+            shape = RoundedCornerShape(16.dp),
+            border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.14f))
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(20.dp)
+                    .background(Color.Black)
             ) {
                 // Header
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(42.dp)
-                                .background(Color(0xFFFF9100).copy(alpha = 0.15f), CircleShape)
-                                .border(1.dp, Color(0xFFFF9100).copy(alpha = 0.5f), CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                Icons.Default.Notifications,
-                                contentDescription = null,
-                                tint = Color(0xFFFF9100),
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                text = "FIREBASE OPTIMIZATION",
-                                color = Color.White,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Black,
-                                letterSpacing = 0.5.sp
-                            )
-                            Text(
-                                text = "FCM • Remote Config • A/B Testing",
-                                color = Color(0xFFFF9100),
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Firebase & Crashlytics",
+                            color = Color.White,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Project: ${suiteState.projectId} • 9 Services Active",
+                            color = Color(0xFF71717A),
+                            fontSize = 11.sp
+                        )
                     }
 
                     IconButton(
                         onClick = onDismiss,
-                        modifier = Modifier
-                            .size(36.dp)
-                            .background(Color(0xFF1F1F24), CircleShape)
+                        modifier = Modifier.size(32.dp)
                     ) {
-                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White, modifier = Modifier.size(18.dp))
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = Color(0xFFA1A1AA),
+                            modifier = Modifier.size(18.dp)
+                        )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
 
-                // Navigation Tabs
+                // Flat Underline Mode Tab Row (No Box-in-Box)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(Color(0xFF16161B), RoundedCornerShape(12.dp))
-                        .padding(4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        .padding(horizontal = 12.dp)
                 ) {
                     tabs.forEachIndexed { index, title ->
                         val isSelected = selectedTab == index
-                        Box(
+                        Column(
                             modifier = Modifier
                                 .weight(1f)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (isSelected) Color(0xFFFF9100) else Color.Transparent)
                                 .clickable { selectedTab = index }
-                                .padding(vertical = 8.dp),
-                            contentAlignment = Alignment.Center
+                                .padding(top = 10.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Text(
                                 text = title,
-                                color = if (isSelected) Color.Black else Color.White.copy(alpha = 0.7f),
-                                fontSize = 11.5.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                color = if (isSelected) Color.White else Color(0xFF71717A),
+                                fontSize = 11.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(if (isSelected) 1.5.dp else 0.5.dp)
+                                    .background(if (isSelected) Color.White else Color.White.copy(alpha = 0.08f))
                             )
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Content by Tab
                 LazyColumn(
                     modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                    contentPadding = PaddingValues(vertical = 8.dp)
                 ) {
                     when (selectedTab) {
                         0 -> {
                             // ==========================================
-                            // TAB 0: FIREBASE CLOUD MESSAGING (FCM)
+                            // TAB 0: CRASHLYTICS, PERFORMANCE & SUITE
                             // ==========================================
                             item {
-                                Surface(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    color = Color(0xFF141418),
-                                    shape = RoundedCornerShape(14.dp),
-                                    border = BorderStroke(1.dp, Color(0xFF27272A))
-                                ) {
-                                    Column(modifier = Modifier.padding(14.dp)) {
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                    Text(
+                                        text = "TELEMETRY & COLLECTION CONTROLS",
+                                        color = Color(0xFF71717A),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 0.8.sp,
+                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                                    )
+
+                                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+                                    FirebaseToggleRow(
+                                        title = "Firebase Crashlytics",
+                                        subtitle = "Capture fatal crashes, non-fatal exceptions, and custom keys",
+                                        checked = suiteState.crashlyticsEnabled,
+                                        onCheckedChange = { VelorixFirebaseSuite.setCrashlyticsEnabled(it) }
+                                    )
+
+                                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+                                    FirebaseToggleRow(
+                                        title = "Firebase Performance Monitoring",
+                                        subtitle = "Measure cold start, screen rendering, and database latency",
+                                        checked = suiteState.performanceEnabled,
+                                        onCheckedChange = { VelorixFirebaseSuite.setPerformanceEnabled(it) }
+                                    )
+
+                                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+                                    FirebaseToggleRow(
+                                        title = "Firebase Google Analytics",
+                                        subtitle = "Stream tournament conversion and user property events",
+                                        checked = suiteState.analyticsEnabled,
+                                        onCheckedChange = { VelorixFirebaseSuite.setAnalyticsEnabled(context, it) }
+                                    )
+                                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+                                }
+                            }
+
+                            item {
+                                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                                    Text(
+                                        text = "CRASHLYTICS DIAGNOSTIC DISPATCH",
+                                        color = Color(0xFF71717A),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 0.8.sp
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = "Admin UID: ${suiteState.currentAdminUid} • App Check: ${suiteState.appCheckProvider}",
+                                        color = Color(0xFFA1A1AA),
+                                        fontSize = 11.sp
+                                    )
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        OutlinedButton(
+                                            onClick = {
+                                                VelorixFirebaseSuite.triggerTestNonFatalReport("Manual diagnostic check from Admin Console")
+                                                Toast.makeText(
+                                                    context,
+                                                    "Non-fatal diagnostic report recorded & queued for Crashlytics",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            },
+                                            modifier = Modifier.weight(1f),
+                                            shape = RoundedCornerShape(8.dp),
+                                            border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.16f)),
+                                            contentPadding = PaddingValues(vertical = 10.dp)
+                                        ) {
+                                            Text(
+                                                text = "Send Test Non-Fatal",
+                                                color = Color.White,
+                                                fontSize = 11.5.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        }
+
+                                        OutlinedButton(
+                                            onClick = {
+                                                VelorixFirebaseSuite.flushUnsentCrashReports()
+                                                Toast.makeText(
+                                                    context,
+                                                    "Flushed unsent Crashlytics reports to Firebase",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            },
+                                            modifier = Modifier.weight(1f),
+                                            shape = RoundedCornerShape(8.dp),
+                                            border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.16f)),
+                                            contentPadding = PaddingValues(vertical = 10.dp)
+                                        ) {
+                                            Text(
+                                                text = "Flush Unsent Reports",
+                                                color = Color.White,
+                                                fontSize = 11.5.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        }
+                                    }
+                                }
+                                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+                            }
+
+                            // Provisioned Firebase Services List
+                            item {
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                    Text(
+                                        text = "CONFIGURED FIREBASE SERVICES (${suiteState.services.size})",
+                                        color = Color(0xFF71717A),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 0.8.sp,
+                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                                    )
+
+                                    suiteState.services.forEach { service ->
+                                        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
                                         Row(
-                                            modifier = Modifier.fillMaxWidth(),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 16.dp, vertical = 10.dp),
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Text(
-                                                "FCM DEVICE REGISTRATION",
-                                                color = Color.White,
-                                                fontSize = 12.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                            Surface(
-                                                color = Color(0xFF00E676).copy(alpha = 0.15f),
-                                                shape = RoundedCornerShape(6.dp)
-                                            ) {
+                                            Column(modifier = Modifier.weight(1f)) {
                                                 Text(
-                                                    "CONNECTED",
-                                                    color = Color(0xFF00E676),
-                                                    fontSize = 9.5.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                    text = service.name,
+                                                    color = Color.White,
+                                                    fontSize = 12.5.sp,
+                                                    fontWeight = FontWeight.Medium
+                                                )
+                                                Text(
+                                                    text = service.statusText,
+                                                    color = Color(0xFF71717A),
+                                                    fontSize = 11.sp
+                                                )
+                                            }
+                                            Text(
+                                                text = if (service.isEnabled) "Active" else "Paused",
+                                                color = if (service.isEnabled) Color(0xFF10B981) else Color(0xFFF59E0B),
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        }
+                                    }
+                                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+                                }
+                            }
+
+                            // Recorded Non-Fatal Reports & Breadcrumbs
+                            item {
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                    Text(
+                                        text = "RECENT CRASHLYTICS EVENTS & BREADCRUMBS",
+                                        color = Color(0xFF71717A),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 0.8.sp,
+                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                                    )
+
+                                    if (suiteState.recordedNonFatals.isEmpty() && suiteState.recentBreadcrumbs.isEmpty()) {
+                                        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+                                        Text(
+                                            text = "No exceptions recorded in this session.",
+                                            color = Color(0xFF71717A),
+                                            fontSize = 11.5.sp,
+                                            modifier = Modifier.padding(16.dp)
+                                        )
+                                    } else {
+                                        suiteState.recordedNonFatals.take(5).forEach { err ->
+                                            HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+                                            val timeStr = remember(err.timestamp) {
+                                                SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(err.timestamp))
+                                            }
+                                            Column(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.SpaceBetween
+                                                ) {
+                                                    Text(
+                                                        text = "[${err.tag}] Non-Fatal Exception",
+                                                        color = Color(0xFFF59E0B),
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.SemiBold
+                                                    )
+                                                    Text(
+                                                        text = timeStr,
+                                                        color = Color(0xFF71717A),
+                                                        fontSize = 10.sp
+                                                    )
+                                                }
+                                                Text(
+                                                    text = err.message,
+                                                    color = Color(0xFFD4D4D8),
+                                                    fontSize = 11.sp,
+                                                    maxLines = 2,
+                                                    overflow = TextOverflow.Ellipsis
                                                 )
                                             }
                                         }
 
-                                        Spacer(modifier = Modifier.height(8.dp))
-
-                                        val tokenStr = fcmToken ?: "Retrieving device token from Firebase..."
-                                        Text(
-                                            text = tokenStr.take(48) + if (tokenStr.length > 48) "..." else "",
-                                            color = VelorixTextSecondary,
-                                            fontSize = 11.sp,
-                                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
-                                        )
-
-                                        Spacer(modifier = Modifier.height(10.dp))
-
-                                        OutlinedButton(
-                                            onClick = {
-                                                fcmToken?.let { token ->
-                                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                                    clipboard.setPrimaryClip(ClipData.newPlainText("FCM Token", token))
-                                                    Toast.makeText(context, "FCM Token copied to clipboard", Toast.LENGTH_SHORT).show()
-                                                }
-                                            },
-                                            shape = RoundedCornerShape(8.dp),
-                                            border = BorderStroke(1.dp, Color(0xFF3F3F46)),
-                                            modifier = Modifier.fillMaxWidth(),
-                                            contentPadding = PaddingValues(vertical = 8.dp)
-                                        ) {
-                                            Icon(Icons.Default.Share, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text("Copy Registration Token", color = Color.White, fontSize = 11.5.sp)
-                                        }
-                                    }
-                                }
-                            }
-
-                            item {
-                                Text(
-                                    "SUBSCRIBED FCM TOPICS",
-                                    color = VelorixTextSecondary,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    listOf("tournaments", "match_reminders", "announcements").forEach { topic ->
-                                        Surface(
-                                            color = Color(0xFF1E1E24),
-                                            shape = RoundedCornerShape(8.dp),
-                                            border = BorderStroke(1.dp, Color(0xFF32323A))
-                                        ) {
-                                            Row(
-                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Box(modifier = Modifier.size(6.dp).background(Color(0xFF38BDF8), CircleShape))
-                                                Spacer(modifier = Modifier.width(6.dp))
-                                                Text(topic, color = Color.White, fontSize = 10.5.sp, fontWeight = FontWeight.Medium)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            item {
-                                Text(
-                                    "TEST PUSH WORKFLOWS (REAL PUSH & IN-APP)",
-                                    color = VelorixTextSecondary,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-
-                                val activeTourney = tournaments.firstOrNull()
-                                if (activeTourney == null) {
-                                    Surface(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        color = Color(0xFF1E1420),
-                                        shape = RoundedCornerShape(12.dp),
-                                        border = BorderStroke(1.dp, VelorixAccent.copy(alpha = 0.3f))
-                                    ) {
-                                        Column(modifier = Modifier.padding(14.dp)) {
+                                        suiteState.recentBreadcrumbs.take(8).forEach { crumb ->
+                                            HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
                                             Text(
-                                                text = "No Live Tournaments in Database",
-                                                color = Color.White,
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 13.sp
-                                            )
-                                            Spacer(modifier = Modifier.height(4.dp))
-                                            Text(
-                                                text = "Create an active tournament first to broadcast real FCM push notifications to registered players.",
-                                                color = VelorixTextSecondary,
-                                                fontSize = 11.sp
+                                                text = crumb,
+                                                color = Color(0xFFA1A1AA),
+                                                fontSize = 10.5.sp,
+                                                fontFamily = FontFamily.Monospace,
+                                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 7.dp)
                                             )
                                         }
                                     }
-                                } else {
-                                    // Push 1: Room Details
-                                    PushActionCard(
-                                        icon = Icons.Default.Lock,
-                                        title = "Send Room Details Push (FCM)",
-                                        subtitle = "Notifies registered players with instant Room ID and Password for ${activeTourney.title}",
-                                        buttonText = "Trigger Room Push",
-                                        onAction = {
-                                            val roomId = activeTourney.roomDetails?.roomId?.ifBlank { "882104" } ?: "882104"
-                                            val roomPass = activeTourney.roomDetails?.roomPassword?.ifBlank { "vx77" } ?: "vx77"
-                                            VelorixFcmManager.dispatchRoomDetailsPush(
-                                                context = context,
-                                                tournament = activeTourney,
-                                                roomId = roomId,
-                                                roomPassword = roomPass
-                                            )
-                                            Toast.makeText(context, "Room Details Push Dispatched for ${activeTourney.title}!", Toast.LENGTH_SHORT).show()
-                                        }
-                                    )
-
-                                    Spacer(modifier = Modifier.height(10.dp))
-
-                                    // Push 2: Match Reminder
-                                    PushActionCard(
-                                        icon = Icons.Default.Notifications,
-                                        title = "Send 15-Minute Match Reminder (FCM)",
-                                        subtitle = "Broadcasts urgent 15-minute preparation warning for ${activeTourney.title}",
-                                        buttonText = "Trigger 15-Min Reminder",
-                                        onAction = {
-                                            VelorixFcmManager.dispatchMatchReminderPush(
-                                                context = context,
-                                                tournament = activeTourney,
-                                                minutesLeft = 15
-                                            )
-                                            Toast.makeText(context, "15-Min Match Reminder Dispatched for ${activeTourney.title}!", Toast.LENGTH_SHORT).show()
-                                        }
-                                    )
+                                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
                                 }
-
-                                Spacer(modifier = Modifier.height(10.dp))
-
-                                // Push 3: Transaction Alert
-                                PushActionCard(
-                                    icon = Icons.Default.ShoppingCart,
-                                    title = "Send Payout Alert Push (FCM)",
-                                    subtitle = "Alerts user immediately when withdrawal request changes to completed",
-                                    buttonText = "Trigger Payout Alert",
-                                    onAction = {
-                                        com.example.notification.VelorixNotificationManager.dispatchPayoutNotification(
-                                            context = context,
-                                            username = "PlayerOne",
-                                            amount = 1250.0,
-                                            approved = true,
-                                            details = "UPI ID (player@okhdfcbank)"
-                                        )
-                                        Toast.makeText(context, "Transaction Alert Dispatched!", Toast.LENGTH_SHORT).show()
-                                    }
-                                )
                             }
                         }
 
                         1 -> {
                             // ==========================================
-                            // TAB 1: FIREBASE REMOTE CONFIG
+                            // TAB 1: FIREBASE CLOUD MESSAGING (FCM)
                             // ==========================================
                             item {
-                                Surface(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    color = Color(0xFF141418),
-                                    shape = RoundedCornerShape(14.dp),
-                                    border = BorderStroke(1.dp, Color(0xFF27272A))
-                                ) {
-                                    Column(modifier = Modifier.padding(14.dp)) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                "REMOTE CONFIG ENGINE",
-                                                color = Color.White,
-                                                fontSize = 12.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                            Surface(
-                                                color = Color(0xFF38BDF8).copy(alpha = 0.15f),
-                                                shape = RoundedCornerShape(6.dp)
-                                            ) {
-                                                Text(
-                                                    remoteConfigState.lastFetchStatus,
-                                                    color = Color(0xFF38BDF8),
-                                                    fontSize = 9.5.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                                )
-                                            }
-                                        }
-
-                                        Spacer(modifier = Modifier.height(10.dp))
+                                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
                                         Text(
-                                            "Dynamic app configuration without Play Store releases. Changes in Firebase Console apply immediately.",
-                                            color = VelorixTextSecondary,
-                                            fontSize = 11.sp,
-                                            lineHeight = 15.sp
+                                            "FCM DEVICE REGISTRATION",
+                                            color = Color(0xFF71717A),
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            letterSpacing = 0.8.sp
                                         )
+                                        Text(
+                                            "Connected",
+                                            color = Color(0xFF10B981),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
 
-                                        Spacer(modifier = Modifier.height(12.dp))
+                                    Spacer(modifier = Modifier.height(8.dp))
 
-                                        Button(
-                                            onClick = {
-                                                VelorixRemoteConfigManager.fetchAndActivate()
-                                                Toast.makeText(context, "Fetching latest Remote Config...", Toast.LENGTH_SHORT).show()
-                                            },
-                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9100)),
-                                            shape = RoundedCornerShape(10.dp),
-                                            modifier = Modifier.fillMaxWidth()
-                                        ) {
-                                            Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text("Fetch & Activate Realtime Config", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                        }
+                                    val tokenStr = fcmToken ?: "Retrieving device token from Firebase..."
+                                    Text(
+                                        text = tokenStr.take(52) + if (tokenStr.length > 52) "..." else "",
+                                        color = VelorixTextSecondary,
+                                        fontSize = 11.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+
+                                    Spacer(modifier = Modifier.height(10.dp))
+
+                                    OutlinedButton(
+                                        onClick = {
+                                            fcmToken?.let { token ->
+                                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                                clipboard.setPrimaryClip(ClipData.newPlainText("FCM Token", token))
+                                                Toast.makeText(context, "FCM Token copied to clipboard", Toast.LENGTH_SHORT).show()
+                                            }
+                                        },
+                                        shape = RoundedCornerShape(8.dp),
+                                        border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.16f)),
+                                        modifier = Modifier.fillMaxWidth(),
+                                        contentPadding = PaddingValues(vertical = 8.dp)
+                                    ) {
+                                        Text("Copy Registration Token", color = Color.White, fontSize = 11.5.sp)
                                     }
                                 }
+                                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
                             }
 
                             item {
-                                Text(
-                                    "LIVE CONFIGURATION PARAMETERS",
-                                    color = VelorixTextSecondary,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "USER PANEL PUSH DISPATCH",
+                                            color = Color(0xFF71717A),
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            letterSpacing = 0.8.sp
+                                        )
+                                        Text(
+                                            text = "TARGET: com.tournaments.velorix",
+                                            color = Color(0xFF0A84FF),
+                                            fontSize = 9.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                    }
 
-                                RemoteConfigParamRow(
-                                    paramKey = "is_maintenance_mode",
-                                    paramValue = remoteConfigState.isMaintenanceMode.toString().uppercase(),
-                                    description = "Toggles global maintenance banner/lock screen",
-                                    badgeColor = if (remoteConfigState.isMaintenanceMode) Color(0xFFEF4444) else Color(0xFF10B981)
-                                )
+                                    val activeTourney = tournaments.firstOrNull()
 
-                                Spacer(modifier = Modifier.height(8.dp))
+                                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+                                    PushActionRow(
+                                        title = "Test Push to User Panel",
+                                        subtitle = "Send live test notification to com.tournaments.velorix players",
+                                        actionLabel = "Send Test Push",
+                                        onAction = {
+                                            VelorixFcmManager.dispatchTestPushToUserPanel(activeTourney)
+                                            Toast.makeText(
+                                                context,
+                                                "Test Push sent to User Panel (com.tournaments.velorix)",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        }
+                                    )
 
-                                RemoteConfigParamRow(
-                                    paramKey = "maintenance_message",
-                                    paramValue = remoteConfigState.maintenanceMessage,
-                                    description = "Custom notice shown to players when maintenance mode is active"
-                                )
+                                    if (activeTourney != null) {
+                                        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+                                        PushActionRow(
+                                            title = "Room Credentials Push",
+                                            subtitle = "Send Room ID and Password to User Panel for ${activeTourney.title}",
+                                            actionLabel = "Send Room Push",
+                                            onAction = {
+                                                val roomId = activeTourney.roomDetails?.roomId?.ifBlank { "882104" } ?: "882104"
+                                                val roomPass = activeTourney.roomDetails?.roomPassword?.ifBlank { "vx77" } ?: "vx77"
+                                                VelorixFcmManager.dispatchRoomDetailsPush(
+                                                    context = context,
+                                                    tournament = activeTourney,
+                                                    roomId = roomId,
+                                                    roomPassword = roomPass
+                                                )
+                                                Toast.makeText(
+                                                    context,
+                                                    "Room Credentials sent to User Panel (com.tournaments.velorix)",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
+                                        )
 
-                                Spacer(modifier = Modifier.height(8.dp))
+                                        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+                                        PushActionRow(
+                                            title = "15-Minute Match Reminder",
+                                            subtitle = "Broadcast 15-minute lobby alert to User Panel for ${activeTourney.title}",
+                                            actionLabel = "Send Reminder",
+                                            onAction = {
+                                                VelorixFcmManager.dispatchMatchReminderPush(
+                                                    context = context,
+                                                    tournament = activeTourney,
+                                                    minutesLeft = 15
+                                                )
+                                                Toast.makeText(
+                                                    context,
+                                                    "15-Min Reminder sent to User Panel (com.tournaments.velorix)",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
+                                        )
+                                    }
 
-                                RemoteConfigParamRow(
-                                    paramKey = "cta_button_text",
-                                    paramValue = remoteConfigState.ctaButtonText,
-                                    description = "Active A/B testing variant for registration button",
-                                    badgeColor = Color(0xFF818CF8)
-                                )
-
-                                Spacer(modifier = Modifier.height(8.dp))
-
-                                RemoteConfigParamRow(
-                                    paramKey = "match_reminder_lead_minutes",
-                                    paramValue = "${remoteConfigState.matchReminderLeadMinutes} Minutes",
-                                    description = "Lead time for FCM push notifications before match starts"
-                                )
-
-                                Spacer(modifier = Modifier.height(8.dp))
-
-                                RemoteConfigParamRow(
-                                    paramKey = "max_slots_per_tournament",
-                                    paramValue = "${remoteConfigState.maxSlotsPerTournament} Slots",
-                                    description = "Default lobby capacity rule for Free Fire custom rooms"
-                                )
-
-                                Spacer(modifier = Modifier.height(8.dp))
-
-                                RemoteConfigParamRow(
-                                    paramKey = "vip_experience_enabled",
-                                    paramValue = remoteConfigState.isVipExperienceEnabled.toString().uppercase(),
-                                    description = "Enables VIP badge and priority slot reservation"
-                                )
+                                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+                                    PushActionRow(
+                                        title = "Payout Settlement Notification",
+                                        subtitle = "Trigger instant withdrawal confirmation on User Panel",
+                                        actionLabel = "Send Alert",
+                                        onAction = {
+                                            VelorixFcmManager.dispatchPayoutSettlementPush(
+                                                context = context,
+                                                username = "PlayerOne",
+                                                amount = 1250.0,
+                                                approved = true,
+                                                details = "UPI ID (player@okhdfcbank)"
+                                            )
+                                            Toast.makeText(
+                                                context,
+                                                "Payout Alert sent to User Panel (com.tournaments.velorix)",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        }
+                                    )
+                                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+                                }
                             }
                         }
 
                         2 -> {
                             // ==========================================
-                            // TAB 2: FIREBASE A/B TESTING & ANALYTICS
+                            // TAB 2: FIREBASE REMOTE CONFIG
                             // ==========================================
                             item {
-                                Surface(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    color = Color(0xFF141418),
-                                    shape = RoundedCornerShape(14.dp),
-                                    border = BorderStroke(1.dp, Color(0xFF27272A))
-                                ) {
-                                    Column(modifier = Modifier.padding(14.dp)) {
+                                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
                                         Text(
-                                            "EXPERIMENT 1: CALL-TO-ACTION (CTA) REFINEMENT",
-                                            color = Color.White,
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Bold
+                                            "REMOTE CONFIG ENGINE",
+                                            color = Color(0xFF71717A),
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            letterSpacing = 0.8.sp
                                         )
-                                        Spacer(modifier = Modifier.height(6.dp))
                                         Text(
-                                            "Testing whether button text 'Join Tournament' outperforms 'Register Now' using Google Analytics event 'cta_button_click' to measure conversion success.",
-                                            color = VelorixTextSecondary,
+                                            remoteConfigState.lastFetchStatus,
+                                            color = Color(0xFF38BDF8),
                                             fontSize = 11.sp,
-                                            lineHeight = 15.sp
+                                            fontWeight = FontWeight.SemiBold
                                         )
+                                    }
 
-                                        Spacer(modifier = Modifier.height(10.dp))
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        "Synchronize live parameters from Firebase Console without republishing the APK.",
+                                        color = VelorixTextSecondary,
+                                        fontSize = 11.sp
+                                    )
 
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            Surface(
-                                                modifier = Modifier.weight(1f),
-                                                color = if (remoteConfigState.ctaButtonText == "Join Tournament") Color(0xFF1E293B) else Color(0xFF0F172A),
-                                                shape = RoundedCornerShape(8.dp),
-                                                border = BorderStroke(1.dp, if (remoteConfigState.ctaButtonText == "Join Tournament") Color(0xFF38BDF8) else Color(0xFF1E293B))
-                                            ) {
-                                                Column(modifier = Modifier.padding(10.dp)) {
-                                                    Text("Variant A (Default)", color = Color(0xFF94A3B8), fontSize = 10.sp)
-                                                    Text("Join Tournament", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                                }
-                                            }
+                                    Spacer(modifier = Modifier.height(10.dp))
 
-                                            Surface(
-                                                modifier = Modifier.weight(1f),
-                                                color = if (remoteConfigState.ctaButtonText != "Join Tournament") Color(0xFF1E293B) else Color(0xFF0F172A),
-                                                shape = RoundedCornerShape(8.dp),
-                                                border = BorderStroke(1.dp, if (remoteConfigState.ctaButtonText != "Join Tournament") Color(0xFF38BDF8) else Color(0xFF1E293B))
-                                            ) {
-                                                Column(modifier = Modifier.padding(10.dp)) {
-                                                    Text("Variant B (Experimental)", color = Color(0xFF94A3B8), fontSize = 10.sp)
-                                                    Text("Register Now", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                                }
-                                            }
-                                        }
-
-                                        Spacer(modifier = Modifier.height(10.dp))
-
-                                        Button(
-                                            onClick = {
-                                                VelorixAnalytics.logCtaClick(
-                                                    ctaText = remoteConfigState.ctaButtonText,
-                                                    tournamentId = "vx_exp_test",
-                                                    tournamentTitle = "A/B Experiment Test"
-                                                )
-                                                Toast.makeText(context, "Logged A/B Analytics Event: cta_button_click ('${remoteConfigState.ctaButtonText}')", Toast.LENGTH_SHORT).show()
-                                            },
-                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6366F1)),
-                                            shape = RoundedCornerShape(8.dp),
-                                            modifier = Modifier.fillMaxWidth()
-                                        ) {
-                                            Icon(Icons.Default.Info, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text("Log CTA Click Event (${remoteConfigState.ctaButtonText})", color = Color.White, fontSize = 11.5.sp)
-                                        }
+                                    OutlinedButton(
+                                        onClick = {
+                                            VelorixRemoteConfigManager.fetchAndActivate()
+                                            Toast.makeText(context, "Fetching latest Remote Config...", Toast.LENGTH_SHORT).show()
+                                        },
+                                        shape = RoundedCornerShape(8.dp),
+                                        border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.16f)),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Fetch & Activate Config", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 11.5.sp)
                                     }
                                 }
+                                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
                             }
 
                             item {
-                                Surface(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    color = Color(0xFF141418),
-                                    shape = RoundedCornerShape(14.dp),
-                                    border = BorderStroke(1.dp, Color(0xFF27272A))
-                                ) {
-                                    Column(modifier = Modifier.padding(14.dp)) {
-                                        Text(
-                                            "EXPERIMENT 2: PUSH NOTIFICATION COPY OPTIMIZATION",
-                                            color = Color.White,
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                        Spacer(modifier = Modifier.height(6.dp))
-                                        Text(
-                                            "Evaluating push notification open rates between urgency hooks ('Are you ready for battle?') vs informative hooks ('New tournament starting now!').",
-                                            color = VelorixTextSecondary,
-                                            fontSize = 11.sp,
-                                            lineHeight = 15.sp
-                                        )
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                        Surface(
-                                            color = Color(0xFF0D121E),
-                                            shape = RoundedCornerShape(8.dp),
-                                            border = BorderStroke(1.dp, Color(0xFF1E293B)),
-                                            modifier = Modifier.fillMaxWidth()
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                    Text(
+                                        "LIVE PARAMETERS",
+                                        color = Color(0xFF71717A),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 0.8.sp,
+                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                                    )
+
+                                    val params = listOf(
+                                        Triple("is_maintenance_mode", remoteConfigState.isMaintenanceMode.toString().uppercase(), "Global maintenance gate"),
+                                        Triple("maintenance_message", remoteConfigState.maintenanceMessage, "Notice shown during maintenance"),
+                                        Triple("cta_button_text", remoteConfigState.ctaButtonText, "Registration CTA variant"),
+                                        Triple("match_reminder_lead_minutes", "${remoteConfigState.matchReminderLeadMinutes}m", "Lead time before match start"),
+                                        Triple("max_slots_per_tournament", "${remoteConfigState.maxSlotsPerTournament}", "Default custom room capacity"),
+                                        Triple("vip_experience_enabled", remoteConfigState.isVipExperienceEnabled.toString().uppercase(), "VIP priority slot access")
+                                    )
+
+                                    params.forEach { (key, value, desc) ->
+                                        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
                                         ) {
+                                            Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                                                Text(
+                                                    text = key,
+                                                    color = Color.White,
+                                                    fontSize = 11.5.sp,
+                                                    fontFamily = FontFamily.Monospace,
+                                                    fontWeight = FontWeight.Medium
+                                                )
+                                                Text(
+                                                    text = desc,
+                                                    color = Color(0xFF71717A),
+                                                    fontSize = 10.5.sp
+                                                )
+                                            }
                                             Text(
-                                                text = "Active Variant: \"${remoteConfigState.notificationCopyVariant}\"",
-                                                color = Color(0xFF38BDF8),
+                                                text = value,
+                                                color = Color(0xFFD4D4D8),
                                                 fontSize = 11.sp,
                                                 fontWeight = FontWeight.SemiBold,
-                                                modifier = Modifier.padding(10.dp)
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
                                             )
                                         }
                                     }
+                                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
                                 }
+                            }
+                        }
+
+                        3 -> {
+                            // ==========================================
+                            // TAB 3: FIREBASE A/B TESTING & ANALYTICS
+                            // ==========================================
+                            item {
+                                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                                    Text(
+                                        "CTA CONVERSION EXPERIMENT",
+                                        color = Color(0xFF71717A),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 0.8.sp
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        "Active Variant: ${remoteConfigState.ctaButtonText}",
+                                        color = Color.White,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        "Tracks conversion rate via Firebase Analytics event 'cta_button_click'.",
+                                        color = VelorixTextSecondary,
+                                        fontSize = 11.sp
+                                    )
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    OutlinedButton(
+                                        onClick = {
+                                            VelorixAnalytics.logCtaClick(
+                                                ctaText = remoteConfigState.ctaButtonText,
+                                                tournamentId = "vx_exp_test",
+                                                tournamentTitle = "A/B Experiment Test"
+                                            )
+                                            Toast.makeText(
+                                                context,
+                                                "Logged Analytics Event: cta_button_click",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        },
+                                        shape = RoundedCornerShape(8.dp),
+                                        border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.16f)),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text("Log Test Conversion Event", color = Color.White, fontSize = 11.5.sp)
+                                    }
+                                }
+                                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
                             }
 
                             item {
-                                Surface(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    color = Color(0xFF141418),
-                                    shape = RoundedCornerShape(14.dp),
-                                    border = BorderStroke(1.dp, Color(0xFF27272A))
-                                ) {
-                                    Column(modifier = Modifier.padding(14.dp)) {
-                                        Text(
-                                            "ANALYTICS FUNNEL TELEMETRY",
-                                            color = Color.White,
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                        listOf(
-                                            "cta_button_click" to "A/B Testing conversion tracker",
-                                            "tournament_joined" to "Registration checkout event",
-                                            "room_credentials_viewed" to "Room ID/Pass access tracker",
-                                            "notification_interaction" to "Push opened / received metric"
-                                        ).forEach { (event, desc) ->
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .padding(vertical = 4.dp),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Column(modifier = Modifier.weight(1f)) {
-                                                    Text(event, color = Color.White, fontSize = 11.5.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
-                                                    Text(desc, color = VelorixTextSecondary, fontSize = 10.sp)
-                                                }
-                                                Icon(Icons.Default.Check, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(16.dp))
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                    Text(
+                                        "REGISTERED ANALYTICS EVENTS",
+                                        color = Color(0xFF71717A),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 0.8.sp,
+                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                                    )
+
+                                    listOf(
+                                        "cta_button_click" to "A/B Testing conversion tracker",
+                                        "tournament_joined" to "Registration checkout event",
+                                        "room_credentials_viewed" to "Room ID/Password unlock tracker",
+                                        "notification_interaction" to "Push opened and received metric",
+                                        "payout_requested" to "Wallet withdrawal request telemetry"
+                                    ).forEach { (event, desc) ->
+                                        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(event, color = Color.White, fontSize = 11.5.sp, fontFamily = FontFamily.Monospace)
+                                                Text(desc, color = VelorixTextSecondary, fontSize = 10.5.sp)
                                             }
+                                            Text("Active", color = Color(0xFF10B981), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                                         }
                                     }
+                                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
                                 }
                             }
                         }
@@ -640,95 +746,71 @@ fun FirebaseOptimizationDialog(
 }
 
 @Composable
-private fun PushActionCard(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+private fun FirebaseToggleRow(
     title: String,
     subtitle: String,
-    buttonText: String,
-    onAction: () -> Unit
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
 ) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = Color(0xFF141418),
-        shape = RoundedCornerShape(12.dp),
-        border = BorderStroke(1.dp, Color(0xFF27272A))
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) }
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(32.dp)
-                        .background(Color(0xFF22222A), CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(icon, contentDescription = null, tint = Color(0xFFFF9100), modifier = Modifier.size(16.dp))
-                }
-                Spacer(modifier = Modifier.width(10.dp))
-                Column {
-                    Text(title, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Text(subtitle, color = VelorixTextSecondary, fontSize = 10.5.sp, lineHeight = 14.sp)
-                }
-            }
-            Spacer(modifier = Modifier.height(10.dp))
-            Button(
-                onClick = onAction,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F1F26)),
-                border = BorderStroke(1.dp, Color(0xFFFF9100).copy(alpha = 0.6f)),
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.fillMaxWidth(),
-                contentPadding = PaddingValues(vertical = 8.dp)
-            ) {
-                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, tint = Color(0xFFFF9100), modifier = Modifier.size(14.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(buttonText, color = Color(0xFFFF9100), fontWeight = FontWeight.Bold, fontSize = 11.5.sp)
-            }
+        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+            Text(
+                text = title,
+                color = Color.White,
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.Medium
+            )
+            Text(
+                text = subtitle,
+                color = Color(0xFF71717A),
+                fontSize = 11.sp
+            )
         }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.Black,
+                checkedTrackColor = Color.White,
+                uncheckedThumbColor = Color(0xFFA1A1AA),
+                uncheckedTrackColor = Color(0xFF18181B)
+            )
+        )
     }
 }
 
 @Composable
-private fun RemoteConfigParamRow(
-    paramKey: String,
-    paramValue: String,
-    description: String,
-    badgeColor: Color = Color(0xFF64748B)
+private fun PushActionRow(
+    title: String,
+    subtitle: String,
+    actionLabel: String,
+    onAction: () -> Unit
 ) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = Color(0xFF141418),
-        shape = RoundedCornerShape(10.dp),
-        border = BorderStroke(1.dp, Color(0xFF22222A))
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(modifier = Modifier.padding(10.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = paramKey,
-                    color = Color.White,
-                    fontSize = 11.5.sp,
-                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Surface(
-                    color = badgeColor.copy(alpha = 0.2f),
-                    shape = RoundedCornerShape(4.dp)
-                ) {
-                    Text(
-                        text = paramValue,
-                        color = badgeColor,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(description, color = VelorixTextSecondary, fontSize = 10.sp)
+        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+            Text(title, color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+            Text(subtitle, color = Color(0xFF71717A), fontSize = 11.sp)
+        }
+        OutlinedButton(
+            onClick = onAction,
+            shape = RoundedCornerShape(8.dp),
+            border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.16f)),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+        ) {
+            Text(actionLabel, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
         }
     }
 }

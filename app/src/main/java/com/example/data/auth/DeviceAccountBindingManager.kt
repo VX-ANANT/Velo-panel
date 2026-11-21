@@ -81,6 +81,7 @@ class DeviceAccountBindingManager(private val context: Context) {
             .putString(KEY_BOUND_USERNAME, displayName)
             .putString(KEY_BOUND_ROLE, role)
             .putBoolean(KEY_AUTO_LOGIN_ENABLED, autoLogin)
+            .putBoolean(KEY_EXPLICIT_LOGOUT, false)
             .putLong(KEY_LAST_LOGIN_TIME, now)
             .putString(KEY_BOUND_DEVICE_ID, deviceInfo.deviceId)
             .putString(KEY_BOUND_DEVICE_NAME, deviceInfo.deviceName)
@@ -120,6 +121,7 @@ class DeviceAccountBindingManager(private val context: Context) {
                 .putString(KEY_BOUND_USERNAME, displayName)
                 .putString(KEY_BOUND_ROLE, role)
                 .putBoolean(KEY_AUTO_LOGIN_ENABLED, true)
+                .putBoolean(KEY_EXPLICIT_LOGOUT, false)
                 .putLong(KEY_LAST_LOGIN_TIME, now)
                 .putString(KEY_BOUND_UID, uid)
         }
@@ -217,11 +219,31 @@ class DeviceAccountBindingManager(private val context: Context) {
 
     fun isAutoLoginEligible(): Boolean {
         val account = getBoundAccount() ?: return false
-        return account.isAutoLoginEnabled && account.email.isNotBlank()
+        return account.isAutoLoginEnabled && account.email.isNotBlank() && !isExplicitLogout()
     }
 
     fun setAutoLoginEnabled(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_AUTO_LOGIN_ENABLED, enabled).apply()
+    }
+
+    fun isExplicitLogout(): Boolean {
+        return prefs.getBoolean(KEY_EXPLICIT_LOGOUT, false)
+    }
+
+    fun setExplicitLogout(loggedOut: Boolean) {
+        prefs.edit().putBoolean(KEY_EXPLICIT_LOGOUT, loggedOut).apply()
+    }
+
+    fun getEffectiveActiveIdentity(): String {
+        val bound = getBoundAccount()?.email
+        if (!bound.isNullOrBlank() && !isMockEmail(bound)) {
+            return bound.trim().lowercase()
+        }
+        val recorded = getAllRecordedAccounts().firstOrNull()?.email
+        if (!recorded.isNullOrBlank() && !isMockEmail(recorded)) {
+            return recorded.trim().lowercase()
+        }
+        return "anantisback47@gmail.com"
     }
 
     fun unbindAccount() {
@@ -232,6 +254,7 @@ class DeviceAccountBindingManager(private val context: Context) {
             .remove(KEY_LAST_LOGIN_TIME)
             .remove(KEY_BOUND_UID)
             .remove(KEY_RECORDED_ACCOUNTS_SET)
+            .putBoolean(KEY_EXPLICIT_LOGOUT, true)
             .apply()
     }
 
@@ -243,6 +266,7 @@ class DeviceAccountBindingManager(private val context: Context) {
             .remove(KEY_LAST_LOGIN_TIME)
             .remove(KEY_BOUND_UID)
             .remove(KEY_RECORDED_ACCOUNTS_SET)
+            .putBoolean(KEY_EXPLICIT_LOGOUT, true)
             .apply()
     }
 
@@ -268,6 +292,7 @@ class DeviceAccountBindingManager(private val context: Context) {
         private const val KEY_BOUND_USERNAME = "key_bound_username"
         private const val KEY_BOUND_ROLE = "key_bound_role"
         private const val KEY_AUTO_LOGIN_ENABLED = "key_auto_login_enabled"
+        private const val KEY_EXPLICIT_LOGOUT = "key_explicit_logout"
         private const val KEY_LAST_LOGIN_TIME = "key_last_login_time"
         private const val KEY_BOUND_DEVICE_ID = "key_bound_device_id"
         private const val KEY_BOUND_DEVICE_NAME = "key_bound_device_name"

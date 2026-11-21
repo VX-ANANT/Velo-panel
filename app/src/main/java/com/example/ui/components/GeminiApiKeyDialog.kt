@@ -208,7 +208,7 @@ fun GeminiApiKeyDialog(
                             if (apiKeyInput.isNotBlank()) {
                                 ApiKeyManager.setCustomApiKey(apiKeyInput.trim())
                                 soundManager.playSubtleChime()
-                                saveSuccessMessage = "✓ Gemini API key saved! Live AI active."
+                                saveSuccessMessage = "Gemini API key saved! Live AI active."
                                 onKeySaved(apiKeyInput.trim())
                             }
                         },

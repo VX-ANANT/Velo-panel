@@ -60,7 +60,7 @@ class GeminiChatViewModel(
         if (!rateCheck.isAllowed) {
             val userMsg = UiChatMessage(text = trimmed, isUser = true)
             val rateLimitMsg = UiChatMessage(
-                text = "⏳ Rate Limit: ${rateCheck.reasonMessage}",
+                text = "Rate Limit: ${rateCheck.reasonMessage}",
                 isUser = false,
                 isError = true
             )

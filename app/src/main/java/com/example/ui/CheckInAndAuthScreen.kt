@@ -2,7 +2,6 @@ package com.example.ui
 
 import android.widget.Toast
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -17,11 +16,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.domain.model.Tournament
 import com.example.domain.model.CheckInToken
+import com.example.domain.model.Tournament
 import com.example.ui.common.GoogleGIcon
 import com.example.ui.theme.*
 import kotlin.random.Random
@@ -40,7 +40,9 @@ fun CheckInAndAuthScreen(
         mutableStateOf(initialTokens)
     }
 
-    var selectedTournamentForToken by remember { mutableStateOf(tournaments.firstOrNull()?.title ?: "BGMI Pro Tournament") }
+    var selectedTournamentForToken by remember {
+        mutableStateOf(tournaments.firstOrNull()?.title ?: "BGMI Pro Tournament")
+    }
     var inputTokenVerify by remember { mutableStateOf("") }
     var verificationStatus by remember { mutableStateOf<Pair<String, String>?>(null) }
     var showNewTokenGeneratedDialog by remember { mutableStateOf<CheckInToken?>(null) }
@@ -48,18 +50,18 @@ fun CheckInAndAuthScreen(
     // Google Auth Settings toggles state
     var googleAuthEnabled by remember { mutableStateOf(true) }
     var enforceTokenCheckIn by remember { mutableStateOf(true) }
-    var autoExpireMinutes by remember { mutableStateOf("15 mins") }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(Color.Black)
             .padding(horizontal = 16.dp)
     ) {
         // Top Bar
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 16.dp),
+                .padding(vertical = 14.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -71,33 +73,56 @@ fun CheckInAndAuthScreen(
                     Spacer(modifier = Modifier.width(4.dp))
                 }
                 Column {
-                    Text("Check-In Tokens & Auth", color = VelorixTextPrimary, fontWeight = FontWeight.Bold, fontSize = 20.sp)
-                    Text("Player verification & Google login controls", color = Color.Gray, fontSize = 12.sp)
+                    Text(
+                        text = "Check-In Tokens & Auth",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 19.sp
+                    )
+                    Text(
+                        text = "Player verification & Google Sign-In controls",
+                        color = Color(0xFF94A3B8),
+                        fontSize = 12.sp
+                    )
                 }
             }
         }
+        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.1f))
 
         LazyColumn(
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-            modifier = Modifier.padding(bottom = 16.dp)
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(bottom = 16.dp)
         ) {
             // Section 1: Quick Generate Check-In Token
             item {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(CardLiveBg, RoundedCornerShape(16.dp))
-                        .border(1.dp, VelorixAccent.copy(alpha = 0.3f), RoundedCornerShape(16.dp))
-                        .padding(16.dp)
+                        .padding(vertical = 16.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.QrCode, contentDescription = null, tint = VelorixAccent, modifier = Modifier.size(20.dp))
+                        Icon(
+                            Icons.Default.QrCode,
+                            contentDescription = null,
+                            tint = VelorixAccent,
+                            modifier = Modifier.size(18.dp)
+                        )
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Generate Tournament Check-In Token", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        Text(
+                            text = "Generate Tournament Check-In Token",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp
+                        )
                     }
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text("Issue a instant 6-digit passcode token for players entering active tournament lobbies.", color = Color.LightGray, fontSize = 12.sp)
-                    
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Issue an instant 6-digit passcode token for players entering active tournament lobbies.",
+                        color = Color(0xFF94A3B8),
+                        fontSize = 12.sp
+                    )
+
                     Spacer(modifier = Modifier.height(12.dp))
                     Button(
                         onClick = {
@@ -115,13 +140,18 @@ fun CheckInAndAuthScreen(
                             onSaveToken?.invoke(newToken)
                             showNewTokenGeneratedDialog = newToken
                         },
-                        modifier = Modifier.fillMaxWidth().height(44.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(44.dp),
+                        shape = RoundedCornerShape(10.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent)
                     ) {
-                        Icon(Icons.Default.AddCircle, contentDescription = null, tint = Color.Black)
+                        Icon(Icons.Default.AddCircle, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Generate New Check-In Token", color = Color.Black, fontWeight = FontWeight.Bold)
+                        Text("Generate New Check-In Token", color = Color.White, fontWeight = FontWeight.Bold)
                     }
+                    Spacer(modifier = Modifier.height(14.dp))
+                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
                 }
             }
 
@@ -130,11 +160,14 @@ fun CheckInAndAuthScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(CardLiveBg, RoundedCornerShape(16.dp))
-                        .border(1.dp, CardVerifyBorder, RoundedCornerShape(16.dp))
-                        .padding(16.dp)
+                        .padding(vertical = 8.dp)
                 ) {
-                    Text("Live Token Validator", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text(
+                        text = "Live Token Validator",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp
+                    )
                     Spacer(modifier = Modifier.height(8.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -143,13 +176,15 @@ fun CheckInAndAuthScreen(
                         OutlinedTextField(
                             value = inputTokenVerify,
                             onValueChange = { inputTokenVerify = it.uppercase() },
-                            placeholder = { Text("Enter PIN (e.g. VLX-8821)", color = Color.Gray, fontSize = 12.sp) },
+                            placeholder = { Text("Enter PIN (e.g. VLX-8821)", color = Color(0xFF64748B), fontSize = 12.sp) },
                             modifier = Modifier.weight(1f),
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedTextColor = Color.White,
                                 unfocusedTextColor = Color.White,
                                 focusedBorderColor = VelorixAccent,
-                                unfocusedBorderColor = CardVerifyBorder
+                                unfocusedBorderColor = Color.White.copy(alpha = 0.14f),
+                                focusedContainerColor = Color.Black,
+                                unfocusedContainerColor = Color.Black
                             ),
                             singleLine = true
                         )
@@ -164,14 +199,14 @@ fun CheckInAndAuthScreen(
                                 } else if (match.isExpired) {
                                     verificationStatus = "error" to "Token Expired"
                                 } else {
-                                    // Mark as used
                                     val updated = match.copy(isUsed = true)
                                     tokenList = tokenList.map { if (it.tokenCode == match.tokenCode) updated else it }
                                     onSaveToken?.invoke(updated)
                                     verificationStatus = "success" to "VERIFIED: Check-in successful for ${match.playerUsername} (${match.gameAccountId})"
                                 }
                             },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF64B5F6)),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF38BDF8)),
+                            shape = RoundedCornerShape(10.dp),
                             modifier = Modifier.height(52.dp)
                         ) {
                             Text("Validate", color = Color.Black, fontWeight = FontWeight.Bold)
@@ -181,26 +216,23 @@ fun CheckInAndAuthScreen(
                     verificationStatus?.let { (type, msg) ->
                         val (icon, color) = when (type) {
                             "success" -> Icons.Default.CheckCircle to Color(0xFF10B981)
-                            "warning" -> Icons.Default.Warning to Color(0xFFFFB74D)
+                            "warning" -> Icons.Default.Warning to Color(0xFFF59E0B)
                             else -> Icons.Default.Cancel to Color(0xFFEF4444)
                         }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            color = Color(0xFF161B28),
-                            shape = RoundedCornerShape(8.dp),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.4f))
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(
-                                modifier = Modifier.padding(10.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(msg, color = color, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                            }
+                            Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(msg, color = color, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                     }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
                 }
             }
 
@@ -209,94 +241,108 @@ fun CheckInAndAuthScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(CardLiveBg, RoundedCornerShape(16.dp))
-                        .border(1.dp, CardVerifyBorder, RoundedCornerShape(16.dp))
-                        .padding(16.dp)
+                        .padding(vertical = 8.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         GoogleGIcon(size = 18.dp)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Google Auth & Token Security Rules", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text(
+                            text = "Google Auth & Token Security Rules",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
                     }
                     Spacer(modifier = Modifier.height(12.dp))
 
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 6.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text("Enforce Google Sign-In", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                            Text("Gate tournament entry and prize claims behind Google Auth", color = Color.Gray, fontSize = 11.sp)
+                            Text("Gate tournament entry and prize claims behind Google Auth", color = Color(0xFF94A3B8), fontSize = 11.sp)
                         }
                         Switch(
                             checked = googleAuthEnabled,
                             onCheckedChange = { googleAuthEnabled = it },
-                            colors = SwitchDefaults.colors(checkedThumbColor = VelorixAccent)
+                            colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = VelorixAccent)
                         )
                     }
+                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.06f))
 
-                    Spacer(modifier = Modifier.height(12.dp))
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 10.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text("Mandatory Pre-Match Token Check-In", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                            Text("Players must submit 6-digit PIN before match start", color = Color.Gray, fontSize = 11.sp)
+                            Text("Players must submit 6-digit PIN before match start", color = Color(0xFF94A3B8), fontSize = 11.sp)
                         }
                         Switch(
                             checked = enforceTokenCheckIn,
                             onCheckedChange = { enforceTokenCheckIn = it },
-                            colors = SwitchDefaults.colors(checkedThumbColor = VelorixAccent)
+                            colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = VelorixAccent)
                         )
                     }
+                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
                 }
             }
 
             // Section 4: Active Check-In Token Log
             item {
-                Text("Active Check-In Tokens Log", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text(
+                    text = "Active Check-In Tokens Log",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp,
+                    modifier = Modifier.padding(top = 12.dp, bottom = 6.dp)
+                )
             }
 
             items(tokenList) { token ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(CardLiveBg, RoundedCornerShape(12.dp))
-                        .border(1.dp, if (token.isUsed) Color.Green.copy(alpha = 0.3f) else CardVerifyBorder, RoundedCornerShape(12.dp))
-                        .padding(14.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(token.tokenCode, color = VelorixAccent, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(token.tournamentTitle, color = Color.Gray, fontSize = 11.sp)
-                        }
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text("Player: ${token.playerUsername} (${token.gameAccountId})", color = Color.White, fontSize = 12.sp)
-                    }
-
-                    Box(
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Row(
                         modifier = Modifier
-                            .background(
-                                if (token.isUsed) Color.Green.copy(alpha = 0.2f)
-                                else if (token.isExpired) Color.Red.copy(alpha = 0.2f)
-                                else Color(0xFFFFB74D).copy(alpha = 0.2f),
-                                RoundedCornerShape(6.dp)
-                            )
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .fillMaxWidth()
+                            .padding(vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = token.tokenCode,
+                                    color = VelorixAccent,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(token.tournamentTitle, color = Color(0xFF94A3B8), fontSize = 11.sp)
+                            }
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Player: ${token.playerUsername} (${token.gameAccountId})",
+                                color = Color.White,
+                                fontSize = 12.sp
+                            )
+                        }
+
                         Text(
                             text = if (token.isUsed) "CHECKED IN" else if (token.isExpired) "EXPIRED" else "ACTIVE",
-                            color = if (token.isUsed) Color.Green else if (token.isExpired) Color.Red else Color(0xFFFFB74D),
+                            color = if (token.isUsed) Color(0xFF10B981) else if (token.isExpired) Color(0xFFEF4444) else Color(0xFFF59E0B),
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
+                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
                 }
             }
         }
@@ -306,35 +352,44 @@ fun CheckInAndAuthScreen(
     showNewTokenGeneratedDialog?.let { token ->
         AlertDialog(
             onDismissRequest = { showNewTokenGeneratedDialog = null },
-            title = { Text("Check-In Token Generated!", color = VelorixAccent, fontWeight = FontWeight.Bold) },
+            title = {
+                Text(
+                    text = "Check-In Token Generated",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 17.sp
+                )
+            },
             text = {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Share this passcode with player:", color = Color.LightGray, fontSize = 12.sp)
+                    Text("Share this passcode with player:", color = Color(0xFF94A3B8), fontSize = 12.sp)
                     Spacer(modifier = Modifier.height(12.dp))
-                    Box(
-                        modifier = Modifier
-                            .background(VelorixAccent.copy(alpha = 0.2f), RoundedCornerShape(12.dp))
-                            .border(2.dp, VelorixAccent, RoundedCornerShape(12.dp))
-                            .padding(horizontal = 24.dp, vertical = 12.dp)
-                    ) {
-                        Text(token.tokenCode, color = VelorixAccent, fontSize = 28.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
-                    }
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text("Tournament: ${token.tournamentTitle}", color = Color.White, fontSize = 13.sp)
+                    Text(
+                        text = token.tokenCode,
+                        color = VelorixAccent,
+                        fontSize = 26.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        letterSpacing = 2.sp
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.1f))
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("Tournament: ${token.tournamentTitle}", color = Color.White, fontSize = 12.sp)
                 }
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        Toast.makeText(context, "Passcode ${token.tokenCode} copied!", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Passcode ${token.tokenCode} copied", Toast.LENGTH_SHORT).show()
                         showNewTokenGeneratedDialog = null
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent)
                 ) {
-                    Text("Copy Code & Close", color = Color.Black, fontWeight = FontWeight.Bold)
+                    Text("Copy Code & Close", color = Color.White, fontWeight = FontWeight.Bold)
                 }
             },
-            containerColor = CardLiveBg
+            containerColor = Color.Black
         )
     }
 }

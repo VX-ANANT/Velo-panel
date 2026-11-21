@@ -51,6 +51,7 @@ import com.example.domain.model.FreeFireCategories
 import com.example.domain.model.Tournament
 import com.example.domain.model.TournamentBannerPresets
 import com.example.ui.common.GameLogoBadge
+import com.example.ui.common.FrostedGlassAlertDialog
 import com.example.ui.theme.*
 import com.example.util.ImageUploadResult
 import com.example.util.TournamentImageUploader
@@ -156,7 +157,7 @@ fun CreateTournamentScreen(
                             bannerUrl = result.url
                             localBannerUri = null
                             isUploadingBanner = false
-                            bannerStatusMessage = "Uploaded via ${result.provider} ✓"
+                            bannerStatusMessage = "Uploaded via ${result.provider}"
                             Toast.makeText(context, "Photo uploaded successfully!", Toast.LENGTH_SHORT).show()
                         }
                         is ImageUploadResult.Failure -> {
@@ -164,7 +165,7 @@ fun CreateTournamentScreen(
                                 bannerUrl = result.fallbackBase64
                                 localBannerUri = null
                                 isUploadingBanner = false
-                                bannerStatusMessage = "Photo attached ✓"
+                                bannerStatusMessage = "Photo attached"
                                 Toast.makeText(context, "Photo attached as banner", Toast.LENGTH_SHORT).show()
                             } else {
                                 isUploadingBanner = false
@@ -203,7 +204,7 @@ fun CreateTournamentScreen(
                             bannerUrl = result.url
                             localBannerUri = null
                             isUploadingBanner = false
-                            bannerStatusMessage = "Uploaded via ${result.provider} ✓"
+                            bannerStatusMessage = "Uploaded via ${result.provider}"
                             Toast.makeText(context, "Tournament banner uploaded!", Toast.LENGTH_SHORT).show()
                         }
                         is ImageUploadResult.Failure -> {
@@ -211,7 +212,7 @@ fun CreateTournamentScreen(
                                 bannerUrl = result.fallbackBase64
                                 localBannerUri = null
                                 isUploadingBanner = false
-                                bannerStatusMessage = "Image attached ✓"
+                                bannerStatusMessage = "Image attached"
                                 Toast.makeText(context, "Banner image attached", Toast.LENGTH_SHORT).show()
                             } else {
                                 isUploadingBanner = false
@@ -281,14 +282,25 @@ fun CreateTournamentScreen(
                         color = if (creationMode == "single") VelorixAccent else Color.Transparent,
                         shape = RoundedCornerShape(10.dp)
                     ) {
-                        Text(
-                            text = "Single Tournament",
-                            color = if (creationMode == "single") Color.Black else VelorixTextSecondary,
-                            fontSize = 12.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.padding(vertical = 9.dp)
-                        )
+                        Row(
+                            modifier = Modifier.padding(vertical = 9.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.AddCircleOutline,
+                                contentDescription = null,
+                                tint = if (creationMode == "single") Color.Black else VelorixTextSecondary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Single Match (Separate)",
+                                color = if (creationMode == "single") Color.Black else VelorixTextSecondary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                     Surface(
                         modifier = Modifier
@@ -311,9 +323,9 @@ fun CreateTournamentScreen(
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "Batch Multi-Tournament",
+                                text = "Batch Scheduler (Bulk)",
                                 color = if (creationMode == "batch") Color.Black else VelorixTextSecondary,
-                                fontSize = 12.5.sp,
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
@@ -605,18 +617,28 @@ fun CreateTournamentScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(Color(0x1AFFB74D), RoundedCornerShape(10.dp))
+                            .background(Color(0x1A00E5FF), RoundedCornerShape(10.dp))
+                            .border(1.dp, Color(0x3300E5FF), RoundedCornerShape(10.dp))
                             .padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.Info, contentDescription = null, tint = Color(0xFFFFB74D), modifier = Modifier.size(20.dp))
+                        Icon(Icons.Default.Tune, contentDescription = null, tint = VelorixAccent, modifier = Modifier.size(20.dp))
                         Spacer(modifier = Modifier.width(10.dp))
-                        Text(
-                            text = "Newly created tournaments are broadcast in Realtime to player feeds and admin oversight.",
-                            color = Color(0xFFFFB74D),
-                            fontSize = 11.sp,
-                            lineHeight = 15.sp
-                        )
+                        Column {
+                            Text(
+                                text = "Individual Match Mode (Separate Setup)",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Configure each match separately with custom title, category, entry fee, and rules. Tap 'CREATE & ADD ANOTHER' at the bottom to queue your next match right away.",
+                                color = Color(0xFF94A3B8),
+                                fontSize = 11.sp,
+                                lineHeight = 15.sp
+                            )
+                        }
                     }
                 }
 
@@ -1149,49 +1171,130 @@ fun CreateTournamentScreen(
                 }
             }
 
-            // Basic Info
+            // Basic Info with Quick-Select Chips
             item {
                 SettingsCard {
-                    Text("Basic Tournament Information", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = VelorixTextPrimary, modifier = Modifier.padding(bottom = 10.dp))
+                    Text("Match Details", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = VelorixTextPrimary, modifier = Modifier.padding(bottom = 10.dp))
                     OutlinedTextField(
                         value = title,
                         onValueChange = { title = it },
                         label = { Text("Tournament Title *") },
-                        placeholder = { Text("e.g. Free Fire Bermuda Solo Championship") },
+                        placeholder = { Text("e.g. Bermuda Pro Solo Series") },
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
                     )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
                     Spacer(modifier = Modifier.height(10.dp))
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        OutlinedTextField(
-                            value = game,
-                            onValueChange = { game = it },
-                            label = { Text("Game") },
-                            leadingIcon = { GameLogoBadge(gameName = game, size = 20.dp) },
-                            modifier = Modifier.weight(1f),
-                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
-                        )
+
+                    // Format Selection Chips
+                    Text("Format", fontSize = 11.5.sp, color = VelorixTextSecondary, fontWeight = FontWeight.SemiBold)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    val formatOptions = listOf(
+                        "SOLO" to "48",
+                        "DUO" to "48",
+                        "SQUAD" to "48",
+                        "4v4 CS" to "8",
+                        "1v1 Lone Wolf" to "2"
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        formatOptions.forEach { (fmt, defaultSlots) ->
+                            val isSelected = format.equals(fmt, ignoreCase = true)
+                            Surface(
+                                onClick = {
+                                    format = fmt
+                                    maxPlayers = defaultSlots
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isSelected) VelorixAccent.copy(alpha = 0.18f) else Color.Transparent,
+                                border = BorderStroke(0.5.dp, if (isSelected) VelorixAccent else Color.White.copy(alpha = 0.12f))
+                            ) {
+                                Text(
+                                    text = fmt,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isSelected) VelorixAccent else Color(0xFFD4D4D8),
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Map Selection Chips
+                    Text("Map", fontSize = 11.5.sp, color = VelorixTextSecondary, fontWeight = FontWeight.SemiBold)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    val mapOptions = listOf("Bermuda", "Purgatory", "Kalahari", "Alpine", "NexTerra", "Iron Cage")
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        mapOptions.forEach { mapOpt ->
+                            val isSelected = mapName.equals(mapOpt, ignoreCase = true)
+                            Surface(
+                                onClick = { mapName = mapOpt },
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isSelected) Color(0xFF38BDF8).copy(alpha = 0.18f) else Color.Transparent,
+                                border = BorderStroke(0.5.dp, if (isSelected) Color(0xFF38BDF8) else Color.White.copy(alpha = 0.12f))
+                            ) {
+                                Text(
+                                    text = mapOpt,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isSelected) Color(0xFF38BDF8) else Color(0xFFD4D4D8),
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Slot Capacity Chips
+                    Text("Max Slots", fontSize = 11.5.sp, color = VelorixTextSecondary, fontWeight = FontWeight.SemiBold)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    val slotOptions = listOf("2", "8", "12", "24", "48", "50", "100")
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        slotOptions.forEach { slotOpt ->
+                            val isSelected = maxPlayers == slotOpt
+                            Surface(
+                                onClick = { maxPlayers = slotOpt },
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isSelected) Color.White.copy(alpha = 0.14f) else Color.Transparent,
+                                border = BorderStroke(0.5.dp, if (isSelected) Color.White else Color.White.copy(alpha = 0.12f))
+                            ) {
+                                Text(
+                                    text = "$slotOpt Slots",
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isSelected) Color.White else Color(0xFFA1A1AA),
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         OutlinedTextField(
                             value = mapName,
                             onValueChange = { mapName = it },
-                            label = { Text("Map (e.g. Bermuda)") },
-                            modifier = Modifier.weight(1f),
-                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        OutlinedTextField(
-                            value = format,
-                            onValueChange = { format = it },
-                            label = { Text("Format (SOLO/DUO/SQUAD)") },
+                            label = { Text("Custom Map") },
                             modifier = Modifier.weight(1f),
                             colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
                         )
                         OutlinedTextField(
                             value = maxPlayers,
                             onValueChange = { maxPlayers = it },
-                            label = { Text("Max Slots") },
+                            label = { Text("Custom Slots") },
                             modifier = Modifier.weight(1f),
                             colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
                         )
@@ -1202,8 +1305,73 @@ fun CreateTournamentScreen(
             // Financials & Prize Breakdown
             item {
                 SettingsCard {
-                    Text("Prize Pool & Prize Distribution", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = VelorixTextPrimary, modifier = Modifier.padding(bottom = 10.dp))
-                    
+                    Text("Entry Fee & Prize Pool", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = VelorixTextPrimary, modifier = Modifier.padding(bottom = 10.dp))
+
+                    // Entry Fee Quick Chips
+                    Text("Quick Entry Fee", fontSize = 11.5.sp, color = VelorixTextSecondary, fontWeight = FontWeight.SemiBold)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    val feeOptions = listOf("0", "10", "20", "30", "50", "100", "200")
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        feeOptions.forEach { feeOpt ->
+                            val isSelected = entryFee == feeOpt
+                            Surface(
+                                onClick = { entryFee = feeOpt },
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isSelected) Color(0xFF10B981).copy(alpha = 0.18f) else Color.Transparent,
+                                border = BorderStroke(0.5.dp, if (isSelected) Color(0xFF10B981) else Color.White.copy(alpha = 0.12f))
+                            ) {
+                                Text(
+                                    text = if (feeOpt == "0") "Free" else "₹$feeOpt",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isSelected) Color(0xFF10B981) else Color(0xFFD4D4D8),
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Prize Pool Quick Chips
+                    Text("Quick Prize Pool", fontSize = 11.5.sp, color = VelorixTextSecondary, fontWeight = FontWeight.SemiBold)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    val poolOptions = listOf("100", "250", "500", "1000", "2500", "5000", "10000")
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        poolOptions.forEach { poolOpt ->
+                            val isSelected = prizePool == poolOpt
+                            Surface(
+                                onClick = {
+                                    prizePool = poolOpt
+                                    val p = poolOpt.toFloatOrNull() ?: 0f
+                                    if (p > 0) {
+                                        firstPlacePrize = (p * 0.50f).toInt().toString()
+                                        secondPlacePrize = (p * 0.25f).toInt().toString()
+                                        thirdPlacePrize = (p * 0.15f).toInt().toString()
+                                    }
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isSelected) VelorixAccent.copy(alpha = 0.18f) else Color.Transparent,
+                                border = BorderStroke(0.5.dp, if (isSelected) VelorixAccent else Color.White.copy(alpha = 0.12f))
+                            ) {
+                                Text(
+                                    text = "₹$poolOpt",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isSelected) VelorixAccent else Color(0xFFD4D4D8),
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         OutlinedTextField(
                             value = prizePool,
@@ -1230,7 +1398,10 @@ fun CreateTournamentScreen(
                     }
 
                     Spacer(modifier = Modifier.height(12.dp))
-                    Text("Prize Pool Presets", fontSize = 12.sp, color = VelorixTextSecondary, fontWeight = FontWeight.SemiBold)
+                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Text("Distribution Split", fontSize = 11.5.sp, color = VelorixTextSecondary, fontWeight = FontWeight.SemiBold)
                     Spacer(modifier = Modifier.height(6.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -1242,13 +1413,13 @@ fun CreateTournamentScreen(
                                 firstPlacePrize = (p * 0.50f).toInt().toString()
                                 secondPlacePrize = (p * 0.25f).toInt().toString()
                                 thirdPlacePrize = (p * 0.15f).toInt().toString()
-                                perKillPrize = "20"
+                                perKillPrize = "10"
                             },
-                            color = VelorixBg,
+                            color = Color.Transparent,
                             shape = RoundedCornerShape(8.dp),
-                            border = BorderStroke(1.dp, VelorixAccent.copy(alpha = 0.4f))
+                            border = BorderStroke(0.5.dp, VelorixAccent.copy(alpha = 0.5f))
                         ) {
-                            Text("50/25/15 Standard", modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp), fontSize = 10.sp, color = VelorixAccent)
+                            Text("50/25/15 + Kill", modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), fontSize = 11.sp, color = VelorixAccent)
                         }
 
                         Surface(
@@ -1258,11 +1429,11 @@ fun CreateTournamentScreen(
                                 thirdPlacePrize = (p * 0.15f).toInt().toString()
                                 perKillPrize = "0"
                             },
-                            color = VelorixBg,
+                            color = Color.Transparent,
                             shape = RoundedCornerShape(8.dp),
-                            border = BorderStroke(1.dp, Color(0xFFFFD54F).copy(alpha = 0.4f))
+                            border = BorderStroke(0.5.dp, Color(0xFFFFD54F).copy(alpha = 0.5f))
                         ) {
-                            Text("60/25/15 Pro", modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp), fontSize = 10.sp, color = Color(0xFFFFD54F))
+                            Text("60/25/15 Top 3", modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), fontSize = 11.sp, color = Color(0xFFFFD54F))
                         }
 
                         Surface(
@@ -1272,17 +1443,15 @@ fun CreateTournamentScreen(
                                 thirdPlacePrize = "0"
                                 perKillPrize = "0"
                             },
-                            color = VelorixBg,
+                            color = Color.Transparent,
                             shape = RoundedCornerShape(8.dp),
-                            border = BorderStroke(1.dp, Color(0xFF81C784).copy(alpha = 0.4f))
+                            border = BorderStroke(0.5.dp, Color(0xFF81C784).copy(alpha = 0.5f))
                         ) {
-                            Text("100% Winner", modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp), fontSize = 10.sp, color = Color(0xFF81C784))
+                            Text("100% Winner", modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), fontSize = 11.sp, color = Color(0xFF81C784))
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text("Prize Distribution Values (Rank 1, 2, 3 & Per Kill)", fontSize = 12.sp, color = Color.White, fontWeight = FontWeight.SemiBold)
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedTextField(
@@ -1319,94 +1488,109 @@ fun CreateTournamentScreen(
                             colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFFFF5252), unfocusedBorderColor = CardVerifyBorder)
                         )
                     }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Surface(
-                        color = Color(0xFF141720),
-                        shape = RoundedCornerShape(10.dp),
-                        border = BorderStroke(1.dp, Color(0xFF282D3D)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.Info, contentDescription = null, tint = VelorixAccent, modifier = Modifier.size(15.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Player Prize Settlement Terms", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                            }
-                            Spacer(modifier = Modifier.height(4.dp))
-                            val fP = firstPlacePrize.ifBlank { "0" }
-                            val sP = secondPlacePrize.ifBlank { "0" }
-                            val tP = thirdPlacePrize.ifBlank { "0" }
-                            val kP = perKillPrize.ifBlank { "0" }
-                            Text(
-                                "Total tournament purse is ₹${prizePool.ifBlank { "0" }}. Champion receives ₹$fP upon score verification. 2nd Place receives ₹$sP and 3rd Place receives ₹$tP. Players also earn ₹$kP per confirmed elimination. Disbursed automatically post-match.",
-                                fontSize = 11.sp,
-                                color = Color(0xFFD1D5DB),
-                                lineHeight = 15.sp
-                            )
-                        }
-                    }
                 }
             }
 
-            // Gun & Weapon Rules
+            // Lobby Rules, Weapons & Device Toggles (Single Clean List with Hairline Dividers)
             item {
                 SettingsCard {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Shield, contentDescription = null, tint = VelorixAccent, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Guns & Loadout Rules", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = VelorixTextPrimary)
+                    Text("Lobby Rules & Loadout Toggles", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = VelorixTextPrimary, modifier = Modifier.padding(bottom = 8.dp))
+
+                    Text("Tap to Ban / Allow Weapons", fontSize = 11.5.sp, color = VelorixTextSecondary, fontWeight = FontWeight.SemiBold)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    val weaponList = listOf("M79 Launcher", "M82B", "SVD", "Double Vector", "Crossbow", "MAG-7", "Charge Buster")
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        weaponList.forEach { weapon ->
+                            val currentBanned = bannedGuns.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                            val isBanned = currentBanned.any { it.equals(weapon, ignoreCase = true) }
+                            Surface(
+                                onClick = {
+                                    val updated = if (isBanned) {
+                                        currentBanned.filterNot { it.equals(weapon, ignoreCase = true) }
+                                    } else {
+                                        currentBanned + weapon
+                                    }
+                                    bannedGuns = updated.joinToString(", ")
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isBanned) Color(0xFFEF4444).copy(alpha = 0.18f) else Color.Transparent,
+                                border = BorderStroke(0.5.dp, if (isBanned) Color(0xFFEF4444) else Color.White.copy(alpha = 0.12f))
+                            ) {
+                                Text(
+                                    text = if (isBanned) "Banned: $weapon" else weapon,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isBanned) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isBanned) Color(0xFFEF4444) else Color(0xFFD4D4D8),
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                )
+                            }
+                        }
                     }
+
                     Spacer(modifier = Modifier.height(10.dp))
-                    OutlinedTextField(
-                        value = allowedGuns,
-                        onValueChange = { allowedGuns = it },
-                        label = { Text("Allowed Weapons") },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(
                         value = bannedGuns,
                         onValueChange = { bannedGuns = it },
-                        label = { Text("Banned Weapons (e.g. M79, M82B)") },
+                        label = { Text("Banned Weapons List") },
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFFFF5252), unfocusedBorderColor = CardVerifyBorder)
                     )
+
                     Spacer(modifier = Modifier.height(10.dp))
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text("Gun Skin Attributes Allowed", fontSize = 13.sp, color = Color.White)
+                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Gun Skin Attributes", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Color.White)
+                            Text("Allow rate-of-fire and damage weapon skin buffs", fontSize = 10.5.sp, color = VelorixTextSecondary)
+                        }
                         Switch(checked = gunAttributesAllowed, onCheckedChange = { gunAttributesAllowed = it })
                     }
-                }
-            }
 
-            // Character Skills & Devices
-            item {
-                SettingsCard {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.PersonOutline, contentDescription = null, tint = Color(0xFF64B5F6), modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Character Skills & Device Rules", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = VelorixTextPrimary)
-                    }
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text("Character Skills Enabled", fontSize = 13.sp, color = Color.White)
+                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Character Skills", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Color.White)
+                            Text("Allow active and passive character abilities", fontSize = 10.5.sp, color = VelorixTextSecondary)
+                        }
                         Switch(checked = characterSkillsAllowed, onCheckedChange = { characterSkillsAllowed = it })
                     }
+
                     if (characterSkillsAllowed) {
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
                         OutlinedTextField(
                             value = bannedSkills,
                             onValueChange = { bannedSkills = it },
-                            label = { Text("Banned Skills (e.g. Chrono, Dimitry)") },
+                            label = { Text("Banned Skills (e.g. Chrono, Dimitri, Orion)") },
                             modifier = Modifier.fillMaxWidth(),
                             colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFFFF5252), unfocusedBorderColor = CardVerifyBorder)
                         )
+                        Spacer(modifier = Modifier.height(6.dp))
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text("Emulator / PC Players Allowed", fontSize = 13.sp, color = Color.White)
+
+                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Allow PC / Emulator Players", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Color.White)
+                            Text("Keep off for strict mobile-only competitive lobbies", fontSize = 10.5.sp, color = VelorixTextSecondary)
+                        }
                         Switch(checked = emulatorAllowed, onCheckedChange = { emulatorAllowed = it })
                     }
                 }
@@ -1632,7 +1816,7 @@ fun CreateTournamentScreen(
                             rules = cleanRules
                         )
                         onCreate(newTournament)
-                        Toast.makeText(context, "✓ '${newTournament.title}' created! Schedule next match below.", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "'${newTournament.title}' created! Schedule next match below.", Toast.LENGTH_SHORT).show()
 
                         // Advance schedule time by 1 hour for next tournament
                         try {
@@ -1669,7 +1853,7 @@ fun CreateTournamentScreen(
     }
 
     if (showAddCategoryDialog) {
-        AlertDialog(
+        FrostedGlassAlertDialog(
             onDismissRequest = { showAddCategoryDialog = false },
             title = { Text("Add Custom Free Fire Category", fontWeight = FontWeight.Bold, color = Color.White) },
             text = {
@@ -1741,8 +1925,7 @@ fun CreateTournamentScreen(
                 TextButton(onClick = { showAddCategoryDialog = false }) {
                     Text("Cancel", color = Color.White)
                 }
-            },
-            containerColor = Color(0xFF181820)
+            }
         )
     }
 }
@@ -1752,35 +1935,44 @@ private fun SettingsCard(
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = CardVerifyBg),
-        border = BorderStroke(1.dp, CardVerifyBorder)
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(Color.Black)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(vertical = 14.dp),
             content = content
+        )
+        HorizontalDivider(
+            thickness = 0.5.dp,
+            color = Color.White.copy(alpha = 0.08f)
         )
     }
 }
 
 @Composable
 private fun WeaponPresetChip(label: String, allowed: String, banned: String, onApply: (String, String) -> Unit) {
-    Surface(
-        modifier = Modifier.clickable { onApply(allowed, banned) },
-        color = VelorixBg,
-        shape = RoundedCornerShape(8.dp),
-        border = BorderStroke(1.dp, VelorixAccent.copy(alpha = 0.3f))
+    Column(
+        modifier = Modifier
+            .clickable { onApply(allowed, banned) }
+            .padding(horizontal = 4.dp, vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
             text = label,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
-            fontSize = 10.sp,
+            fontSize = 10.5.sp,
             color = VelorixAccent,
             fontWeight = FontWeight.Bold
+        )
+        Spacer(modifier = Modifier.height(3.dp))
+        Box(
+            modifier = Modifier
+                .width(18.dp)
+                .height(1.dp)
+                .background(VelorixAccent.copy(alpha = 0.5f))
         )
     }
 }
@@ -1790,18 +1982,24 @@ private fun QuickTemplateChip(
     label: String,
     onClick: () -> Unit
 ) {
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(10.dp),
-        color = Color(0xFF1E2235),
-        border = BorderStroke(1.dp, Color(0xFF6366F1).copy(alpha = 0.45f))
+    Column(
+        modifier = Modifier
+            .clickable { onClick() }
+            .padding(horizontal = 6.dp, vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
             text = label,
             color = Color.White,
             fontWeight = FontWeight.SemiBold,
-            fontSize = 12.sp,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+            fontSize = 12.sp
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Box(
+            modifier = Modifier
+                .width(24.dp)
+                .height(1.dp)
+                .background(Color.White.copy(alpha = 0.35f))
         )
     }
 }

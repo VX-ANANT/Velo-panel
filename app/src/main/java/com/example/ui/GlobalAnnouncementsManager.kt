@@ -1,13 +1,9 @@
 package com.example.ui
 
-import android.widget.Toast
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -17,15 +13,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.domain.model.GlobalAnnouncement
-import com.example.ui.common.GlassCard
+import com.example.ui.common.FrostedGlassDialog
 import com.example.ui.theme.*
 
 @Composable
@@ -42,253 +36,161 @@ fun GlobalAnnouncementsBanner(
 
     if (visibleAnnouncements.isEmpty()) return
 
-    Column(modifier = Modifier.fillMaxWidth()) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color.Black)
+    ) {
+        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+
+        // Header row
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(
-                    modifier = Modifier.size(8.dp),
-                    shape = CircleShape,
-                    color = Color(0xFFFF5252)
-                ) {}
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .background(Color(0xFFEF4444), CircleShape)
+                )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "LIVE ANNOUNCEMENTS (${visibleAnnouncements.size})",
-                    fontSize = 11.sp,
+                    text = "ANNOUNCEMENTS (${visibleAnnouncements.size})",
+                    fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
-                    color = VelorixTextSecondary,
-                    letterSpacing = 1.sp
+                    color = Color(0xFF94A3B8),
+                    letterSpacing = 0.8.sp
                 )
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (isAdmin) {
-                    Text(
-                        text = "+ Broadcast",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = VelorixAccent,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .clickable { onPublishClick() }
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    )
-                }
+            if (isAdmin) {
+                Text(
+                    text = "+ New",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    modifier = Modifier
+                        .clickable { onPublishClick() }
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                )
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.07f))
 
-        if (announcements.isEmpty()) {
-            Surface(
-                color = CardVerifyBg,
-                shape = RoundedCornerShape(14.dp),
-                border = BorderStroke(1.dp, CardVerifyBorder),
-                modifier = Modifier.fillMaxWidth()
+        visibleAnnouncements.take(3).forEachIndexed { index, announcement ->
+            val priorityColor = when (announcement.priority.uppercase()) {
+                "URGENT" -> Color(0xFFEF4444)
+                "MAINTENANCE" -> Color(0xFFF59E0B)
+                "TOURNAMENT" -> VelorixAccent
+                else -> Color(0xFF38BDF8)
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Default.Campaign, contentDescription = null, tint = VelorixAccent, modifier = Modifier.size(20.dp))
-                    Spacer(modifier = Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = announcement.priority.uppercase(),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = priorityColor
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = announcement.title,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.White,
+                            fontSize = 12.5.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        "All tournament servers operational. Tap + Broadcast to send alerts to players.",
+                        text = announcement.message,
                         fontSize = 11.sp,
-                        color = VelorixTextSecondary,
-                        lineHeight = 15.sp
+                        color = Color(0xFF94A3B8),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
-            }
-        } else {
-            LazyRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                items(visibleAnnouncements, key = { it.id }) { announcement ->
-                    val priorityColor = when (announcement.priority.uppercase()) {
-                        "URGENT" -> Color(0xFFFF5252)
-                        "MAINTENANCE" -> Color(0xFFFFB74D)
-                        "TOURNAMENT" -> VelorixAccent
-                        else -> Color(0xFF64B5F6)
-                    }
 
-                    GlassCard(
-                        modifier = Modifier.width(280.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        brush = Brush.horizontalGradient(
-                            colors = listOf(
-                                priorityColor.copy(alpha = 0.15f),
-                                Color(0xFF1E1A2A)
-                            )
-                        ),
-                        borderBrush = Brush.horizontalGradient(
-                            colors = listOf(
-                                priorityColor.copy(alpha = 0.6f),
-                                Color.White.copy(alpha = 0.1f)
-                            )
-                        )
+                if (isAdmin) {
+                    IconButton(
+                        onClick = {
+                            dismissedIds = dismissedIds + announcement.id
+                            onDeleteClick(announcement.id)
+                        },
+                        modifier = Modifier.size(26.dp)
                     ) {
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Surface(
-                                    color = priorityColor.copy(alpha = 0.25f),
-                                    shape = RoundedCornerShape(6.dp)
-                                ) {
-                                    Text(
-                                        text = announcement.priority.uppercase(),
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                        fontSize = 9.sp,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        color = priorityColor
-                                    )
-                                }
-
-                                if (isAdmin) {
-                                    IconButton(
-                                        onClick = {
-                                            dismissedIds = dismissedIds + announcement.id
-                                            onDeleteClick(announcement.id)
-                                        },
-                                        modifier = Modifier.size(28.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Close,
-                                            contentDescription = "Delete announcement",
-                                            tint = Color.White.copy(alpha = 0.7f),
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    }
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(6.dp))
-
-                            Text(
-                                text = announcement.title,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                fontSize = 13.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-
-                            Spacer(modifier = Modifier.height(2.dp))
-
-                            Text(
-                                text = announcement.message,
-                                fontSize = 11.sp,
-                                color = VelorixTextSecondary,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                                lineHeight = 14.sp
-                            )
-                        }
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Dismiss",
+                            tint = Color(0xFF71717A),
+                            modifier = Modifier.size(14.dp)
+                        )
                     }
                 }
             }
+
+            HorizontalDivider(
+                thickness = 0.5.dp,
+                color = Color.White.copy(alpha = 0.08f)
+            )
         }
     }
 }
 
 @Composable
 fun PublishAnnouncementDialog(
+    tournaments: List<com.example.domain.model.Tournament> = emptyList(),
+    users: List<com.example.domain.model.UserProfile> = emptyList(),
     onDismiss: () -> Unit,
-    onPublish: (GlobalAnnouncement) -> Unit
+    onPublish: (GlobalAnnouncement) -> Unit,
+    onPublishCampaign: ((title: String, message: String, targetTopic: String, deepLink: String?) -> Unit)? = null
 ) {
-    val context = LocalContext.current
-    var title by remember { mutableStateOf("") }
-    var message by remember { mutableStateOf("") }
-    var priority by remember { mutableStateOf("URGENT") }
-
-    AlertDialog(
+    FrostedGlassDialog(
         onDismissRequest = onDismiss,
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Campaign, contentDescription = null, tint = VelorixAccent)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Broadcast Live Announcement", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            }
-        },
-        text = {
-            Column(
+        maxWidth = 520.dp
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = { title = it },
-                    label = { Text("Announcement Title") },
-                    placeholder = { Text("e.g. Free Fire Room ID Released!") },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
+                Text(
+                    text = "Send Notification & Broadcast",
+                    color = Color.White,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold
                 )
-
-                OutlinedTextField(
-                    value = message,
-                    onValueChange = { message = it },
-                    label = { Text("Broadcast Message") },
-                    placeholder = { Text("Enter details for all active players...") },
-                    modifier = Modifier.fillMaxWidth().height(100.dp),
-                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
-                )
-
-                Text("Priority Level", fontSize = 11.sp, color = VelorixTextSecondary)
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    listOf("URGENT", "TOURNAMENT", "MAINTENANCE", "INFO").forEach { p ->
-                        val isSelected = priority == p
-                        FilterChip(
-                            selected = isSelected,
-                            onClick = { priority = p },
-                            label = { Text(p, fontSize = 9.sp, fontWeight = FontWeight.Bold) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = VelorixAccent,
-                                selectedLabelColor = Color.Black,
-                                containerColor = CardVerifyBg,
-                                labelColor = VelorixTextSecondary
-                            )
-                        )
-                    }
+                IconButton(onClick = onDismiss, modifier = Modifier.size(30.dp)) {
+                    Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFF94A3B8), modifier = Modifier.size(18.dp))
                 }
             }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    if (title.isBlank() || message.isBlank()) {
-                        Toast.makeText(context, "Please enter title and message", Toast.LENGTH_SHORT).show()
-                        return@Button
-                    }
-                    val announcement = GlobalAnnouncement(
-                        id = "ANN-${System.currentTimeMillis()}",
-                        title = title.trim(),
-                        message = message.trim(),
-                        priority = priority
-                    )
-                    onPublish(announcement)
-                    onDismiss()
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent)
-            ) {
-                Text("Broadcast to All", color = Color.Black, fontWeight = FontWeight.Bold)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel", color = VelorixTextSecondary)
-            }
-        },
-        containerColor = CardVerifyBg
-    )
+            Spacer(modifier = Modifier.height(10.dp))
+            ManualNotificationComposerSection(
+                tournaments = tournaments,
+                users = users,
+                onPublishAnnouncement = onPublish,
+                onPublishCampaign = onPublishCampaign,
+                onSentSuccess = onDismiss
+            )
+        }
+    }
 }

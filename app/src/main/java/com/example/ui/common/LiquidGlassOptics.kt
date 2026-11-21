@@ -49,14 +49,14 @@ import com.example.ui.theme.VelorixTextSecondary
  * Corresponds to the real-time optical refraction pipeline.
  */
 data class LiquidGlassOpticsState(
-    val vibrancy: Float = 0.85f,                // 0f..1f (Boost the saturation of the glass backdrop)
-    val blurRadius: Float = 0.90f,              // 0f..1f (Amount of blur on the glass surface: 90% Gaussian blur)
-    val lensRefractionHeight: Float = 0.75f,    // 0f..1f (Manage Lens Refraction Height settings)
-    val lensRefractionAmount: Float = 0.80f,    // 0f..1f (Manage Lens Refraction Amount settings)
-    val chromaticAberration: Boolean = true,    // Manage Chromatic Aberration settings
+    val vibrancy: Float = 0.55f,                // 0f..1f (Subtle specular clarity without blue saturation tint)
+    val blurRadius: Float = 0.42f,              // 0f..1f (Reduced, crisp optical glass blur)
+    val lensRefractionHeight: Float = 0.72f,    // 0f..1f (Manage Lens Refraction Height settings)
+    val lensRefractionAmount: Float = 0.75f,    // 0f..1f (Manage Lens Refraction Amount settings)
+    val chromaticAberration: Boolean = false,   // Disabled by default to prevent blue/cyan edge tinting
     val depthEffect: Boolean = true,            // Manage Depth Effect settings
-    val surfaceTint: Color = Color(0xFF1E1528), // Tint colour applied to the glass surface
-    val surfaceOpacity: Float = 0.20f,          // Opacity of the glass tint overlay for readability
+    val surfaceTint: Color = Color.Black,       // Neutral untinted glass surface
+    val surfaceOpacity: Float = 0.12f,          // Subtle opacity
     val glassTextColor: Color = Color.White,    // Text colour used on glass surfaces
     val glassPlayer: Boolean = true,            // Manage Glass Player settings
     val glassMiniPlayer: Boolean = true,        // Manage Glass Mini Player settings
@@ -71,13 +71,13 @@ class LiquidGlassOpticsManager(context: Context) {
 
     var state by mutableStateOf(
         LiquidGlassOpticsState(
-            vibrancy = prefs.getFloat("vibrancy", 0.85f),
-            blurRadius = prefs.getFloat("blurRadius", 0.90f),
-            lensRefractionHeight = prefs.getFloat("lensRefractionHeight", 0.75f),
-            lensRefractionAmount = prefs.getFloat("lensRefractionAmount", 0.80f),
-            chromaticAberration = prefs.getBoolean("chromaticAberration", true),
+            vibrancy = prefs.getFloat("vibrancy_v2", 0.55f),
+            blurRadius = prefs.getFloat("blurRadius_v2", 0.42f),
+            lensRefractionHeight = prefs.getFloat("lensRefractionHeight", 0.72f),
+            lensRefractionAmount = prefs.getFloat("lensRefractionAmount", 0.75f),
+            chromaticAberration = prefs.getBoolean("chromaticAberration_v2", false),
             depthEffect = prefs.getBoolean("depthEffect", true),
-            surfaceOpacity = prefs.getFloat("surfaceOpacity", 0.20f),
+            surfaceOpacity = prefs.getFloat("surfaceOpacity", 0.12f),
             glassPlayer = prefs.getBoolean("glassPlayer", true),
             glassMiniPlayer = prefs.getBoolean("glassMiniPlayer", true),
             glassNavigationBar = prefs.getBoolean("glassNavigationBar", true)
@@ -87,12 +87,12 @@ class LiquidGlassOpticsManager(context: Context) {
 
     fun updateVibrancy(value: Float) {
         state = state.copy(vibrancy = value.coerceIn(0f, 1f))
-        prefs.edit().putFloat("vibrancy", state.vibrancy).apply()
+        prefs.edit().putFloat("vibrancy_v2", state.vibrancy).apply()
     }
 
     fun updateBlurRadius(value: Float) {
         state = state.copy(blurRadius = value.coerceIn(0f, 1f))
-        prefs.edit().putFloat("blurRadius", state.blurRadius).apply()
+        prefs.edit().putFloat("blurRadius_v2", state.blurRadius).apply()
     }
 
     fun updateLensRefractionHeight(value: Float) {
@@ -107,7 +107,7 @@ class LiquidGlassOpticsManager(context: Context) {
 
     fun setChromaticAberration(enabled: Boolean) {
         state = state.copy(chromaticAberration = enabled)
-        prefs.edit().putBoolean("chromaticAberration", enabled).apply()
+        prefs.edit().putBoolean("chromaticAberration_v2", enabled).apply()
     }
 
     fun setDepthEffect(enabled: Boolean) {

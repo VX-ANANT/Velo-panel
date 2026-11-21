@@ -217,23 +217,34 @@ object TournamentBackendValidator {
 
     /**
      * Validates Payout Requests (UPI / Bank transfer withdrawal).
+     * Strictly enforces that ONLY Winning Money (winningFunds) can be withdrawn.
+     * Deposited Money (depositFunds) and Bonus Money (bonusFunds) are non-withdrawable.
      */
     fun validatePayoutRequest(user: UserProfile?, request: PayoutRequest): ValidationResult {
         if (user == null) {
             return ValidationResult.Invalid("User profile could not be verified.", "user")
         }
 
-        if (user.isBanned) {
-            return ValidationResult.Invalid("User account is restricted.", "user")
+        if (user.isBanned || user.isSuspended) {
+            return ValidationResult.Invalid("User account is restricted from withdrawals.", "user")
         }
 
         if (request.amount < 50.0) {
-            return ValidationResult.Invalid("Minimum withdrawal threshold is ₹50.", "amount")
+            return ValidationResult.Invalid("Minimum withdrawal threshold is ₹50 (Winning Money only).", "amount")
         }
 
-        val availableWinning = if (user.winningFunds > 0.0) user.winningFunds else user.funds
+        val availableWinning = user.winningFunds.coerceAtLeast(0.0)
+        if (availableWinning <= 0.0) {
+            return ValidationResult.Invalid(
+                "Withdrawal denied: Winning Money balance is ₹0. Deposited Money (₹${user.depositFunds.toInt()}) and Bonus Money (₹${user.bonusFunds.toInt()}) cannot be withdrawn.",
+                "amount"
+            )
+        }
         if (request.amount > availableWinning) {
-            return ValidationResult.Invalid("Requested amount (₹${request.amount.toInt()}) exceeds available winning balance (₹${availableWinning.toInt()}).", "amount")
+            return ValidationResult.Invalid(
+                "Requested amount (₹${request.amount.toInt()}) exceeds withdrawable Winning Money (₹${availableWinning.toInt()}). Deposited Money (₹${user.depositFunds.toInt()}) is non-withdrawable.",
+                "amount"
+            )
         }
 
         if (request.paymentMethod.equals("UPI", ignoreCase = true)) {

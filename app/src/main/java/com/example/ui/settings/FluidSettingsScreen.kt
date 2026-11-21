@@ -158,14 +158,13 @@ fun FluidSettingsScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(Color(0xFF09090D))
+            .background(Color.Black)
     ) {
         // Sub-screen navigation transition
         AnimatedContent(
             targetState = currentSubScreen,
             transitionSpec = {
                 if (targetState != null) {
-                    // Forward slide in
                     (slideInHorizontally(
                         initialOffsetX = { it },
                         animationSpec = spring(dampingRatio = 0.82f, stiffness = 420f)
@@ -177,7 +176,6 @@ fun FluidSettingsScreen(
                             ) + fadeOut(tween(180))
                         )
                 } else {
-                    // Back slide out
                     (slideInHorizontally(
                         initialOffsetX = { -it / 3 },
                         animationSpec = spring(dampingRatio = 0.82f, stiffness = 420f)
@@ -194,7 +192,6 @@ fun FluidSettingsScreen(
         ) { subScreen ->
             when (subScreen) {
                 null -> {
-                    // Main Settings Hub
                     SettingsHubContent(
                         stagedState = stagedState,
                         committedState = committedState,
@@ -249,7 +246,7 @@ fun FluidSettingsScreen(
             }
         }
 
-        // Floating Review/Discard dock (matching the video's bottom floating pill)
+        // Bottom Review/Discard dock
         FluidFloatingReviewBar(
             changesCount = changesCount,
             accentColor = dynamicAccentColor,
@@ -265,48 +262,30 @@ fun FluidSettingsScreen(
             },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 85.dp) // Sits comfortably above navigation bar
+                .padding(bottom = 85.dp)
         )
 
         // Review & Apply Dialog
         if (showReviewSummaryDialog) {
             AlertDialog(
                 onDismissRequest = { showReviewSummaryDialog = false },
-                containerColor = Color(0xFF15151F),
+                containerColor = Color.Black,
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Surface(
-                            modifier = Modifier.size(32.dp),
-                            shape = CircleShape,
-                            color = dynamicAccentColor.copy(alpha = 0.25f),
-                            border = BorderStroke(1.dp, dynamicAccentColor)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(Icons.Default.Check, contentDescription = null, tint = dynamicAccentColor, modifier = Modifier.size(18.dp))
-                            }
-                        }
-                        Spacer(modifier = Modifier.width(10.dp))
+                        Icon(Icons.Default.Check, contentDescription = null, tint = dynamicAccentColor, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
                         Text("Apply $changesCount Customization${if (changesCount > 1) "s" else ""}?", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                     }
                 },
                 text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("The following fluid visual changes will take effect immediately:", color = Color(0xFF94A3B8), fontSize = 12.sp)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = Color(0xFF0C0C12),
-                            border = BorderStroke(1.dp, Color(0xFF222230)),
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-                        ) {
-                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text("• Theme Accent: ${stagedState.themeColorName}", color = dynamicAccentColor, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                Text("• Typography Scale: ${stagedState.textSize}", color = Color.White, fontSize = 12.sp)
-                                Text("• UI Shape Style: ${stagedState.uiStyle}", color = Color.White, fontSize = 12.sp)
-                                Text("• System Language: ${stagedState.language}", color = Color.White, fontSize = 12.sp)
-                                Text("• Dark Mode: ${if (stagedState.isDark) "Enabled" else "Disabled"}", color = Color.White, fontSize = 12.sp)
-                            }
-                        }
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("The following visual changes will take effect immediately:", color = Color(0xFF94A3B8), fontSize = 12.sp)
+                        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f), modifier = Modifier.padding(vertical = 4.dp))
+                        Text("Theme Accent: ${stagedState.themeColorName}", color = dynamicAccentColor, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Typography Scale: ${stagedState.textSize}", color = Color.White, fontSize = 12.sp)
+                        Text("UI Shape Style: ${stagedState.uiStyle}", color = Color.White, fontSize = 12.sp)
+                        Text("System Language: ${stagedState.language}", color = Color.White, fontSize = 12.sp)
+                        Text("Dark Mode: ${if (stagedState.isDark) "Enabled" else "Disabled"}", color = Color.White, fontSize = 12.sp)
                     }
                 },
                 confirmButton = {
@@ -314,10 +293,10 @@ fun FluidSettingsScreen(
                         onClick = {
                             committedState = stagedState
                             showReviewSummaryDialog = false
-                            Toast.makeText(context, "Preferences applied with 120Hz fluidity!", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Preferences applied", Toast.LENGTH_SHORT).show()
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = dynamicAccentColor),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(8.dp)
                     ) {
                         Text("Apply Changes", color = Color.White, fontWeight = FontWeight.Bold)
                     }
@@ -350,44 +329,31 @@ private fun SettingsHubContent(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
+            .background(Color.Black)
             .padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         item {
             Spacer(modifier = Modifier.height(14.dp))
-            // Top Bar with back button
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Surface(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .bounceClick(scaleDown = 0.90f) { onBack() },
-                    shape = CircleShape,
-                    color = Color(0xFF161622),
-                    border = BorderStroke(1.dp, Color(0xFF262638))
+                IconButton(
+                    onClick = onBack,
+                    modifier = Modifier.size(36.dp)
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White, modifier = Modifier.size(18.dp))
-                    }
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White, modifier = Modifier.size(18.dp))
                 }
 
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = accentColor.copy(alpha = 0.15f),
-                    border = BorderStroke(1.dp, accentColor.copy(alpha = 0.4f))
-                ) {
-                    Text(
-                        text = "120Hz ULTRA FLUID",
-                        color = accentColor,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        letterSpacing = 1.sp,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
-                }
+                Text(
+                    text = "120Hz ULTRA FLUID",
+                    color = accentColor,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 1.sp
+                )
             }
         }
 
@@ -397,48 +363,26 @@ private fun SettingsHubContent(
                 Text(
                     text = "Settings",
                     color = Color.White,
-                    fontSize = 28.sp,
+                    fontSize = 26.sp,
                     fontWeight = FontWeight.ExtraBold
                 )
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = "Make the app feel like yours.",
                     color = Color(0xFF8E8EA0),
-                    fontSize = 13.sp
+                    fontSize = 12.5.sp
                 )
             }
+            HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f), modifier = Modifier.padding(top = 8.dp))
         }
 
-        // Profile Overview Card (matching video 0:01)
+        // Profile Overview Section (flat, zero nested boxes)
         item {
             FluidSettingsCard {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Avatar circle with glow
-                    Box(
-                        modifier = Modifier
-                            .size(54.dp)
-                            .background(
-                                Brush.linearGradient(
-                                    listOf(accentColor, Color(0xFFEC4899))
-                                ),
-                                CircleShape
-                            )
-                            .border(2.dp, Color.White.copy(alpha = 0.35f), CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = (currentUserEmail?.firstOrNull() ?: 'V').uppercase(),
-                            color = Color.White,
-                            fontSize = 22.sp,
-                            fontWeight = FontWeight.Black
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.width(14.dp))
-
                     Column(modifier = Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
@@ -447,20 +391,13 @@ private fun SettingsHubContent(
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Surface(
-                                shape = RoundedCornerShape(4.dp),
-                                color = Color(0xFF102A1E),
-                                border = BorderStroke(0.5.dp, Color(0xFF166534))
-                            ) {
-                                Text(
-                                    text = "ACTIVE",
-                                    color = Color(0xFF86EFAC),
-                                    fontSize = 8.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                                )
-                            }
+                            Text(
+                                text = "  •  ACTIVE",
+                                color = Color(0xFF4ADE80),
+                                fontSize = 9.5.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                letterSpacing = 0.6.sp
+                            )
                         }
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
@@ -471,46 +408,37 @@ private fun SettingsHubContent(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(12.dp))
+                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+                Spacer(modifier = Modifier.height(10.dp))
 
-                // Stats Pill Row
+                // Stats Row divided by vertical hairlines
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(IntrinsicSize.Min),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     ProfileMetricPill(modifier = Modifier.weight(1f), count = "3", label = "Modes", accentColor = accentColor)
+                    VerticalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
                     ProfileMetricPill(modifier = Modifier.weight(1f), count = "120Hz", label = "Fluidity", accentColor = accentColor)
+                    VerticalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
                     ProfileMetricPill(modifier = Modifier.weight(1f), count = "RTDB", label = "Live Sync", accentColor = accentColor)
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
-                // Tag Chips
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    val tags = listOf("Free Fire", "Tournament", "Dual Database", "Spring Physics", "Glass UI")
-                    items(tags) { tag ->
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = Color(0xFF1A1A24),
-                            border = BorderStroke(0.8.dp, Color(0xFF2C2C3D))
-                        ) {
-                            Text(
-                                text = tag,
-                                color = Color(0xFFB0B0C0),
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Medium,
-                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
-                            )
-                        }
-                    }
-                }
+                Text(
+                    text = "Free Fire  •  Tournament  •  Dual Database  •  AMOLED Pure Black",
+                    color = Color(0xFF71718A),
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Medium
+                )
             }
         }
 
-        // Dark Mode Quick Toggle Card (matching video 0:03)
+        // Dark Mode Quick Toggle Section
         item {
             FluidSettingsCard {
                 Row(
@@ -531,7 +459,7 @@ private fun SettingsHubContent(
                         }
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = if (stagedState.isDark) "Easy on the eyes at night" else "Top for daylight",
+                            text = if (stagedState.isDark) "Pure #000000 AMOLED active" else "Daylight theme",
                             color = Color(0xFF8E8EA0),
                             fontSize = 11.5.sp
                         )
@@ -553,12 +481,11 @@ private fun SettingsHubContent(
             Text(
                 text = "PERSONALIZATION",
                 color = Color(0xFF6E6E82),
-                fontSize = 11.sp,
+                fontSize = 10.5.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 1.sp,
-                modifier = Modifier.padding(start = 4.dp, top = 6.dp)
+                modifier = Modifier.padding(top = 6.dp)
             )
-            Spacer(modifier = Modifier.height(6.dp))
             FluidSettingsCard {
                 FluidSettingsRow(
                     title = "Appearance",
@@ -567,7 +494,7 @@ private fun SettingsHubContent(
                     iconTint = accentColor,
                     onClick = { onNavigateSubScreen("appearance") }
                 )
-                HorizontalDivider(color = Color(0xFF1F1F2C), thickness = 0.8.dp, modifier = Modifier.padding(vertical = 4.dp))
+                HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp, modifier = Modifier.padding(vertical = 4.dp))
                 FluidSettingsRow(
                     title = "Language",
                     subtitle = stagedState.language,
@@ -583,12 +510,11 @@ private fun SettingsHubContent(
             Text(
                 text = "ALERTS",
                 color = Color(0xFF6E6E82),
-                fontSize = 11.sp,
+                fontSize = 10.5.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 1.sp,
-                modifier = Modifier.padding(start = 4.dp, top = 6.dp)
+                modifier = Modifier.padding(top = 6.dp)
             )
-            Spacer(modifier = Modifier.height(6.dp))
             FluidSettingsCard {
                 FluidSettingsRow(
                     title = "Notifications",
@@ -605,12 +531,11 @@ private fun SettingsHubContent(
             Text(
                 text = "PRIVACY & SECURITY",
                 color = Color(0xFF6E6E82),
-                fontSize = 11.sp,
+                fontSize = 10.5.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 1.sp,
-                modifier = Modifier.padding(start = 4.dp, top = 6.dp)
+                modifier = Modifier.padding(top = 6.dp)
             )
-            Spacer(modifier = Modifier.height(6.dp))
             FluidSettingsCard {
                 FluidSettingsRow(
                     title = "Privacy",
@@ -627,12 +552,11 @@ private fun SettingsHubContent(
             Text(
                 text = "ADMINISTRATIVE ENGINE",
                 color = Color(0xFF6E6E82),
-                fontSize = 11.sp,
+                fontSize = 10.5.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 1.sp,
-                modifier = Modifier.padding(start = 4.dp, top = 6.dp)
+                modifier = Modifier.padding(top = 6.dp)
             )
-            Spacer(modifier = Modifier.height(6.dp))
             FluidSettingsCard {
                 if (onPurgeDemoData != null) {
                     FluidSettingsRow(
@@ -642,7 +566,7 @@ private fun SettingsHubContent(
                         iconTint = Color(0xFFEF4444),
                         onClick = onPurgeDemoData
                     )
-                    HorizontalDivider(color = Color(0xFF1F1F2C), thickness = 0.8.dp, modifier = Modifier.padding(vertical = 4.dp))
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp, modifier = Modifier.padding(vertical = 4.dp))
                 }
                 FluidSettingsRow(
                     title = "Sign Out Administrator",
@@ -661,7 +585,7 @@ private fun SettingsHubContent(
 }
 
 /**
- * Profile Metric Pill (e.g. "3 Modes", "120Hz Fluidity")
+ * Flat Profile Metric Item (zero box-in-box)
  */
 @Composable
 private fun ProfileMetricPill(
@@ -670,24 +594,17 @@ private fun ProfileMetricPill(
     accentColor: Color,
     modifier: Modifier = Modifier
 ) {
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(12.dp),
-        color = Color(0xFF171722),
-        border = BorderStroke(0.8.dp, Color(0xFF28283A))
+    Column(
+        modifier = modifier.padding(vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Column(
-            modifier = Modifier.padding(vertical = 8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(text = count, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-            Text(text = label, color = Color(0xFF8E8EA0), fontSize = 10.sp)
-        }
+        Text(text = count, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+        Text(text = label.uppercase(), color = Color(0xFF8E8EA0), fontSize = 9.5.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.5.sp)
     }
 }
 
 /**
- * Appearance Sub-Screen (Matching video 0:04 - 0:10)
+ * Appearance Sub-Screen
  */
 @Composable
 private fun AppearanceSubScreen(
@@ -697,53 +614,17 @@ private fun AppearanceSubScreen(
     onUpdateState: (FluidSettingsState) -> Unit,
     onApplyTheme: (ThemeColorOption) -> Unit
 ) {
-    var searchPrompt by remember { mutableStateOf("") }
-
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
+            .background(Color.Black)
             .padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         item {
             Spacer(modifier = Modifier.height(14.dp))
             SubScreenHeader(title = "Appearance", onBack = onBack, accentColor = accentColor)
-        }
-
-        // Search Prompt Box (matching video 0:04 "Ask anything...")
-        item {
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp),
-                shape = RoundedCornerShape(24.dp),
-                color = Color(0xFF151520),
-                border = BorderStroke(1.dp, Color(0xFF282838))
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = if (searchPrompt.isBlank()) "Ask anything..." else searchPrompt,
-                        color = if (searchPrompt.isBlank()) Color(0xFF71718A) else Color.White,
-                        fontSize = 13.sp
-                    )
-                    Surface(
-                        modifier = Modifier.size(28.dp),
-                        shape = CircleShape,
-                        color = accentColor.copy(alpha = 0.2f),
-                        border = BorderStroke(0.8.dp, accentColor)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(Icons.Default.ArrowUpward, contentDescription = null, tint = accentColor, modifier = Modifier.size(14.dp))
-                        }
-                    }
-                }
-            }
+            HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f), modifier = Modifier.padding(top = 8.dp))
         }
 
         // Dark Mode Card

@@ -38,6 +38,8 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.util.TournamentImageUploader
 import com.example.domain.model.MatchProofSubmission
+import com.example.ui.common.FrostedGlassAlertDialog
+import com.example.ui.common.FrostedGlassDialog
 import com.example.domain.model.PlayerRegistration
 import com.example.domain.model.Tournament
 import com.example.domain.model.UserProfile
@@ -64,7 +66,8 @@ fun TournamentDetailsScreen(
     onApproveMatchProof: (String, Double, Int) -> Unit = { _, _, _ -> },
     onRejectMatchProof: (String, String) -> Unit = { _, _ -> },
     onAddParticipant: ((String, PlayerRegistration) -> Unit)? = null,
-    onUpdateTournament: ((Tournament) -> Unit)? = null
+    onUpdateTournament: ((Tournament) -> Unit)? = null,
+    viewModel: com.example.ui.viewmodel.TournamentDashboardViewModel? = null
 ) {
     val context = LocalContext.current
     var showCancelDialog by remember { mutableStateOf(false) }
@@ -74,6 +77,8 @@ fun TournamentDetailsScreen(
     var showInspectProofsDialog by remember { mutableStateOf(false) }
     var showAddParticipantDialog by remember { mutableStateOf(false) }
     var showEditPrizeDialog by remember { mutableStateOf(false) }
+    var showLobbyChatModal by remember { mutableStateOf(false) }
+    var showDeclareStandingsModal by remember { mutableStateOf(false) }
 
     // Dynamic Prize Editing states
     var editPrizePoolInput by remember(tournament.prizePool) { mutableStateOf(tournament.prizePool.toInt().toString()) }
@@ -167,6 +172,22 @@ fun TournamentDetailsScreen(
                         }
                     },
                     actions = {
+                        if (viewModel != null) {
+                            IconButton(onClick = { showDeclareStandingsModal = true }) {
+                                Icon(
+                                    imageVector = Icons.Default.EmojiEvents,
+                                    contentDescription = "Declare Standings & Credit Winners",
+                                    tint = Color(0xFFFFD60A)
+                                )
+                            }
+                            IconButton(onClick = { showLobbyChatModal = true }) {
+                                Icon(
+                                    imageVector = Icons.Default.Forum,
+                                    contentDescription = "Live Lobby Chat Moderation",
+                                    tint = Color(0xFF30D158)
+                                )
+                            }
+                        }
                         IconButton(onClick = { onEditRules(tournament.id) }) {
                             Icon(
                                 imageVector = Icons.Default.Gavel,
@@ -249,6 +270,31 @@ fun TournamentDetailsScreen(
                                 fontSize = 12.sp,
                                 maxLines = 1
                             )
+                        }
+
+                        if (viewModel != null) {
+                            Button(
+                                onClick = { showDeclareStandingsModal = true },
+                                modifier = Modifier.weight(1.2f).height(48.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD60A)),
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.EmojiEvents,
+                                    contentDescription = null,
+                                    tint = Color.Black,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    "Results",
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.Black,
+                                    fontSize = 12.sp,
+                                    maxLines = 1
+                                )
+                            }
                         }
 
                         OutlinedButton(
@@ -1359,7 +1405,7 @@ fun TournamentDetailsScreen(
     // DIALOG: 5-MIN LOCKED ROOM ID BROADCASTER
     // ==========================================
     if (showRoomBroadcastDialog) {
-        AlertDialog(
+        FrostedGlassAlertDialog(
             onDismissRequest = { showRoomBroadcastDialog = false },
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1471,8 +1517,7 @@ fun TournamentDetailsScreen(
                 TextButton(onClick = { showRoomBroadcastDialog = false }) {
                     Text("Cancel", color = VelorixTextSecondary)
                 }
-            },
-            containerColor = CardVerifyBg
+            }
         )
     }
 
@@ -1480,7 +1525,7 @@ fun TournamentDetailsScreen(
     // DIALOG: ADD PARTICIPANT MANUALLY (ADMIN)
     // ==========================================
     if (showAddParticipantDialog) {
-        AlertDialog(
+        FrostedGlassAlertDialog(
             onDismissRequest = { showAddParticipantDialog = false },
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1612,8 +1657,7 @@ fun TournamentDetailsScreen(
                 TextButton(onClick = { showAddParticipantDialog = false }) {
                     Text("Cancel", color = VelorixTextSecondary)
                 }
-            },
-            containerColor = CardVerifyBg
+            }
         )
     }
 
@@ -2061,8 +2105,55 @@ fun TournamentDetailsScreen(
                         Text("Cancel", color = Color(0xFFA1A1AA))
                     }
                 },
-                containerColor = Color(0xFF141418),
-                shape = RoundedCornerShape(18.dp)
+                containerColor = Color.Black,
+                shape = RoundedCornerShape(14.dp)
+            )
+        }
+
+        if (showLobbyChatModal && viewModel != null) {
+            androidx.compose.ui.window.Dialog(
+                onDismissRequest = { showLobbyChatModal = false },
+                properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth(0.96f)
+                        .fillMaxHeight(0.88f)
+                        .background(Color.Black, RoundedCornerShape(8.dp))
+                        .border(0.5.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(8.dp))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "LOBBY CHAT • ${tournament.title.uppercase()}",
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        IconButton(onClick = { showLobbyChatModal = false }) {
+                            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+                        }
+                    }
+                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.1f))
+                    TournamentLobbyChatModeratorSection(
+                        viewModel = viewModel,
+                        tournaments = listOf(tournament),
+                        initialTournamentId = tournament.id
+                    )
+                }
+            }
+        }
+
+        if (showDeclareStandingsModal && viewModel != null) {
+            DeclareStandingsAndPrizesDialog(
+                tournament = tournament,
+                viewModel = viewModel,
+                onDismiss = { showDeclareStandingsModal = false }
             )
         }
     }
@@ -2070,14 +2161,18 @@ fun TournamentDetailsScreen(
 
 @Composable
 private fun TagBadge(text: String, bg: Color, textTint: Color) {
-    Surface(
-        color = bg,
-        shape = RoundedCornerShape(6.dp),
-        border = BorderStroke(1.dp, textTint.copy(alpha = 0.3f))
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(end = 6.dp)
     ) {
+        Box(
+            modifier = Modifier
+                .size(5.dp)
+                .background(textTint, RoundedCornerShape(50))
+        )
+        Spacer(modifier = Modifier.width(5.dp))
         Text(
             text = text,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
             color = textTint,
             fontSize = 10.sp,
             fontWeight = FontWeight.Bold
@@ -2101,46 +2196,35 @@ private fun CredentialBox(
     value: String,
     onCopy: () -> Unit
 ) {
-    Surface(
-        modifier = modifier.clickable { onCopy() },
-        color = Color(0xFF101016),
-        shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(1.2.dp, VelorixAccent.copy(alpha = 0.5f))
+    Column(
+        modifier = modifier
+            .background(Color.Black)
+            .clickable { onCopy() }
+            .padding(vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(text = label, fontSize = 10.sp, color = VelorixAccent, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.8.sp)
-                Surface(
-                    color = VelorixAccent.copy(alpha = 0.15f),
-                    shape = RoundedCornerShape(6.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Default.ContentCopy, contentDescription = "Copy", tint = VelorixAccent, modifier = Modifier.size(11.dp))
-                        Spacer(modifier = Modifier.width(3.dp))
-                        Text("COPY", color = VelorixAccent, fontSize = 8.5.sp, fontWeight = FontWeight.ExtraBold)
-                    }
-                }
+            Text(text = label, fontSize = 10.sp, color = VelorixAccent, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.8.sp)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.ContentCopy, contentDescription = "Copy", tint = VelorixAccent, modifier = Modifier.size(11.dp))
+                Spacer(modifier = Modifier.width(3.dp))
+                Text("COPY", color = VelorixAccent, fontSize = 8.5.sp, fontWeight = FontWeight.ExtraBold)
             }
-            Text(
-                text = value,
-                fontSize = 18.sp,
-                color = Color.White,
-                fontWeight = FontWeight.Black,
-                letterSpacing = 1.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
         }
+        Text(
+            text = value,
+            fontSize = 18.sp,
+            color = Color.White,
+            fontWeight = FontWeight.Black,
+            letterSpacing = 1.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
     }
 }
 
@@ -2151,20 +2235,17 @@ private fun PrizeRankCard(
     prize: String,
     color: Color
 ) {
-    Surface(
-        modifier = modifier,
-        color = VelorixBg,
-        shape = RoundedCornerShape(10.dp),
-        border = BorderStroke(1.dp, color.copy(alpha = 0.4f))
+    Column(
+        modifier = modifier
+            .background(Color.Black)
+            .padding(vertical = 8.dp, horizontal = 4.dp),
+        horizontalAlignment = Alignment.Start
     ) {
-        Column(
-            modifier = Modifier.padding(8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(text = rank, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = color)
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(text = prize, fontSize = 14.sp, fontWeight = FontWeight.Black, color = Color.White)
-        }
+        Text(text = rank, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = color)
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(text = prize, fontSize = 14.sp, fontWeight = FontWeight.Black, color = Color.White)
+        Spacer(modifier = Modifier.height(6.dp))
+        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
     }
 }
 
@@ -2175,14 +2256,15 @@ private fun RuleDetailItem(
     title: String,
     details: String
 ) {
-    Surface(
-        color = VelorixBg,
-        shape = RoundedCornerShape(10.dp),
-        border = BorderStroke(1.dp, CardVerifyBorder),
-        modifier = Modifier.fillMaxWidth()
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color.Black)
     ) {
         Row(
-            modifier = Modifier.padding(12.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 10.dp),
             verticalAlignment = Alignment.Top
         ) {
             Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(18.dp).padding(top = 2.dp))
@@ -2193,6 +2275,7 @@ private fun RuleDetailItem(
                 Text(text = details, fontSize = 12.sp, color = Color.White.copy(alpha = 0.9f), lineHeight = 16.sp)
             }
         }
+        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
     }
 }
 
@@ -2204,16 +2287,15 @@ private fun SettingPill(
     isAllowed: Boolean
 ) {
     val tint = if (isAllowed) Color(0xFF81C784) else Color(0xFFFF8A80)
-    Surface(
-        modifier = modifier,
-        color = VelorixBg,
-        shape = RoundedCornerShape(10.dp),
-        border = BorderStroke(1.dp, tint.copy(alpha = 0.3f))
+    Column(
+        modifier = modifier
+            .background(Color.Black)
+            .padding(vertical = 8.dp, horizontal = 4.dp)
     ) {
-        Column(modifier = Modifier.padding(10.dp)) {
-            Text(text = label, fontSize = 9.sp, color = VelorixTextSecondary, fontWeight = FontWeight.SemiBold)
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(text = value, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = tint)
-        }
+        Text(text = label, fontSize = 9.sp, color = VelorixTextSecondary, fontWeight = FontWeight.SemiBold)
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(text = value, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = tint)
+        Spacer(modifier = Modifier.height(6.dp))
+        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
     }
 }

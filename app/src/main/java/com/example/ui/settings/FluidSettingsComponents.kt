@@ -4,39 +4,28 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
-import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ui.common.HyperPhysics
 import com.example.ui.common.bounceClick
 
 /**
- * Modern fluid toggle switch matching iOS / HyperOS design with smooth spring translation,
- * illuminated active track, and custom micro-icons inside the sliding thumb.
+ * Modern fluid toggle switch with smooth spring translation on pure AMOLED black.
  */
 @Composable
 fun FluidSwitch(
@@ -48,9 +37,9 @@ fun FluidSwitch(
     checkedThumbIcon: ImageVector? = null,
     uncheckedThumbIcon: ImageVector? = null
 ) {
-    val trackWidth = 50.dp
-    val trackHeight = 30.dp
-    val thumbSize = 24.dp
+    val trackWidth = 48.dp
+    val trackHeight = 26.dp
+    val thumbSize = 20.dp
     val padding = 3.dp
 
     val travelDistance = trackWidth - thumbSize - (padding * 2)
@@ -65,14 +54,14 @@ fun FluidSwitch(
     )
 
     val trackColor by animateColorAsState(
-        targetValue = if (checked) accentColor else Color(0xFF24242E),
-        animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing),
+        targetValue = if (checked) accentColor else Color(0xFF1A1A22),
+        animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing),
         label = "trackColor"
     )
 
     val borderColor by animateColorAsState(
-        targetValue = if (checked) accentColor.copy(alpha = 0.8f) else Color(0xFF383848),
-        animationSpec = tween(durationMillis = 240),
+        targetValue = if (checked) accentColor else Color.White.copy(alpha = 0.14f),
+        animationSpec = tween(durationMillis = 200),
         label = "borderColor"
     )
 
@@ -80,9 +69,9 @@ fun FluidSwitch(
         modifier = modifier
             .size(width = trackWidth, height = trackHeight)
             .bounceClick(scaleDown = 0.94f) { onCheckedChange(!checked) },
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(14.dp),
         color = trackColor,
-        border = BorderStroke(1.dp, borderColor)
+        border = BorderStroke(0.5.dp, borderColor)
     ) {
         Box(
             modifier = Modifier
@@ -95,8 +84,7 @@ fun FluidSwitch(
                     .size(thumbSize)
                     .offset(x = thumbOffset),
                 shape = CircleShape,
-                color = Color.White,
-                shadowElevation = 4.dp
+                color = if (checked) Color.Black else Color.White
             ) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
@@ -112,8 +100,8 @@ fun FluidSwitch(
                         Icon(
                             imageVector = currentIcon,
                             contentDescription = null,
-                            tint = if (checked) accentColor else Color(0xFF71717A),
-                            modifier = Modifier.size(13.dp)
+                            tint = if (checked) accentColor else Color(0xFF52525B),
+                            modifier = Modifier.size(12.dp)
                         )
                     }
                 }
@@ -123,7 +111,7 @@ fun FluidSwitch(
 }
 
 /**
- * Fluid Segmented Control with a sliding background pill indicator driven by spring physics.
+ * Flat AMOLED underline mode selector replacing boxed segmented controls (zero box-in-box).
  */
 @Composable
 fun <T> FluidSegmentedControl(
@@ -132,18 +120,19 @@ fun <T> FluidSegmentedControl(
     onItemSelected: (Int) -> Unit,
     modifier: Modifier = Modifier,
     accentColor: Color = Color(0xFF8B5CF6),
-    shape: Shape = RoundedCornerShape(14.dp),
+    shape: Shape = RoundedCornerShape(0.dp),
     itemContent: @Composable (item: T, isSelected: Boolean) -> Unit
 ) {
-    Surface(
+    Column(
         modifier = modifier
             .fillMaxWidth()
-            .height(46.dp),
-        shape = shape,
-        color = Color(0xFF16161D),
-        border = BorderStroke(1.dp, Color(0xFF262633))
+            .background(Color.Black)
     ) {
-        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(40.dp)
+        ) {
             val totalWidth = maxWidth
             val segmentWidth = totalWidth / items.size.coerceAtLeast(1)
             val indicatorOffset by animateDpAsState(
@@ -153,25 +142,6 @@ fun <T> FluidSegmentedControl(
                     stiffness = 450f
                 ),
                 label = "segmentedIndicator"
-            )
-
-            // Sliding active pill indicator
-            Box(
-                modifier = Modifier
-                    .offset(x = indicatorOffset)
-                    .width(segmentWidth)
-                    .fillMaxHeight()
-                    .padding(4.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(
-                                accentColor.copy(alpha = 0.28f),
-                                accentColor.copy(alpha = 0.16f)
-                            )
-                        )
-                    )
-                    .border(1.2.dp, accentColor, RoundedCornerShape(10.dp))
             )
 
             // Segments clickable row
@@ -189,13 +159,24 @@ fun <T> FluidSegmentedControl(
                     }
                 }
             }
+
+            // Sliding active underline bar (zero box-in-box)
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .offset(x = indicatorOffset)
+                    .width(segmentWidth)
+                    .padding(horizontal = 12.dp)
+                    .height(2.dp)
+                    .background(accentColor)
+            )
         }
+        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.1f))
     }
 }
 
 /**
- * Floating Action Pill Dock showing unsaved changes count with Discard & Review buttons.
- * Perfectly replicates the fluid bottom pill from the user's video.
+ * Flat AMOLED bottom action bar showing unsaved changes count with Discard & Review actions.
  */
 @Composable
 fun FluidFloatingReviewBar(
@@ -217,54 +198,37 @@ fun FluidFloatingReviewBar(
         ) + fadeOut(tween(160)),
         modifier = modifier
     ) {
-        Surface(
+        Column(
             modifier = Modifier
-                .padding(horizontal = 20.dp, vertical = 10.dp)
                 .fillMaxWidth()
-                .shadow(
-                    elevation = 16.dp,
-                    shape = RoundedCornerShape(26.dp),
-                    spotColor = accentColor.copy(alpha = 0.35f),
-                    ambientColor = Color.Black
-                ),
-            shape = RoundedCornerShape(26.dp),
-            color = Color(0xEB13131A),
-            border = BorderStroke(1.2.dp, Color(0xFF2C2C3C))
+                .background(Color.Black)
         ) {
+            HorizontalDivider(thickness = 0.5.dp, color = accentColor.copy(alpha = 0.4f))
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                // Change counter badge pill
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Surface(
-                        shape = CircleShape,
-                        color = accentColor.copy(alpha = 0.25f),
-                        border = BorderStroke(1.dp, accentColor)
-                    ) {
-                        Text(
-                            text = "$changesCount",
-                            color = accentColor,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Black,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                        )
-                    }
                     Text(
-                        text = if (changesCount == 1) "1 change" else "$changesCount changes",
+                        text = "$changesCount",
+                        color = accentColor,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Black
+                    )
+                    Text(
+                        text = if (changesCount == 1) "unsaved change" else "unsaved changes",
                         color = Color.White,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold
                     )
                 }
 
-                // Actions: Discard & Review
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -276,22 +240,22 @@ fun FluidFloatingReviewBar(
                         Text(
                             text = "Discard",
                             color = Color(0xFF94A3B8),
-                            fontSize = 13.sp,
+                            fontSize = 12.5.sp,
                             fontWeight = FontWeight.Medium
                         )
                     }
 
                     Button(
                         onClick = onReview,
-                        shape = RoundedCornerShape(18.dp),
+                        shape = RoundedCornerShape(8.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = accentColor),
-                        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
                         modifier = Modifier.bounceClick(scaleDown = 0.94f)
                     ) {
                         Text(
                             text = "Review",
                             color = Color.White,
-                            fontSize = 13.sp,
+                            fontSize = 12.5.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
@@ -302,31 +266,34 @@ fun FluidFloatingReviewBar(
 }
 
 /**
- * Settings Group Card container matching video's sleek matte glass styling.
+ * Flat AMOLED Settings Section container divided by a 0.5.dp bottom hairline (zero box-in-box).
  */
 @Composable
 fun FluidSettingsCard(
     modifier: Modifier = Modifier,
-    shape: Shape = RoundedCornerShape(20.dp),
+    shape: Shape = RoundedCornerShape(0.dp),
     content: @Composable ColumnScope.() -> Unit
 ) {
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        shape = shape,
-        color = Color(0xFF13131A),
-        border = BorderStroke(1.dp, Color(0xFF22222E))
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(Color.Black)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(vertical = 12.dp),
             content = content
+        )
+        HorizontalDivider(
+            thickness = 0.5.dp,
+            color = Color.White.copy(alpha = 0.08f)
         )
     }
 }
 
 /**
- * Settings Navigation Row with title, dynamic subtitle pill, and forward chevron arrow.
+ * Flat Settings Navigation Row with title, subtitle, and forward chevron arrow (no nested icon box).
  */
 @Composable
 fun FluidSettingsRow(
@@ -337,63 +304,52 @@ fun FluidSettingsRow(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Surface(
+    Row(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .bounceClick(scaleDown = 0.98f) { onClick() },
-        color = Color.Transparent
+            .clickable { onClick() }
+            .padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 10.dp, horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.weight(1f)
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.weight(1f)
-            ) {
-                if (icon != null) {
-                    Surface(
-                        modifier = Modifier.size(34.dp),
-                        shape = RoundedCornerShape(10.dp),
-                        color = iconTint.copy(alpha = 0.15f),
-                        border = BorderStroke(0.8.dp, iconTint.copy(alpha = 0.35f))
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(17.dp))
-                        }
-                    }
-                }
-                Column {
+            if (icon != null) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = iconTint,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+            Column {
+                Text(
+                    text = title,
+                    color = Color.White,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                if (!subtitle.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = title,
-                        color = Color.White,
-                        fontSize = 14.5.sp,
-                        fontWeight = FontWeight.SemiBold
+                        text = subtitle,
+                        color = Color(0xFF8E8EA0),
+                        fontSize = 11.5.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
-                    if (!subtitle.isNullOrBlank()) {
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = subtitle,
-                            color = Color(0xFF8E8EA0),
-                            fontSize = 11.5.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
                 }
             }
-
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
-                contentDescription = null,
-                tint = Color(0xFF555566),
-                modifier = Modifier.size(13.dp)
-            )
         }
+
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
+            contentDescription = null,
+            tint = Color(0xFF555566),
+            modifier = Modifier.size(12.dp)
+        )
     }
 }

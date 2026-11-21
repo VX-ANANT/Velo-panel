@@ -64,13 +64,29 @@ fun UserAvatarView(
     isActiveRecently: Boolean = false,
     showGlow: Boolean = true
 ) {
-    val cleanUrl = avatarUrl?.trim().takeIf {
-        !it.isNullOrBlank() && (it.startsWith("http://") || it.startsWith("https://") || it.startsWith("content://") || it.startsWith("data:"))
+    val trimmedAvatar = avatarUrl?.trim() ?: ""
+    val cleanUrl = trimmedAvatar.takeIf {
+        it.startsWith("http://") || it.startsWith("https://") || it.startsWith("content://")
+    }
+    val base64Bytes = remember(trimmedAvatar) {
+        if (trimmedAvatar.startsWith("data:image", ignoreCase = true) && trimmedAvatar.contains("base64,")) {
+            try {
+                val b64Part = trimmedAvatar.substringAfter("base64,").trim()
+                android.util.Base64.decode(b64Part, android.util.Base64.DEFAULT)
+            } catch (_: Exception) {
+                null
+            }
+        } else null
+    }
+    val presetIndex = remember(trimmedAvatar) {
+        if (trimmedAvatar.startsWith("avatar_", ignoreCase = true)) {
+            trimmedAvatar.substringAfter("_").toIntOrNull()
+        } else null
     }
 
-    // Gradient selector based on name / ID hash
-    val gradientColors = remember(name) {
-        val hash = abs(name.hashCode())
+    // Gradient selector based on presetIndex or name / ID hash
+    val gradientColors = remember(name, presetIndex) {
+        val hash = presetIndex ?: abs(name.hashCode())
         VibrantAvatarGradients[hash % VibrantAvatarGradients.size]
     }
 
@@ -103,12 +119,13 @@ fun UserAvatarView(
         else -> VelorixAccent
     }
 
-    val initials = remember(name) {
+    val initials = remember(name, presetIndex) {
         val trimmed = name.trim()
         val parts = trimmed.split(" ").filter { it.isNotBlank() }
         when {
             parts.size >= 2 -> "${parts[0].first()}${parts[1].first()}".uppercase()
             trimmed.isNotEmpty() -> trimmed.take(2).uppercase()
+            presetIndex != null -> "A$presetIndex"
             else -> "U"
         }
     }
@@ -140,10 +157,11 @@ fun UserAvatarView(
                 ),
             contentAlignment = Alignment.Center
         ) {
-            if (cleanUrl != null) {
+            val imageModelData: Any? = base64Bytes ?: cleanUrl
+            if (imageModelData != null) {
                 AsyncImage(
                     model = ImageRequest.Builder(LocalContext.current)
-                        .data(cleanUrl)
+                        .data(imageModelData)
                         .crossfade(true)
                         .build(),
                     contentDescription = "Profile photo of $name",

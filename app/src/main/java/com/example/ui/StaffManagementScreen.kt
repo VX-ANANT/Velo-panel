@@ -298,11 +298,11 @@ fun StaffManagementScreenContent(
 
         // Filter chips (horizontally scrollable to avoid crushing)
         Row(
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(20.dp),
             modifier = Modifier
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState())
-                .padding(bottom = 12.dp)
+                .padding(top = 6.dp)
         ) {
             listOf("ALL", "ACTIVE", "REVOKED", "SUPER_ADMIN", "TOURNAMENT_ADMIN").forEach { f ->
                 val isSel = selectedFilter == f
@@ -311,16 +311,30 @@ fun StaffManagementScreenContent(
                     "TOURNAMENT_ADMIN" -> "TOURNAMENT"
                     else -> f
                 }
-                Box(
+                Column(
                     modifier = Modifier
-                        .background(if (isSel) VelorixAccent else CardLiveBg, RoundedCornerShape(8.dp))
                         .clickable { selectedFilter = f }
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                        .padding(vertical = 6.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(label, color = if (isSel) Color.Black else Color.LightGray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = label,
+                        color = if (isSel) VelorixAccent else Color.Gray,
+                        fontSize = 11.sp,
+                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
+                        letterSpacing = 0.6.sp
+                    )
+                    Spacer(modifier = Modifier.height(5.dp))
+                    Box(
+                        modifier = Modifier
+                            .width(34.dp)
+                            .height(2.dp)
+                            .background(if (isSel) VelorixAccent else Color.Transparent)
+                    )
                 }
             }
         }
+        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
 
         val distinctFilteredAdmins = remember(filteredAdmins) {
             val seen = mutableSetOf<String>()
@@ -330,16 +344,16 @@ fun StaffManagementScreenContent(
             }
         }
 
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(bottom = 90.dp)) {
+        LazyColumn(modifier = Modifier.padding(bottom = 90.dp)) {
             if (distinctFilteredAdmins.isEmpty()) {
                 item {
                     Column(
                         modifier = Modifier.fillMaxWidth().padding(32.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Icon(Icons.Default.SupervisorAccount, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(48.dp))
+                        Icon(Icons.Default.SupervisorAccount, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(40.dp))
                         Spacer(modifier = Modifier.height(8.dp))
-                        Text("No matching admin records found.", color = VelorixTextSecondary, fontSize = 14.sp)
+                        Text("No matching admin records found.", color = VelorixTextSecondary, fontSize = 13.sp)
                     }
                 }
             }
@@ -387,116 +401,90 @@ fun RealAdminCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(CardLiveBg, RoundedCornerShape(16.dp))
-            .border(1.dp, if (admin.active) CardVerifyBorder else Color.Red.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
+            .background(Color.Black)
             .clickable { onClick() }
-            .padding(16.dp)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 14.dp)
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                Box(
-                    modifier = Modifier
-                        .size(42.dp)
-                        .background(if (admin.active) roleColor.copy(alpha = 0.2f) else Color.Red.copy(alpha = 0.2f), CircleShape)
-                        .border(1.5.dp, if (admin.active) roleColor else Color.Red, CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = (admin.name.firstOrNull() ?: admin.email.firstOrNull() ?: 'A').uppercase(),
-                        color = if (admin.active) roleColor else Color.Red,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp
-                    )
-                }
-                Spacer(modifier = Modifier.width(12.dp))
-                Column {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(admin.name.ifBlank { "Admin" }, color = VelorixTextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Box(
-                            modifier = Modifier
-                                .background(if (admin.active) Color(0xFF2E7D32) else Color.Red, RoundedCornerShape(4.dp))
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = if (admin.active) "ACTIVE" else "REVOKED",
-                                color = Color.White,
-                                fontSize = 8.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
+                        Text(
+                            text = admin.name.ifBlank { "Admin" },
+                            color = VelorixTextPrimary,
+                            fontSize = 15.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = if (admin.active) "  •  ACTIVE" else "  •  REVOKED",
+                            color = if (admin.active) Color(0xFF4ADE80) else Color(0xFFF87171),
+                            fontSize = 9.5.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            letterSpacing = 0.5.sp
+                        )
                     }
-                    Text(admin.email, color = VelorixTextSecondary, fontSize = 11.sp)
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(admin.email, color = VelorixTextSecondary, fontSize = 11.5.sp)
+                }
+
+                Text(
+                    text = admin.role.replace("_", " ").uppercase(),
+                    color = roleColor,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 0.6.sp
+                )
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Column {
+                    Text("ASSIGNED", color = Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    Text(dateStr, color = VelorixTextPrimary, fontSize = 11.5.sp)
+                }
+                Column {
+                    Text("GRANTED BY", color = Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    Text(admin.grantedBy.ifBlank { "System" }, color = Color.White, fontSize = 11.5.sp)
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("UID", color = Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    Text(admin.uid.take(10), color = VelorixAccent, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
                 }
             }
-            Box(
-                modifier = Modifier
-                    .background(roleColor.copy(alpha = 0.2f), RoundedCornerShape(6.dp))
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(admin.role.replace("_", " ").uppercase(), color = roleColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-            }
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-        HorizontalDivider(color = Color(0xFF2A2A2A))
-        Spacer(modifier = Modifier.height(10.dp))
-
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Column {
-                Text("Assigned Date", color = Color.Gray, fontSize = 10.sp)
-                Text(dateStr, color = VelorixTextPrimary, fontSize = 12.sp)
-            }
-            Column {
-                Text("Granted By", color = Color.Gray, fontSize = 10.sp)
-                Text(admin.grantedBy.ifBlank { "System" }, color = Color.White, fontSize = 12.sp)
-            }
-            Column(horizontalAlignment = Alignment.End) {
-                Text("UID", color = Color.Gray, fontSize = 10.sp)
-                Text(admin.uid.take(10), color = VelorixAccent, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-            }
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
-                onClick = onEditClick,
-                modifier = Modifier.weight(1.2f).height(34.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent),
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
-            ) {
-                Icon(Icons.Default.Edit, contentDescription = null, tint = Color.Black, modifier = Modifier.size(13.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("EDIT DETAILS", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Black)
-            }
-
-            if (admin.active) {
-                Button(
-                    onClick = onRevoke,
-                    modifier = Modifier.weight(0.9f).height(34.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.85f)),
-                    contentPadding = PaddingValues(0.dp)
-                ) {
-                    Text("REVOKE", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                TextButton(onClick = onEditClick) {
+                    Icon(Icons.Default.Edit, contentDescription = null, tint = VelorixAccent, modifier = Modifier.size(13.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("EDIT DETAILS", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = VelorixAccent)
                 }
-            } else {
-                Button(
-                    onClick = {
-                        onToggleStatus(admin.copy(active = true))
-                    },
-                    modifier = Modifier.weight(0.9f).height(34.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
-                    contentPadding = PaddingValues(0.dp)
-                ) {
-                    Text("ACTIVATE", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                Spacer(modifier = Modifier.width(8.dp))
+                if (admin.active) {
+                    TextButton(onClick = onRevoke) {
+                        Text("REVOKE", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFFF87171))
+                    }
+                } else {
+                    TextButton(onClick = { onToggleStatus(admin.copy(active = true)) }) {
+                        Text("ACTIVATE", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4ADE80))
+                    }
                 }
             }
         }
+        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
     }
 }
 
@@ -552,7 +540,7 @@ fun AdminDetailsInspectorDialog(
                     Text("Cancel", color = Color.Gray)
                 }
             },
-            containerColor = CardLiveBg
+            containerColor = Color.Black
         )
     }
 
@@ -560,69 +548,48 @@ fun AdminDetailsInspectorDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
-        Card(
+        Surface(
             modifier = Modifier
                 .fillMaxWidth(0.95f)
                 .fillMaxHeight(0.92f)
                 .padding(vertical = 12.dp),
-            shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF14171E)),
-            border = BorderStroke(1.dp, CardVerifyBorder)
+            shape = RoundedCornerShape(16.dp),
+            color = Color.Black,
+            border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.14f))
         ) {
-            Column(modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black)
+            ) {
                 // Header Bar
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(Color(0xFF1A1F29))
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                        Box(
-                            modifier = Modifier
-                                .size(42.dp)
-                                .background(if (admin.active) VelorixAccent.copy(alpha = 0.2f) else Color.Red.copy(alpha = 0.2f), CircleShape)
-                                .border(2.dp, if (admin.active) VelorixAccent else Color.Red, CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = (admin.name.firstOrNull() ?: admin.email.firstOrNull() ?: 'A').uppercase(),
-                                color = if (admin.active) VelorixAccent else Color.Red,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 18.sp
+                                text = admin.name.ifBlank { "Admin" },
+                                color = Color.White,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = if (admin.active) "  •  ACTIVE" else "  •  REVOKED",
+                                color = if (admin.active) Color(0xFF4ADE80) else Color(0xFFF87171),
+                                fontSize = 9.5.sp,
+                                fontWeight = FontWeight.ExtraBold
                             )
                         }
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = admin.name.ifBlank { "Admin" },
-                                    color = Color.White,
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .background(if (admin.active) Color(0xFF2E7D32) else Color.Red, RoundedCornerShape(4.dp))
-                                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                                ) {
-                                    Text(
-                                        text = if (admin.active) "ACTIVE" else "REVOKED",
-                                        color = Color.White,
-                                        fontSize = 9.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-                            Text(
-                                text = admin.email,
-                                color = VelorixTextSecondary,
-                                fontSize = 11.sp
-                            )
-                        }
+                        Text(
+                            text = admin.email,
+                            color = VelorixTextSecondary,
+                            fontSize = 11.5.sp
+                        )
                     }
 
                     IconButton(onClick = onDismiss) {
@@ -630,11 +597,12 @@ fun AdminDetailsInspectorDialog(
                     }
                 }
 
+                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+
                 // Copy UID Bar
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(Color(0xFF0F1218))
                         .padding(horizontal = 16.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
@@ -662,10 +630,12 @@ fun AdminDetailsInspectorDialog(
                     }
                 }
 
+                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+
                 // Tabs: 0 -> Details & Role, 1 -> Controls & Edit, 2 -> Raw Admin DB Data
                 TabRow(
                     selectedTabIndex = selectedTab,
-                    containerColor = Color(0xFF161B24),
+                    containerColor = Color.Black,
                     contentColor = VelorixAccent,
                     indicator = { tabPositions ->
                         TabRowDefaults.SecondaryIndicator(
@@ -695,7 +665,6 @@ fun AdminDetailsInspectorDialog(
                 Box(modifier = Modifier.weight(1f).fillMaxWidth().padding(14.dp)) {
                     when (selectedTab) {
                         0 -> {
-                            // Details & Role Metadata
                             Column(
                                 modifier = Modifier
                                     .fillMaxSize()
@@ -739,7 +708,6 @@ fun AdminDetailsInspectorDialog(
                             }
                         }
                         1 -> {
-                            // Controls & Edit
                             Column(
                                 modifier = Modifier
                                     .fillMaxSize()
@@ -815,35 +783,40 @@ fun AdminDetailsInspectorDialog(
                                     }
                                 }
 
-                                // 2. Assign Role
+                                // 2. Assign Role (flat underline mode selector)
                                 DetailSectionCard(title = "ASSIGN ADMIN PRIVILEGE ROLE", icon = Icons.Default.Security) {
                                     Text("Current Role: ${admin.role}", color = Color.LightGray, fontSize = 12.sp)
                                     Spacer(modifier = Modifier.height(8.dp))
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                                     ) {
                                         listOf("super_admin", "tournament_admin", "support_admin").forEach { roleOption ->
                                             val isSelected = editRole.equals(roleOption, ignoreCase = true)
-                                            Box(
+                                            Column(
                                                 modifier = Modifier
                                                     .weight(1f)
-                                                    .background(if (isSelected) VelorixAccent else Color(0xFF232936), RoundedCornerShape(8.dp))
-                                                    .border(1.dp, if (isSelected) VelorixAccent else CardVerifyBorder, RoundedCornerShape(8.dp))
-                                                .clickable {
-                                                    editRole = roleOption
-                                                    val updated = admin.copy(role = roleOption)
-                                                    onUpdateAdmin(updated)
-                                                    Toast.makeText(context, "Role changed to ${roleOption.replace("_", " ").uppercase()}", Toast.LENGTH_SHORT).show()
-                                                }
-                                                .padding(vertical = 8.dp),
-                                                contentAlignment = Alignment.Center
+                                                    .clickable {
+                                                        editRole = roleOption
+                                                        val updated = admin.copy(role = roleOption)
+                                                        onUpdateAdmin(updated)
+                                                        Toast.makeText(context, "Role changed to ${roleOption.replace("_", " ").uppercase()}", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                    .padding(vertical = 8.dp),
+                                                horizontalAlignment = Alignment.CenterHorizontally
                                             ) {
                                                 Text(
                                                     text = roleOption.replace("_", " ").take(10).uppercase(),
-                                                    color = if (isSelected) Color.Black else Color.LightGray,
-                                                    fontSize = 9.sp,
+                                                    color = if (isSelected) VelorixAccent else Color.Gray,
+                                                    fontSize = 10.sp,
                                                     fontWeight = FontWeight.Bold
+                                                )
+                                                Spacer(modifier = Modifier.height(5.dp))
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .height(2.dp)
+                                                        .background(if (isSelected) VelorixAccent else Color.White.copy(alpha = 0.08f))
                                                 )
                                             }
                                         }
@@ -854,7 +827,7 @@ fun AdminDetailsInspectorDialog(
                                 DetailSectionCard(title = "ACCESS STATUS CONTROL", icon = Icons.Default.Lock) {
                                     Text(
                                         text = if (admin.active) "Staff member currently has full active panel access." else "Staff member's access is currently REVOKED.",
-                                        color = if (admin.active) Color.Green else Color.Red,
+                                        color = if (admin.active) Color(0xFF4ADE80) else Color(0xFFF87171),
                                         fontSize = 12.sp
                                     )
                                     Spacer(modifier = Modifier.height(10.dp))
@@ -888,11 +861,9 @@ fun AdminDetailsInspectorDialog(
                                 DetailSectionCard(title = "DANGER ZONE", icon = Icons.Default.Warning) {
                                     Text("Permanently remove this admin record from Firebase Realtime Database.", color = Color.Gray, fontSize = 11.sp)
                                     Spacer(modifier = Modifier.height(10.dp))
-                                    Button(
+                                    TextButton(
                                         onClick = { showDeleteConfirmDialog = true },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.2f)),
-                                        border = BorderStroke(1.dp, Color.Red),
-                                        modifier = Modifier.fillMaxWidth().height(38.dp)
+                                        modifier = Modifier.fillMaxWidth()
                                     ) {
                                         Icon(Icons.Default.DeleteForever, contentDescription = null, tint = Color.Red, modifier = Modifier.size(16.dp))
                                         Spacer(modifier = Modifier.width(6.dp))
@@ -902,30 +873,22 @@ fun AdminDetailsInspectorDialog(
                             }
                         }
                         2 -> {
-                            // Raw DB Data View
                             Column(
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .verticalScroll(rememberScrollState()),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Text("FIREBASE /admins/${admin.uid}", color = VelorixAccent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(Color(0xFF0F1218), RoundedCornerShape(12.dp))
-                                        .border(1.dp, CardVerifyBorder, RoundedCornerShape(12.dp))
-                                        .padding(12.dp)
-                                ) {
-                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        Text("\"uid\": \"${admin.uid}\"", color = Color.LightGray, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                                        Text("\"name\": \"${admin.name}\"", color = Color.LightGray, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                                        Text("\"email\": \"${admin.email}\"", color = Color.LightGray, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                                        Text("\"role\": \"${admin.role}\"", color = Color.LightGray, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                                        Text("\"active\": ${admin.active}", color = if (admin.active) Color.Green else Color.Red, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                                        Text("\"assignedAt\": ${admin.assignedAt}", color = Color.LightGray, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                                        Text("\"grantedBy\": \"${admin.grantedBy}\"", color = Color.LightGray, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                                    }
+                                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text("\"uid\": \"${admin.uid}\"", color = Color.LightGray, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                                    Text("\"name\": \"${admin.name}\"", color = Color.LightGray, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                                    Text("\"email\": \"${admin.email}\"", color = Color.LightGray, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                                    Text("\"role\": \"${admin.role}\"", color = Color.LightGray, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                                    Text("\"active\": ${admin.active}", color = if (admin.active) Color(0xFF4ADE80) else Color(0xFFF87171), fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                                    Text("\"assignedAt\": ${admin.assignedAt}", color = Color.LightGray, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                                    Text("\"grantedBy\": \"${admin.grantedBy}\"", color = Color.LightGray, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
                                 }
                             }
                         }
