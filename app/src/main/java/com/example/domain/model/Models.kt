@@ -210,10 +210,6 @@ data class UserProfile(
     var deletionDetails: String = "",
     @get:PropertyName("deletionRequestedAt") @set:PropertyName("deletionRequestedAt")
     var deletionRequestedAt: Long = 0L,
-    @get:PropertyName("isFounder") @set:PropertyName("isFounder")
-    var isFounder: Boolean = false,
-    @get:PropertyName("founderTier") @set:PropertyName("founderTier")
-    var founderTier: String = "",
     @get:PropertyName("version") @set:PropertyName("version")
     var version: Int = 1,
     @get:PropertyName("updatedAt") @set:PropertyName("updatedAt")
@@ -476,14 +472,26 @@ data class PayoutRequest(
     var uid: String = "",
     @get:PropertyName("username") @set:PropertyName("username")
     var username: String = "",
+    @get:PropertyName("inGameName") @set:PropertyName("inGameName")
+    var inGameName: String = "",
     @get:PropertyName("email") @set:PropertyName("email")
     var email: String = "",
     @get:PropertyName("paymentMethod") @set:PropertyName("paymentMethod")
-    var paymentMethod: String = "UPI", // UPI, Paytm, Bank Transfer
+    var paymentMethod: String = "UPI", // UPI, REDEEM_CODE
     @get:PropertyName("paymentId") @set:PropertyName("paymentId")
-    var paymentId: String = "", // UPI ID / Phone / A/C
+    var paymentId: String = "", // UPI ID or Voucher Spec
+    @get:PropertyName("voucherSpec") @set:PropertyName("voucherSpec")
+    var voucherSpec: String = "", // Google Play, Free Fire Diamonds, BGMI UC
+    @get:PropertyName("deliveredRedeemCode") @set:PropertyName("deliveredRedeemCode")
+    var deliveredRedeemCode: String = "",
+    @get:PropertyName("transactionId") @set:PropertyName("transactionId")
+    var transactionId: String = "",
     @get:PropertyName("vtAmount") @set:PropertyName("vtAmount")
     var vtAmount: Double = 0.0,
+    @get:PropertyName("tdsAmount") @set:PropertyName("tdsAmount")
+    var tdsAmount: Double = 0.0,
+    @get:PropertyName("netAmount") @set:PropertyName("netAmount")
+    var netAmount: Double = 0.0,
     @get:PropertyName("status") @set:PropertyName("status")
     var status: String = "pending", // pending, approved, completed, rejected
     @get:PropertyName("rejectionReason") @set:PropertyName("rejectionReason")
@@ -505,6 +513,16 @@ data class PayoutRequest(
     val upiId: String get() = paymentId
     @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
     val createdAt: Long get() = requestedAt
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
+    val effectiveTdsAmount: Double get() = if (tdsAmount > 0.0) tdsAmount else (vtAmount * 0.30)
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
+    val effectiveNetAmount: Double get() = if (netAmount > 0.0) netAmount else (vtAmount - effectiveTdsAmount).coerceAtLeast(0.0)
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
+    val isRedeemVoucher: Boolean
+        get() = paymentMethod.equals("REDEEM_CODE", ignoreCase = true) ||
+            paymentMethod.contains("REDEEM", ignoreCase = true) ||
+            paymentMethod.contains("VOUCHER", ignoreCase = true) ||
+            voucherSpec.isNotBlank()
 }
 
 @IgnoreExtraProperties
@@ -514,6 +532,8 @@ data class DepositRequest(
     var id: String = "",
     @get:PropertyName("requestId") @set:PropertyName("requestId")
     var requestId: String = "",
+    @get:PropertyName("orderId") @set:PropertyName("orderId")
+    var orderId: String = "",
     @get:PropertyName("transactionId") @set:PropertyName("transactionId")
     var transactionId: String = "",
     @get:PropertyName("uid") @set:PropertyName("uid")
@@ -531,7 +551,7 @@ data class DepositRequest(
     @get:PropertyName("utrNumber") @set:PropertyName("utrNumber")
     var utrNumber: String = "",
     @get:PropertyName("paymentMethod") @set:PropertyName("paymentMethod")
-    var paymentMethod: String = "UPI_MANUAL", // UPI_MANUAL | SPACEPAY | RAZORPAY
+    var paymentMethod: String = "UPI_MANUAL", // UPI_MANUAL | UPI_ORDER | SPACEPAY | RAZORPAY
     @get:PropertyName("paymentScreenshotUrl") @set:PropertyName("paymentScreenshotUrl")
     var paymentScreenshotUrl: String = "",
     @get:PropertyName("screenshotUrl") @set:PropertyName("screenshotUrl")
@@ -1216,7 +1236,7 @@ enum class AdminChannelType(
     ROOM_CREDENTIALS("room_credentials", "#room-credentials", "Room ID & Password", "Custom Room ID, Password & Slot issues"),
     CHEATER_HACKER("cheater_hacker", "#cheater-hacker", "Cheater / Hacker Report", "Report Aimbot, Wallhack, Teaming or Emulator"),
     ACCOUNT_ISSUE("account_issue", "#account-issue", "Account & Profile", "Free Fire UID change, login or ban appeal"),
-    VERIFICATION("verification", "#verification", "Verification & Founder", "Founder Pass, KYC or Tournament Host request"),
+    VERIFICATION("verification", "#kyc-verification", "KYC & Verification", "Identity KYC or Tournament Host verification"),
 
     // Operational Dispatch Logs (Master Prompt Section 4)
     SLOT_CONFIRMATIONS("slot_confirmations", "#slot-confirmations", "Slot Confirmations", "Automated slot confirmation dispatches", true),
@@ -1469,20 +1489,33 @@ data class TournamentChatMessage(
     @get:PropertyName("senderId") @set:PropertyName("senderId")
     var senderId: String = "admin",
     @get:PropertyName("senderName") @set:PropertyName("senderName")
-    var senderName: String = "VeloRix Official",
+    var senderName: String = "VeloRix Admin",
     @get:PropertyName("senderAvatar") @set:PropertyName("senderAvatar")
     var senderAvatar: String = "",
     @get:PropertyName("senderRole") @set:PropertyName("senderRole")
     var senderRole: String = "ADMIN",
     @get:PropertyName("message") @set:PropertyName("message")
     var message: String = "",
+    @get:PropertyName("text") @set:PropertyName("text")
+    var text: String = "",
     @get:PropertyName("isAdmin") @set:PropertyName("isAdmin")
     var isAdmin: Boolean = true,
+    @get:PropertyName("isSystemMessage") @set:PropertyName("isSystemMessage")
+    var isSystemMessage: Boolean = false,
+    @get:PropertyName("messageType") @set:PropertyName("messageType")
+    var messageType: String = "TEXT",
+    @get:PropertyName("channel") @set:PropertyName("channel")
+    var channel: String = "ALL",
+    @get:PropertyName("isDeleted") @set:PropertyName("isDeleted")
+    var isDeleted: Boolean = false,
     @get:PropertyName("isPinned") @set:PropertyName("isPinned")
     var isPinned: Boolean = false,
     @get:PropertyName("timestamp") @set:PropertyName("timestamp")
     var timestamp: Long = System.currentTimeMillis()
-)
+) {
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
+    val displayText: String get() = text.ifBlank { message }
+}
 
 @IgnoreExtraProperties
 @Serializable
@@ -1510,7 +1543,7 @@ data class SystemConfig(
     @get:PropertyName("showDeveloperModal") @set:PropertyName("showDeveloperModal")
     var showDeveloperModal: Boolean = false,
     @get:PropertyName("upiId") @set:PropertyName("upiId")
-    var upiId: String = "velorix.pay@okaxis",
+    var upiId: String = "veloxyra.anant@fam",
     @get:PropertyName("upiMerchantName") @set:PropertyName("upiMerchantName")
     var upiMerchantName: String = "VeloRix Esports",
     @get:PropertyName("minDepositVt") @set:PropertyName("minDepositVt")
@@ -1529,76 +1562,26 @@ data class SystemConfig(
     var discordUrl: String = "https://discord.gg/velorix",
     @get:PropertyName("vpnBlockEnabled") @set:PropertyName("vpnBlockEnabled")
     var vpnBlockEnabled: Boolean = true,
-    // OTA Live Config, Calendar Festivals & 14 Feature Flags (Play-Store-Free Updates)
     @get:PropertyName("otaPatchVersion") @set:PropertyName("otaPatchVersion")
     var otaPatchVersion: Int = 1,
     @get:PropertyName("otaReleaseNotes") @set:PropertyName("otaReleaseNotes")
-    var otaReleaseNotes: String = "Live OTA Hot-Patch Active — Zero Play Store Update Needed",
+    var otaReleaseNotes: String = "Live OTA Config Active",
     @get:PropertyName("liveLobbyTicker") @set:PropertyName("liveLobbyTicker")
     var liveLobbyTicker: String = "",
-    @get:PropertyName("activeFestivalOverride") @set:PropertyName("activeFestivalOverride")
-    var activeFestivalOverride: String = "AUTO",
-    @get:PropertyName("customFestivalTitle") @set:PropertyName("customFestivalTitle")
-    var customFestivalTitle: String = "",
-    @get:PropertyName("customFestivalMessage") @set:PropertyName("customFestivalMessage")
-    var customFestivalMessage: String = "",
-    @get:PropertyName("customAttractingTitle") @set:PropertyName("customAttractingTitle")
-    var customAttractingTitle: String = "",
-    @get:PropertyName("customAttractingMessage") @set:PropertyName("customAttractingMessage")
-    var customAttractingMessage: String = "",
-    @get:PropertyName("attractingAlertWeight") @set:PropertyName("attractingAlertWeight")
-    var attractingAlertWeight: Int = 65,
-    @get:PropertyName("timeContextualWeight") @set:PropertyName("timeContextualWeight")
-    var timeContextualWeight: Int = 20,
-    @get:PropertyName("weeklyCalendarWeight") @set:PropertyName("weeklyCalendarWeight")
-    var weeklyCalendarWeight: Int = 15,
     @get:PropertyName("featureFlags") @set:PropertyName("featureFlags")
     var featureFlags: Map<String, Boolean> = defaultFeatureFlags(),
     @get:PropertyName("updatedAt") @set:PropertyName("updatedAt")
     var updatedAt: Long = System.currentTimeMillis()
 ) {
     companion object {
-        val ALL_FESTIVAL_OPTIONS = listOf(
-            "AUTO" to "Auto-Detect Real-World Calendar Date",
-            "NEW_YEAR_EVE" to "New Year's Eve (Dec 31)",
-            "NEW_YEAR" to "New Year Kickoff (Jan 1–3)",
-            "HARVEST_FESTIVALS" to "Makar Sankranti / Pongal / Lohri (Jan 13–15)",
-            "REPUBLIC_DAY" to "Republic Day Tricolor Cup (Jan 26)",
-            "VALENTINE_DUO" to "Valentine's Duo Showdown (Feb 14)",
-            "MAHA_SHIVRATRI" to "Maha Shivratri Night Clash",
-            "HOLI" to "Holi Festival of Colors",
-            "EID_UL_FITR" to "Eid-ul-Fitr Mubarak Drop",
-            "GUDI_PADWA_NAVRATRI" to "Gudi Padwa / Ugadi / Chaitra Navratri",
-            "AMBEDKAR_BAISAKHI" to "Baisakhi / Vishu / Puthandu (Apr 13–15)",
-            "EID_UL_ADHA" to "Eid-ul-Adha Champions Arena",
-            "INDEPENDENCE_DAY" to "Independence Day Freedom Cup (Aug 15)",
-            "RAKSHA_BANDHAN" to "Raksha Bandhan Duo Special",
-            "JANMASHTAMI" to "Krishna Janmashtami Midnight Clash",
-            "GANESH_CHATURTHI" to "Ganesh Chaturthi Arena",
-            "GANDHI_JAYANTI" to "Gandhi Jayanti Special (Oct 2)",
-            "NAVRATRI_DUSSEHRA" to "Navratri & Vijayadashami Showdown",
-            "HALLOWEEN" to "Halloween Phantom Drop (Oct 31)",
-            "DIWALI" to "Diwali Grand Dhamaka",
-            "GURU_NANAK_JAYANTI" to "Gurpurab Special Lobby",
-            "CHRISTMAS" to "Winterland & Christmas Drop (Dec 24–26)",
-            "CUSTOM" to "Custom Admin Festival Override"
-        )
-
+        // Strictly the 6 Active Core Feature Flags (obsolete flags removed)
         val ALL_FEATURE_FLAG_METADATA = listOf(
-            Triple("token_conversion", "Token → VT Conversion", "10 Tokens = 1 VT in Wallet"),
             Triple("tournament_join", "Tournament Joining", "Master switch for joining matches"),
             Triple("room_credentials_delivery", "Room ID Delivery", "Show Room ID & Password to joined players"),
-            Triple("instant_withdrawals", "Instant Withdrawals", "Allow players to submit payout requests"),
+            Triple("instant_withdrawals", "Instant Withdrawals", "Allow players to submit UPI & Voucher payouts"),
+            Triple("token_conversion", "Token → VT Conversion", "10 Tokens = 1 VT in Wallet"),
             Triple("daily_login_rewards", "Daily Login Streak", "7-Day Login Streak & Daily Missions"),
-            Triple("founder_pass_hub", "Founder Pass Hub", "VIP Founder Pass tiers & perks"),
-            Triple("community_chat", "Community Lobby Chat", "Live global & match chat"),
-            Triple("ai_sentinel_support", "AI Sentinel Support", "6-Channel Admin Router & AI Help Desk"),
-            Triple("calendar_festival_sync", "Calendar Festival Sync", "Auto-detect Indian & global festivals"),
-            Triple("attracting_esports_alerts", "Attracting Esports Alerts", "High-energy Free Fire squad callouts"),
-            Triple("hyperos_super_island", "HyperOS Super Island", "Dynamic Island pill notifications"),
-            Triple("mj_signature_sfx", "Signature Audio SFX", "Custom notification & action sound effects"),
-            Triple("ota_live_hot_patch", "OTA Live Hot-Patch", "Play-Store-free live config sync"),
-            Triple("auto_upi_utr_listener", "Auto UPI UTR Listener", "Instant UTR verification queue")
+            Triple("ai_sentinel_support", "AI Sentinel Support", "12-Channel Request Hub & My Tickets Desk")
         )
 
         fun defaultFeatureFlags(): Map<String, Boolean> =
@@ -1657,4 +1640,206 @@ data class AdminAuditLogItem(
     @get:PropertyName("timestamp") @set:PropertyName("timestamp")
     var timestamp: Long = System.currentTimeMillis()
 )
+
+// ============================================================================
+// MODULE 3: REDEEM CODE VAULT (/redeem_codes & /redeem_claims)
+// ============================================================================
+@IgnoreExtraProperties
+@Serializable
+data class RedeemCodeItem(
+    @get:PropertyName("code") @set:PropertyName("code")
+    var code: String = "",
+    @get:PropertyName("title") @set:PropertyName("title")
+    var title: String = "",
+    @get:PropertyName("active") @set:PropertyName("active")
+    var active: Boolean = true,
+    @get:PropertyName("status") @set:PropertyName("status")
+    var status: String = "ACTIVE", // ACTIVE | DISABLED
+    @get:PropertyName("rewardVt") @set:PropertyName("rewardVt")
+    var rewardVt: Double = 0.0,
+    @get:PropertyName("rewardTokens") @set:PropertyName("rewardTokens")
+    var rewardTokens: Int = 0,
+    @get:PropertyName("maxUses") @set:PropertyName("maxUses")
+    var maxUses: Int = 0, // 0 = unlimited
+    @get:PropertyName("usedCount") @set:PropertyName("usedCount")
+    var usedCount: Int = 0,
+    @get:PropertyName("expiresAt") @set:PropertyName("expiresAt")
+    var expiresAt: Long = 0L, // 0 = never
+    @get:PropertyName("targetUserId") @set:PropertyName("targetUserId")
+    var targetUserId: String = "",
+    @get:PropertyName("createdAt") @set:PropertyName("createdAt")
+    var createdAt: Long = System.currentTimeMillis(),
+    @get:PropertyName("updatedAt") @set:PropertyName("updatedAt")
+    var updatedAt: Long = System.currentTimeMillis()
+)
+
+@IgnoreExtraProperties
+@Serializable
+data class RedeemClaimRecord(
+    @get:PropertyName("id") @set:PropertyName("id")
+    var id: String = "",
+    @get:PropertyName("code") @set:PropertyName("code")
+    var code: String = "",
+    @get:PropertyName("userId") @set:PropertyName("userId")
+    var userId: String = "",
+    @get:PropertyName("username") @set:PropertyName("username")
+    var username: String = "",
+    @get:PropertyName("rewardVt") @set:PropertyName("rewardVt")
+    var rewardVt: Double = 0.0,
+    @get:PropertyName("rewardTokens") @set:PropertyName("rewardTokens")
+    var rewardTokens: Int = 0,
+    @get:PropertyName("claimedAt") @set:PropertyName("claimedAt")
+    var claimedAt: Long = System.currentTimeMillis()
+)
+
+// ============================================================================
+// MODULE 4: UNIFIED 12-CHANNEL REQUEST HUB & "MY TICKETS" DESK
+// ============================================================================
+@Serializable
+enum class UnifiedRequestChannel(
+    val categoryKey: String,
+    val channelTag: String,
+    val label: String,
+    val rtdbNode: String
+) {
+    ALL("ALL", "ALL", "All Requests", "all"),
+    PAYMENT_DEPOSIT("PAYMENT_DEPOSIT", "#deposit-issues", "Deposit Issues", "deposit_issue_requests"),
+    PAYMENT_WITHDRAW("PAYMENT_WITHDRAW", "#withdrawal-desk", "Withdrawal Desk", "withdrawal_issue_requests"),
+    REDEEM_CODE_REQUEST("REDEEM_CODE_REQUEST", "#redeem-codes", "Redeem Codes", "redeem_code_requests"),
+    ROOM_CREDENTIALS("ROOM_CREDENTIALS", "#room-credentials", "Room Creds", "room_credential_requests"),
+    CHEATER_HACKER("CHEATER_HACKER", "#sentinel-anticheat", "Anti-Cheat", "cheater_reports"),
+    RESULT_DISPUTE("RESULT_DISPUTE", "#match-disputes", "Match Disputes", "result_dispute_requests"),
+    TOURNAMENT_REQUEST("TOURNAMENT_REQUEST", "#tournament-requests", "Host Requests", "tournament_host_requests"),
+    APP_BUG_CRASH("APP_BUG_CRASH", "#crash-diagnostics", "Bug / Crash", "bug_reports"),
+    BAN_APPEAL("BAN_APPEAL", "#ban-appeals", "Ban Appeals", "ban_appeals"),
+    SUSPENSION_APPEAL("SUSPENSION_APPEAL", "#kyc-verification", "KYC / Suspend", "verification_requests"),
+    ACCOUNT_DELETION("ACCOUNT_DELETION", "#account-deletions", "DPDP Deletion", "account_deletion_requests"),
+    GENERAL_SUPPORT("GENERAL_SUPPORT", "#general-support", "General Support", "general_support_requests");
+
+    companion object {
+        fun matchFromRaw(category: String?, channel: String?, sourceNode: String? = null): UnifiedRequestChannel {
+            val cat = category.orEmpty().trim().uppercase()
+            val ch = channel.orEmpty().trim().lowercase()
+            val src = sourceNode.orEmpty().trim().lowercase()
+            return entries.firstOrNull { c ->
+                c != ALL && (
+                    c.categoryKey.equals(cat, ignoreCase = true) ||
+                        c.channelTag.equals(ch, ignoreCase = true) ||
+                        c.rtdbNode.equals(src, ignoreCase = true) ||
+                        ch.contains(c.channelTag.removePrefix("#"))
+                    )
+            } ?: when {
+                cat.contains("DEPOSIT") || src.contains("deposit") -> PAYMENT_DEPOSIT
+                cat.contains("WITHDRAW") || cat.contains("PAYOUT") || src.contains("withdraw") -> PAYMENT_WITHDRAW
+                cat.contains("REDEEM") || cat.contains("VOUCHER") || src.contains("redeem") -> REDEEM_CODE_REQUEST
+                cat.contains("ROOM") || src.contains("room") -> ROOM_CREDENTIALS
+                cat.contains("CHEAT") || cat.contains("HACK") || src.contains("cheat") -> CHEATER_HACKER
+                cat.contains("DISPUTE") || cat.contains("RESULT") || src.contains("dispute") -> RESULT_DISPUTE
+                cat.contains("TOURNAMENT") || cat.contains("HOST") -> TOURNAMENT_REQUEST
+                cat.contains("BUG") || cat.contains("CRASH") -> APP_BUG_CRASH
+                cat.contains("BAN") -> BAN_APPEAL
+                cat.contains("SUSPEND") || cat.contains("KYC") || cat.contains("VERIF") -> SUSPENSION_APPEAL
+                cat.contains("DELET") || cat.contains("DPDP") -> ACCOUNT_DELETION
+                else -> GENERAL_SUPPORT
+            }
+        }
+    }
+}
+
+@IgnoreExtraProperties
+@Serializable
+data class UnifiedAdminRequest(
+    @get:PropertyName("id") @set:PropertyName("id")
+    var id: String = "",
+    @get:PropertyName("userId") @set:PropertyName("userId")
+    var userId: String = "",
+    @get:PropertyName("username") @set:PropertyName("username")
+    var username: String = "",
+    @get:PropertyName("userEmail") @set:PropertyName("userEmail")
+    var userEmail: String = "",
+    @get:PropertyName("inGameName") @set:PropertyName("inGameName")
+    var inGameName: String = "",
+    @get:PropertyName("freeFireId") @set:PropertyName("freeFireId")
+    var freeFireId: String = "",
+    @get:PropertyName("category") @set:PropertyName("category")
+    var category: String = "GENERAL_SUPPORT",
+    @get:PropertyName("channel") @set:PropertyName("channel")
+    var channel: String = "#general-support",
+    @get:PropertyName("subject") @set:PropertyName("subject")
+    var subject: String = "",
+    @get:PropertyName("description") @set:PropertyName("description")
+    var description: String = "",
+    @get:PropertyName("amount") @set:PropertyName("amount")
+    var amount: Double = 0.0,
+    @get:PropertyName("utrNumber") @set:PropertyName("utrNumber")
+    var utrNumber: String = "",
+    @get:PropertyName("paymentMethod") @set:PropertyName("paymentMethod")
+    var paymentMethod: String = "",
+    @get:PropertyName("voucherSpec") @set:PropertyName("voucherSpec")
+    var voucherSpec: String = "",
+    @get:PropertyName("status") @set:PropertyName("status")
+    var status: String = "PENDING", // PENDING | IN_REVIEW | INVESTIGATING | RESOLVED | REJECTED
+    @get:PropertyName("adminReply") @set:PropertyName("adminReply")
+    var adminReply: String = "",
+    @get:PropertyName("deliveredRedeemCode") @set:PropertyName("deliveredRedeemCode")
+    var deliveredRedeemCode: String = "",
+    @get:PropertyName("sourceNode") @set:PropertyName("sourceNode")
+    var sourceNode: String = "admin_requests/all",
+    @get:PropertyName("createdAt") @set:PropertyName("createdAt")
+    var createdAt: Long = System.currentTimeMillis(),
+    @get:PropertyName("updatedAt") @set:PropertyName("updatedAt")
+    var updatedAt: Long = System.currentTimeMillis()
+) {
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
+    val resolvedChannel: UnifiedRequestChannel
+        get() = UnifiedRequestChannel.matchFromRaw(category, channel, sourceNode)
+}
+
+// ============================================================================
+// MODULE 5B: CHAT REPORTS QUEUE (/chat_reports) & PRE-VERIFIED UTR (/verified_bank_deposits)
+// ============================================================================
+@IgnoreExtraProperties
+@Serializable
+data class ChatReportItem(
+    @get:PropertyName("id") @set:PropertyName("id")
+    var id: String = "",
+    @get:PropertyName("tournamentId") @set:PropertyName("tournamentId")
+    var tournamentId: String = "",
+    @get:PropertyName("messageId") @set:PropertyName("messageId")
+    var messageId: String = "",
+    @get:PropertyName("reportedUserId") @set:PropertyName("reportedUserId")
+    var reportedUserId: String = "",
+    @get:PropertyName("reportedUserName") @set:PropertyName("reportedUserName")
+    var reportedUserName: String = "",
+    @get:PropertyName("reporterUserId") @set:PropertyName("reporterUserId")
+    var reporterUserId: String = "",
+    @get:PropertyName("reporterName") @set:PropertyName("reporterName")
+    var reporterName: String = "",
+    @get:PropertyName("messageText") @set:PropertyName("messageText")
+    var messageText: String = "",
+    @get:PropertyName("reason") @set:PropertyName("reason")
+    var reason: String = "",
+    @get:PropertyName("status") @set:PropertyName("status")
+    var status: String = "PENDING",
+    @get:PropertyName("timestamp") @set:PropertyName("timestamp")
+    var timestamp: Long = System.currentTimeMillis()
+)
+
+@IgnoreExtraProperties
+@Serializable
+data class VerifiedBankDeposit(
+    @get:PropertyName("utr") @set:PropertyName("utr")
+    var utr: String = "",
+    @get:PropertyName("amount") @set:PropertyName("amount")
+    var amount: Double = 0.0,
+    @get:PropertyName("claimed") @set:PropertyName("claimed")
+    var claimed: Boolean = false,
+    @get:PropertyName("claimedBy") @set:PropertyName("claimedBy")
+    var claimedBy: String = "",
+    @get:PropertyName("verifiedBy") @set:PropertyName("verifiedBy")
+    var verifiedBy: String = "",
+    @get:PropertyName("timestamp") @set:PropertyName("timestamp")
+    var timestamp: Long = System.currentTimeMillis()
+)
+
 

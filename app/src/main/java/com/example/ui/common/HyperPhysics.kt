@@ -151,10 +151,10 @@ enum class HyperOSTheme(
         glowColor = Color(0xFFFBBF24)
     ),
     ELECTRIC_ROSE(
-        themeName = "System Crimson",
-        primaryColor = Color(0xFFFF453A),
-        secondaryColor = Color(0xFFDC2626),
-        glowColor = Color(0xFFF87171)
+        themeName = "YouTube Pink-Red",
+        primaryColor = Color(0xFFFF0033),
+        secondaryColor = Color(0xFFC8103E),
+        glowColor = Color(0xFFFF2E5B)
     )
 }
 

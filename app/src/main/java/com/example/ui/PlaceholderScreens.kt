@@ -159,64 +159,83 @@ fun TournamentsListScreenContent(
             }
             
             Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (onCreateTournament != null) {
-                    IconButton(
-                        onClick = onCreateTournament,
+                    Box(
                         modifier = Modifier
-                            .size(32.dp)
-                            .background(VelorixAccent.copy(alpha = 0.14f), CircleShape)
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(VelorixAccent.copy(alpha = 0.16f))
+                            .border(0.75.dp, VelorixAccent.copy(alpha = 0.4f), CircleShape)
+                            .clickable(onClick = onCreateTournament),
+                        contentAlignment = Alignment.Center
                     ) {
                         Icon(Icons.Default.Add, contentDescription = "Create Match", tint = VelorixAccent, modifier = Modifier.size(18.dp))
                     }
                 }
 
-                IconButton(
-                    onClick = {
-                        val json = org.json.JSONArray().apply {
-                            tournamentsList.forEach { t ->
-                                put(org.json.JSONObject().apply {
-                                    put("id", t.id)
-                                    put("tournamentId", t.id)
-                                    put("title", t.title)
-                                    put("game", t.game)
-                                    put("map", t.map)
-                                    put("format", t.format)
-                                    put("status", t.status)
-                                    put("prizePool", t.prizePool)
-                                    put("entryFee", t.entryFee)
-                                    put("registeredPlayers", t.registeredPlayers)
-                                    put("maxPlayers", t.maxPlayers)
-                                    put("bannerUrl", t.bannerUrl)
-                                })
-                            }
-                        }.toString(2)
-                        extractedJsonText = json
-                        val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("TournamentsJSON", json))
-                        showExportDialog = true
-                    },
-                    modifier = Modifier.size(32.dp)
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF14141B))
+                        .border(0.75.dp, Color(0xFF1E1E27), CircleShape)
+                        .clickable {
+                            val json = org.json.JSONArray().apply {
+                                tournamentsList.forEach { t ->
+                                    put(org.json.JSONObject().apply {
+                                        put("id", t.id)
+                                        put("tournamentId", t.id)
+                                        put("title", t.title)
+                                        put("game", t.game)
+                                        put("map", t.map)
+                                        put("format", t.format)
+                                        put("status", t.status)
+                                        put("prizePool", t.prizePool)
+                                        put("entryFee", t.entryFee)
+                                        put("registeredPlayers", t.registeredPlayers)
+                                        put("maxPlayers", t.maxPlayers)
+                                        put("bannerUrl", t.bannerUrl)
+                                    })
+                                }
+                            }.toString(2)
+                            extractedJsonText = json
+                            val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("TournamentsJSON", json))
+                            showExportDialog = true
+                        },
+                    contentAlignment = Alignment.Center
                 ) {
                     Icon(Icons.Default.ContentCopy, contentDescription = "Export JSON", tint = Color.White, modifier = Modifier.size(16.dp))
                 }
-                
-                IconButton(
-                    onClick = { showImportDialog = true },
-                    modifier = Modifier.size(32.dp)
+
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF14141B))
+                        .border(0.75.dp, Color(0xFF1E1E27), CircleShape)
+                        .clickable { showImportDialog = true },
+                    contentAlignment = Alignment.Center
                 ) {
-                    Icon(Icons.Default.FileUpload, contentDescription = "Import / Push JSON", tint = Color(0xFF38BDF8), modifier = Modifier.size(16.dp))
+                    Icon(Icons.Default.FileUpload, contentDescription = "Import / Push JSON", tint = VelorixAccent, modifier = Modifier.size(16.dp))
                 }
 
                 val isCloudSyncing = (uiState as? DashboardState.Success)?.isSyncing ?: false
-                IconButton(
-                    onClick = {
-                        syncStatusMessage = "Extracting live tournaments directly from Firebase backend..."
-                        onSyncCloud?.invoke()
-                    },
-                    modifier = Modifier.size(32.dp).bounceClick(scaleDown = 0.90f)
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF4ADE80).copy(alpha = 0.12f))
+                        .border(0.75.dp, Color(0xFF4ADE80).copy(alpha = 0.35f), CircleShape)
+                        .bounceClick(scaleDown = 0.90f)
+                        .clickable {
+                            syncStatusMessage = "Extracting live tournaments directly from Firebase backend..."
+                            onSyncCloud?.invoke()
+                        },
+                    contentAlignment = Alignment.Center
                 ) {
                     if (isCloudSyncing) {
                         CircularProgressIndicator(
@@ -1820,11 +1839,14 @@ fun UsersManagementScreenContent(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(
-                        onClick = { showAddUserDialog = true },
+                    Box(
                         modifier = Modifier
-                            .size(34.dp)
-                            .background(Color.White.copy(alpha = 0.08f), CircleShape)
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF14141B))
+                            .border(0.75.dp, Color(0xFF1E1E27), CircleShape)
+                            .clickable { showAddUserDialog = true },
+                        contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             Icons.Default.PersonAdd,
@@ -1835,18 +1857,21 @@ fun UsersManagementScreenContent(
                     }
 
                     if (onRefreshUserData != null) {
-                        IconButton(
-                            onClick = {
-                                Toast.makeText(context, "Syncing live players from Firebase...", Toast.LENGTH_SHORT).show()
-                                onRefreshUserData()
-                            },
+                        Box(
                             modifier = Modifier
-                                .size(34.dp)
-                                .background(Color(0xFF38BDF8).copy(alpha = 0.14f), CircleShape)
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(VelorixAccent.copy(alpha = 0.14f))
+                                .border(0.75.dp, VelorixAccent.copy(alpha = 0.35f), CircleShape)
+                                .clickable {
+                                    Toast.makeText(context, "Syncing live players from Firebase...", Toast.LENGTH_SHORT).show()
+                                    onRefreshUserData()
+                                },
+                            contentAlignment = Alignment.Center
                         ) {
                             if (isUserSyncing) {
                                 CircularProgressIndicator(
-                                    color = Color(0xFF38BDF8),
+                                    color = VelorixAccent,
                                     strokeWidth = 1.8.dp,
                                     modifier = Modifier.size(14.dp)
                                 )
@@ -1854,7 +1879,7 @@ fun UsersManagementScreenContent(
                                 Icon(
                                     Icons.Default.Sync,
                                     contentDescription = "Sync RTDB",
-                                    tint = Color(0xFF38BDF8),
+                                    tint = VelorixAccent,
                                     modifier = Modifier.size(16.dp)
                                 )
                             }
@@ -1862,14 +1887,17 @@ fun UsersManagementScreenContent(
                     }
 
                     if (onUnbanGuestSessions != null) {
-                        IconButton(
-                            onClick = {
-                                Toast.makeText(context, "Unbanning guest sessions...", Toast.LENGTH_SHORT).show()
-                                onUnbanGuestSessions()
-                            },
+                        Box(
                             modifier = Modifier
-                                .size(34.dp)
-                                .background(Color.White.copy(alpha = 0.06f), CircleShape)
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF14141B))
+                                .border(0.75.dp, Color(0xFF1E1E27), CircleShape)
+                                .clickable {
+                                    Toast.makeText(context, "Unbanning guest sessions...", Toast.LENGTH_SHORT).show()
+                                    onUnbanGuestSessions()
+                                },
+                            contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 Icons.Default.Shield,
@@ -4991,19 +5019,22 @@ fun PlayerFundsTransferHubContent(
                             fontFamily = FontFamily.Monospace
                         )
                     }
-                    IconButton(
-                        onClick = {
-                            selectedPlayerId = p.id
-                            dialogPlayerId = p.id
-                        },
+                    Box(
                         modifier = Modifier
-                            .size(34.dp)
-                            .background(Color(0xFF38BDF8).copy(alpha = 0.14f), CircleShape)
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(VelorixAccent.copy(alpha = 0.14f))
+                            .border(0.75.dp, VelorixAccent.copy(alpha = 0.35f), CircleShape)
+                            .clickable {
+                                selectedPlayerId = p.id
+                                dialogPlayerId = p.id
+                            },
+                        contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             Icons.Default.AccountBalanceWallet,
                             contentDescription = "Send Funds",
-                            tint = Color(0xFF38BDF8),
+                            tint = VelorixAccent,
                             modifier = Modifier.size(16.dp)
                         )
                     }

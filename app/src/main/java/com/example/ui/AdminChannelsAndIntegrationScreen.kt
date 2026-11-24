@@ -39,15 +39,15 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-// Eye-Comfortable Ergonomic Dark Palette (Anti-Halation Midnight Slate & Desaturated Accents)
-private val PureBlackBg = Color(0xFF0B0F17)
-private val HairlineBorder = Color(0xFF222C3C)
-private val TextPrimaryWhite = Color(0xFFE6EDF3)
-private val TextSecondaryZinc = Color(0xFF94A3B8)
-private val AccentBlue = Color(0xFF38BDF8)
+// Pure AMOLED Black Palette with V14 Neutral Hairlines & YouTube Pinkish-Red Primary Accent
+private val PureBlackBg = Color.Black
+private val HairlineBorder = Color(0xFF1E1E27)
+private val TextPrimaryWhite = Color(0xFFF5F5F7)
+private val TextSecondaryZinc = Color(0xFF9A9AA6)
+private val AccentBlue = Color(0xFFFF2E5B) // Signature YouTube Pinkish-Red Primary Accent
 private val AccentGreen = Color(0xFF34D399)
 private val AccentAmber = Color(0xFFFBBF24)
-private val AccentRed = Color(0xFFF87171)
+private val AccentRed = Color(0xFFFF4D6D)
 
 @Composable
 private fun AdminActionChip(
@@ -128,13 +128,12 @@ enum class IntegrationHubSection(
     val icon: androidx.compose.ui.graphics.vector.ImageVector
 ) {
     TOURNAMENTS_RESULTS("Matches", Icons.Default.EmojiEvents),
-    DEPOSIT_QUEUE("Wallet", Icons.Default.AccountBalanceWallet),
-    USERS_MODERATION("Players", Icons.Default.Group),
-    DPDP_COMPLIANCE("Privacy", Icons.Default.Security),
-    ADMIN_CHANNELS("Channels", Icons.Default.Hub),
-    SYSTEM_CONFIG("Config", Icons.Default.Tune),
-    TOKENS_MISSIONS("Missions", Icons.Default.Stars),
-    LOBBY_CHAT("Chat", Icons.Default.Forum)
+    WALLET_PAYOUTS("Wallet", Icons.Default.AccountBalanceWallet),
+    REDEEM_VAULT("Redeem", Icons.Default.ConfirmationNumber),
+    UNIFIED_REQUESTS("Requests", Icons.Default.SupportAgent),
+    USERS_AND_CHAT("Players & Chat", Icons.Default.Group),
+    BANNERS_BROADCASTS("Banners", Icons.Default.Campaign),
+    SYSTEM_CONFIG_DPDP("Config & DPDP", Icons.Default.Tune)
 }
 
 @Composable
@@ -147,29 +146,52 @@ fun AdminChannelsAndIntegrationHub(
     onSettingsClick: ((String) -> Unit)? = null
 ) {
     var activeSection by remember(initialSection) { mutableStateOf(initialSection) }
+    var usersChatSubTab by remember { mutableStateOf("USERS") } // USERS | CHAT
+    var configDpdpSubTab by remember { mutableStateOf("CONFIG") } // CONFIG | DPDP | MISSIONS
     var tournamentForChat by remember(initialTournamentIdForChat) { mutableStateOf(initialTournamentIdForChat) }
     var tournamentForStandingsModal by remember { mutableStateOf<Tournament?>(null) }
 
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val successState = uiState as? DashboardState.Success
 
-    val selectedChannel by viewModel.selectedAdminChannel.collectAsStateWithLifecycle()
-    val channelItems by viewModel.activeChannelItems.collectAsStateWithLifecycle()
     val deletionRequests by viewModel.accountDeletionRequests.collectAsStateWithLifecycle()
     val exportRequests by viewModel.dataExportRequests.collectAsStateWithLifecycle()
     val depositRequests by viewModel.depositRequests.collectAsStateWithLifecycle()
+    val unifiedWithdrawals by viewModel.unifiedWithdrawals.collectAsStateWithLifecycle()
+    val verifiedBankDeposits by viewModel.verifiedBankDeposits.collectAsStateWithLifecycle()
+    val redeemCodes by viewModel.redeemCodes.collectAsStateWithLifecycle()
+    val redeemClaims by viewModel.redeemClaims.collectAsStateWithLifecycle()
+    val unifiedRequests by viewModel.unifiedRequests.collectAsStateWithLifecycle()
+    val chatReports by viewModel.chatReports.collectAsStateWithLifecycle()
     val tokenConversions by viewModel.tokenConversions.collectAsStateWithLifecycle()
     val missions by viewModel.missions.collectAsStateWithLifecycle()
     val systemConfig by viewModel.systemConfig.collectAsStateWithLifecycle()
     val auditLogs by viewModel.auditLogs.collectAsStateWithLifecycle()
 
+    val mergedWithdrawals = remember(unifiedWithdrawals, successState?.payoutRequests) {
+        val byId = LinkedHashMap<String, PayoutRequest>()
+        unifiedWithdrawals.forEach { if (it.id.isNotBlank()) byId[it.id] = it }
+        (successState?.payoutRequests ?: emptyList()).forEach {
+            if (it.id.isNotBlank() && !byId.containsKey(it.id)) byId[it.id] = it
+        }
+        byId.values.sortedByDescending { it.requestedAt }
+    }
+
     val pendingDeletionsCount = remember(deletionRequests) {
         deletionRequests.count { it.status.equals("PENDING", ignoreCase = true) }
     }
-    val pendingDepositsCount = remember(depositRequests, successState?.payoutRequests) {
+    val pendingWalletCount = remember(depositRequests, mergedWithdrawals) {
         val dep = depositRequests.count { it.status.equals("PENDING", ignoreCase = true) }
-        val wdr = (successState?.payoutRequests ?: emptyList()).count { it.status.equals("PENDING", ignoreCase = true) }
+        val wdr = mergedWithdrawals.count { !it.isDeposit && it.status.equals("PENDING", ignoreCase = true) }
         dep + wdr
+    }
+    val openRequestsCount = remember(unifiedRequests) {
+        unifiedRequests.count {
+            !it.status.equals("RESOLVED", true) && !it.status.equals("REJECTED", true)
+        }
+    }
+    val pendingChatReportsCount = remember(chatReports) {
+        chatReports.count { !it.status.equals("RESOLVED", true) }
     }
 
     Column(
@@ -211,7 +233,7 @@ fun AdminChannelsAndIntegrationHub(
 
         HorizontalDivider(thickness = 0.5.dp, color = HairlineBorder)
 
-        // Scrollable Pill Section Selector Row (Prevents 8 tabs from crowding/overlapping)
+        // Scrollable Pill Section Selector Row (7 Clean Admin Hub Modules)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -223,9 +245,10 @@ fun AdminChannelsAndIntegrationHub(
             IntegrationHubSection.entries.forEach { section ->
                 val isSelected = activeSection == section
                 val badgeCount = when (section) {
-                    IntegrationHubSection.DPDP_COMPLIANCE -> pendingDeletionsCount
-                    IntegrationHubSection.DEPOSIT_QUEUE -> pendingDepositsCount
-                    IntegrationHubSection.ADMIN_CHANNELS -> successState?.openSupportComplaintsCount ?: 0
+                    IntegrationHubSection.WALLET_PAYOUTS -> pendingWalletCount
+                    IntegrationHubSection.UNIFIED_REQUESTS -> openRequestsCount
+                    IntegrationHubSection.USERS_AND_CHAT -> pendingChatReportsCount
+                    IntegrationHubSection.SYSTEM_CONFIG_DPDP -> pendingDeletionsCount
                     else -> 0
                 }
                 Row(
@@ -281,51 +304,136 @@ fun AdminChannelsAndIntegrationHub(
                 onDeclareStandingsClick = { tournamentForStandingsModal = it },
                 onOpenLobbyChat = { tId ->
                     tournamentForChat = tId
-                    activeSection = IntegrationHubSection.LOBBY_CHAT
+                    usersChatSubTab = "CHAT"
+                    activeSection = IntegrationHubSection.USERS_AND_CHAT
                 },
                 onCreateTournamentClick = onCreateTournamentClick,
                 onTournamentClick = onTournamentClick,
                 onSettingsClick = onSettingsClick
             )
-            IntegrationHubSection.DEPOSIT_QUEUE -> DepositVerificationQueueSection(
+            IntegrationHubSection.WALLET_PAYOUTS -> WalletUpiVoucherModuleSection(
                 viewModel = viewModel,
                 depositRequests = depositRequests,
-                payoutRequests = successState?.payoutRequests ?: emptyList()
+                withdrawals = mergedWithdrawals,
+                verifiedUtrs = verifiedBankDeposits
             )
-            IntegrationHubSection.USERS_MODERATION -> UsersAndModerationModuleSection(
+            IntegrationHubSection.REDEEM_VAULT -> RedeemCodeVaultModuleSection(
                 viewModel = viewModel,
-                users = successState?.users ?: emptyList()
+                redeemCodes = redeemCodes,
+                redeemClaims = redeemClaims
             )
-            IntegrationHubSection.DPDP_COMPLIANCE -> DpdpAccountDeletionAndExportSection(
+            IntegrationHubSection.UNIFIED_REQUESTS -> UnifiedRequestHubModuleSection(
                 viewModel = viewModel,
-                deletionRequests = deletionRequests,
-                exportRequests = exportRequests,
-                auditLogs = auditLogs,
-                users = successState?.users ?: emptyList()
+                unifiedRequests = unifiedRequests
             )
-            IntegrationHubSection.ADMIN_CHANNELS -> AdminTenChannelsInboxSection(
-                viewModel = viewModel,
-                selectedChannel = selectedChannel,
-                channelItems = channelItems,
-                supportTickets = successState?.supportTickets ?: emptyList(),
-                onJumpToSection = { activeSection = it }
-            )
-            IntegrationHubSection.SYSTEM_CONFIG -> SystemConfigAndBannersSection(
+            IntegrationHubSection.USERS_AND_CHAT -> {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(
+                            "USERS" to "Players & Sanctions",
+                            "CHAT" to if (pendingChatReportsCount > 0) "Lobby Chat & Reports ($pendingChatReportsCount)" else "Lobby Chat & Reports"
+                        ).forEach { (key, title) ->
+                            val sel = usersChatSubTab == key
+                            Box(
+                                modifier = Modifier
+                                    .background(if (sel) AccentBlue.copy(alpha = 0.16f) else Color(0xFF0A0A0D), RoundedCornerShape(10.dp))
+                                    .border(0.75.dp, if (sel) AccentBlue else HairlineBorder, RoundedCornerShape(10.dp))
+                                    .clickable { usersChatSubTab = key }
+                                    .padding(horizontal = 12.dp, vertical = 7.dp)
+                            ) {
+                                Text(
+                                    text = title,
+                                    color = if (sel) TextPrimaryWhite else TextSecondaryZinc,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
+                        }
+                    }
+                    HorizontalDivider(thickness = 0.5.dp, color = HairlineBorder)
+                    if (usersChatSubTab == "USERS") {
+                        UsersAndModerationModuleSection(
+                            viewModel = viewModel,
+                            users = successState?.users ?: emptyList()
+                        )
+                    } else {
+                        TournamentLobbyChatModeratorSection(
+                            viewModel = viewModel,
+                            tournaments = successState?.tournaments ?: emptyList(),
+                            initialTournamentId = tournamentForChat,
+                            chatReports = chatReports
+                        )
+                    }
+                }
+            }
+            IntegrationHubSection.BANNERS_BROADCASTS -> BannersAndBroadcastsModuleSection(
                 viewModel = viewModel,
                 systemConfig = systemConfig,
                 banners = successState?.banners ?: emptyList()
             )
-            IntegrationHubSection.TOKENS_MISSIONS -> TokensAndMissionsManagerSection(
-                viewModel = viewModel,
-                tokenConversions = tokenConversions,
-                missions = missions,
-                users = successState?.users ?: emptyList()
-            )
-            IntegrationHubSection.LOBBY_CHAT -> TournamentLobbyChatModeratorSection(
-                viewModel = viewModel,
-                tournaments = successState?.tournaments ?: emptyList(),
-                initialTournamentId = tournamentForChat
-            )
+            IntegrationHubSection.SYSTEM_CONFIG_DPDP -> {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(
+                            "CONFIG" to "Live Config (6 Flags)",
+                            "DPDP" to if (pendingDeletionsCount > 0) "DPDP Deletions ($pendingDeletionsCount)" else "DPDP Deletions",
+                            "MISSIONS" to "Tokens & Missions"
+                        ).forEach { (key, title) ->
+                            val sel = configDpdpSubTab == key
+                            Box(
+                                modifier = Modifier
+                                    .background(if (sel) AccentBlue.copy(alpha = 0.16f) else Color(0xFF0A0A0D), RoundedCornerShape(10.dp))
+                                    .border(0.75.dp, if (sel) AccentBlue else HairlineBorder, RoundedCornerShape(10.dp))
+                                    .clickable { configDpdpSubTab = key }
+                                    .padding(horizontal = 12.dp, vertical = 7.dp)
+                            ) {
+                                Text(
+                                    text = title,
+                                    color = if (sel) TextPrimaryWhite else TextSecondaryZinc,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
+                        }
+                    }
+                    HorizontalDivider(thickness = 0.5.dp, color = HairlineBorder)
+                    when (configDpdpSubTab) {
+                        "CONFIG" -> SystemConfigCleanSection(
+                            viewModel = viewModel,
+                            systemConfig = systemConfig
+                        )
+                        "DPDP" -> DpdpAccountDeletionAndExportSection(
+                            viewModel = viewModel,
+                            deletionRequests = deletionRequests,
+                            exportRequests = exportRequests,
+                            auditLogs = auditLogs,
+                            users = successState?.users ?: emptyList()
+                        )
+                        else -> TokensAndMissionsManagerSection(
+                            viewModel = viewModel,
+                            tokenConversions = tokenConversions,
+                            missions = missions,
+                            users = successState?.users ?: emptyList()
+                        )
+                    }
+                }
+            }
         }
     }
 
@@ -1363,15 +1471,6 @@ private fun UsersAndModerationModuleSection(
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold
                         )
-                        if (u.isFounder || u.founderTier.isNotBlank()) {
-                            Text(
-                                text = "👑 ${u.founderTier.ifBlank { "FOUNDER" }}",
-                                color = AccentAmber,
-                                fontSize = 9.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                fontFamily = FontFamily.Monospace
-                            )
-                        }
                     }
                     Text(
                         text = when {
@@ -1432,408 +1531,8 @@ private fun UsersAndModerationModuleSection(
     }
 }
 
-// ============================================================================
-// MODULE 5: SUPPORT TICKETS (/reports & /support_tickets), BROADCASTS & 10 CHANNELS
-// ============================================================================
-@Composable
-private fun AdminTenChannelsInboxSection(
-    viewModel: TournamentDashboardViewModel,
-    selectedChannel: AdminChannelType,
-    channelItems: List<AdminChannelItem>,
-    supportTickets: List<SupportTicket>,
-    onJumpToSection: (IntegrationHubSection) -> Unit
-) {
-    var statusFilter by remember { mutableStateOf("ALL") }
-    var broadcastTitle by remember { mutableStateOf("") }
-    var broadcastMessage by remember { mutableStateOf("") }
-    var replyMap by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+// Legacy 10-Channel Support Inbox removed — replaced by UnifiedRequestHubModuleSection (12-Channel Hub & My Tickets Desk) in AdminHubNewModules.kt
 
-    val filteredItems = remember(channelItems, statusFilter) {
-        if (statusFilter == "ALL") channelItems
-        else channelItems.filter { it.status.equals(statusFilter, ignoreCase = true) }
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
-        // 5A. Support Tickets & Problem Reports (/reports & /support_tickets)
-        Text(
-            text = "5A. SUPPORT TICKETS & PROBLEM REPORTS (/reports & /support_tickets)",
-            color = TextPrimaryWhite,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Bold
-        )
-        Text(
-            text = "Reply directly to user tickets & mark RESOLVED. Writes to /reports, /support_tickets, and /global_app_state.",
-            color = TextSecondaryZinc,
-            fontSize = 11.sp
-        )
-
-        if (supportTickets.isEmpty()) {
-            Text(
-                text = "No support tickets or problem reports in /reports or /support_tickets.",
-                color = TextSecondaryZinc,
-                fontSize = 11.sp
-            )
-        } else {
-            supportTickets.take(25).forEach { ticket ->
-                val currentReply = replyMap[ticket.id] ?: ticket.adminReply.ifBlank { ticket.adminNote }
-                val isResolved = ticket.status.equals("RESOLVED", true) || ticket.status.equals("CLOSED", true)
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 6.dp),
-                    verticalArrangement = Arrangement.spacedBy(5.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "${ticket.subject.ifBlank { ticket.tournamentTitle.ifBlank { "Support Ticket" } }} • ${ticket.username.ifBlank { ticket.userEmail }}",
-                            color = TextPrimaryWhite,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Text(
-                            text = ticket.status.uppercase(),
-                            color = if (isResolved) AccentGreen else AccentAmber,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
-                    Text(
-                        text = ticket.description,
-                        color = TextSecondaryZinc,
-                        fontSize = 11.sp
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        OutlinedTextField(
-                            value = currentReply,
-                            onValueChange = { replyMap = replyMap + (ticket.id to it) },
-                            label = { Text("Admin Reply", fontSize = 10.sp) },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
-                        )
-                        TextButton(
-                            onClick = {
-                                val updated = ticket.copy().apply {
-                                    status = "RESOLVED"
-                                    adminNote = currentReply.ifBlank { "Resolved by Admin" }
-                                    adminReply = currentReply.ifBlank { "Resolved by Admin" }
-                                    updatedAt = System.currentTimeMillis()
-                                }
-                                viewModel.saveComplaint(updated)
-                            }
-                        ) {
-                            Text("REPLY & RESOLVE", color = AccentGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-                HorizontalDivider(thickness = 0.5.dp, color = HairlineBorder)
-            }
-        }
-
-        // 5B. Global Broadcasts (/notifications/global & /global_announcements)
-        Text(
-            text = "5B. GLOBAL BROADCASTS (/notifications/global & /global_app_state)",
-            color = TextPrimaryWhite,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Bold
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            OutlinedTextField(
-                value = broadcastTitle,
-                onValueChange = { broadcastTitle = it },
-                label = { Text("Broadcast Title", fontSize = 10.sp) },
-                singleLine = true,
-                modifier = Modifier.weight(0.4f)
-            )
-            OutlinedTextField(
-                value = broadcastMessage,
-                onValueChange = { broadcastMessage = it },
-                label = { Text("Broadcast Message", fontSize = 10.sp) },
-                singleLine = true,
-                modifier = Modifier.weight(0.6f)
-            )
-            TextButton(
-                onClick = {
-                    if (broadcastTitle.isNotBlank() && broadcastMessage.isNotBlank()) {
-                        viewModel.sendGlobalBroadcastNotification(broadcastTitle.trim(), broadcastMessage.trim())
-                        broadcastTitle = ""
-                        broadcastMessage = ""
-                    }
-                }
-            ) {
-                Text("SEND", color = AccentBlue, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-            }
-        }
-
-        HorizontalDivider(thickness = 0.5.dp, color = HairlineBorder)
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "5C. DEDICATED ADMIN CHANNELS (10 INBOX FEEDS)",
-                    color = TextPrimaryWhite,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "/admin_channels/{channelType} • /admin_requests/{channelType}",
-                    color = TextSecondaryZinc,
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace
-                )
-            }
-            TextButton(
-                onClick = {
-                    viewModel.selectAdminChannel(AdminChannelType.ADMIN_SITUATION_TESTS)
-                    viewModel.pushTestSituationEvent("ADMIN_CHANNEL_DIAGNOSTIC")
-                }
-            ) {
-                Icon(Icons.Default.Bolt, contentDescription = null, tint = AccentAmber, modifier = Modifier.size(15.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("TEST #SITUATION", color = AccentAmber, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-            }
-        }
-
-        // 10 Channel Selector Pills
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            AdminChannelType.entries.forEach { ch ->
-                val isSelected = selectedChannel == ch
-                Box(
-                    modifier = Modifier
-                        .border(
-                            width = 0.5.dp,
-                            color = if (isSelected) TextPrimaryWhite else HairlineBorder,
-                            shape = RoundedCornerShape(4.dp)
-                        )
-                        .background(
-                            if (isSelected) TextPrimaryWhite.copy(alpha = 0.1f) else PureBlackBg,
-                            RoundedCornerShape(4.dp)
-                        )
-                        .clickable { viewModel.selectAdminChannel(ch) }
-                        .padding(horizontal = 10.dp, vertical = 7.dp)
-                ) {
-                    Column {
-                        Text(
-                            text = ch.hashtag,
-                            color = if (isSelected) TextPrimaryWhite else AccentBlue,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
-                        )
-                        Text(
-                            text = ch.title,
-                            color = TextSecondaryZinc,
-                            fontSize = 9.sp
-                        )
-                    }
-                }
-            }
-        }
-
-        HorizontalDivider(thickness = 0.5.dp, color = HairlineBorder)
-
-        // Active Channel Header + Deep Link Action
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "${selectedChannel.hashtag} — ${selectedChannel.title.uppercase()}",
-                    color = TextPrimaryWhite,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "${selectedChannel.description} (${filteredItems.size} items)",
-                    color = TextSecondaryZinc,
-                    fontSize = 11.sp
-                )
-            }
-            when (selectedChannel) {
-                AdminChannelType.ACCOUNT_DELETION, AdminChannelType.DATA_EXPORT -> {
-                    TextButton(onClick = { onJumpToSection(IntegrationHubSection.DPDP_COMPLIANCE) }) {
-                        Text("OPEN DPDP CONSOLE →", color = AccentBlue, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-                AdminChannelType.DEPOSIT_REQUESTS -> {
-                    TextButton(onClick = { onJumpToSection(IntegrationHubSection.DEPOSIT_QUEUE) }) {
-                        Text("OPEN UTR QUEUE →", color = AccentGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-                AdminChannelType.TOKEN_CONVERSIONS -> {
-                    TextButton(onClick = { onJumpToSection(IntegrationHubSection.TOKENS_MISSIONS) }) {
-                        Text("OPEN TOKEN LEDGER →", color = AccentAmber, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-                else -> {}
-            }
-        }
-
-        // Status Filter Row
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            listOf("ALL", "PENDING", "APPROVED", "COMPLETED", "REJECTED").forEach { st ->
-                val active = statusFilter == st
-                Text(
-                    text = st,
-                    color = if (active) TextPrimaryWhite else TextSecondaryZinc,
-                    fontSize = 11.sp,
-                    fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
-                    modifier = Modifier
-                        .clickable { statusFilter = st }
-                        .padding(vertical = 4.dp)
-                )
-            }
-        }
-
-        HorizontalDivider(thickness = 0.5.dp, color = HairlineBorder)
-
-        if (filteredItems.isEmpty()) {
-            Text(
-                text = "No requests in ${selectedChannel.hashtag} matching '$statusFilter'. Listening live on RTDB & Firestore...",
-                color = TextSecondaryZinc,
-                fontSize = 12.sp,
-                modifier = Modifier.padding(vertical = 24.dp)
-            )
-        } else {
-            filteredItems.forEach { item ->
-                AdminChannelItemRow(
-                    item = item,
-                    onUpdateStatus = { newStatus, note ->
-                        viewModel.updateAdminChannelItemStatus(
-                            channelType = selectedChannel.channelKey,
-                            itemId = item.id,
-                            status = newStatus,
-                            note = note
-                        )
-                    }
-                )
-                HorizontalDivider(thickness = 0.5.dp, color = HairlineBorder)
-            }
-        }
-    }
-}
-
-@Composable
-private fun AdminChannelItemRow(
-    item: AdminChannelItem,
-    onUpdateStatus: (String, String) -> Unit
-) {
-    val statusColor = when (item.status.uppercase()) {
-        "APPROVED", "COMPLETED", "RESOLVED", "VERIFIED" -> AccentGreen
-        "REJECTED", "RESTORED" -> AccentRed
-        else -> AccentAmber
-    }
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = item.title.ifBlank { "${item.channelType} #${item.id.take(8)}" },
-                color = TextPrimaryWhite,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.weight(1f)
-            )
-            Text(
-                text = item.status.uppercase(),
-                color = statusColor,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace
-            )
-        }
-
-        if (item.subtitle.isNotBlank()) {
-            Text(
-                text = item.subtitle,
-                color = TextSecondaryZinc,
-                fontSize = 12.sp
-            )
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "User: ${item.username.ifBlank { item.userId.ifBlank { "System" } }} • ID: ${item.id.take(12)}",
-                color = TextSecondaryZinc,
-                fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace
-            )
-            Text(
-                text = formatTimestampShort(item.createdAt),
-                color = TextSecondaryZinc,
-                fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace
-            )
-        }
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            AdminActionChip(
-                label = "Approve",
-                color = AccentGreen,
-                onClick = { onUpdateStatus("COMPLETED", "Approved via Admin Channel Inbox") }
-            )
-            AdminActionChip(
-                label = "Resolve",
-                color = AccentBlue,
-                onClick = { onUpdateStatus("RESOLVED", "Resolved by Admin") }
-            )
-            AdminActionChip(
-                label = "Reject",
-                color = AccentRed,
-                onClick = { onUpdateStatus("REJECTED", "Rejected by Admin") }
-            )
-        }
-    }
-}
 
 // ============================================================================
 // MODULE 4: ACCOUNT DELETION, DATA EXPORT ARCHIVE & AUDIT LOGS (DPDP ACT 2023)
@@ -2245,7 +1944,7 @@ private fun DataExportJsonArchiveModal(
 }
 
 // ============================================================================
-// MODULE 2: WALLET REQUESTS — DEPOSITS (/deposit_requests) & WITHDRAWALS (/withdraw_requests)
+// MODULE 2: WALLET REQUESTS — DELEGATES TO UPGRADED WALLET, PRE-VERIFY UTR & DUAL WITHDRAWAL DESK
 // ============================================================================
 @Composable
 fun DepositVerificationQueueSection(
@@ -2253,279 +1952,20 @@ fun DepositVerificationQueueSection(
     depositRequests: List<DepositRequest>,
     payoutRequests: List<PayoutRequest> = emptyList()
 ) {
-    val systemConfig by viewModel.systemConfig.collectAsStateWithLifecycle()
-    var dynamicUpiId by remember(systemConfig.upiId) { mutableStateOf(systemConfig.upiId) }
-    var dynamicMerchantName by remember(systemConfig.upiMerchantName) { mutableStateOf(systemConfig.upiMerchantName) }
-    var filterStatus by remember { mutableStateOf("ALL") }
-    val filteredDeposits = remember(depositRequests, filterStatus) {
-        if (filterStatus == "ALL") depositRequests
-        else depositRequests.filter { it.status.equals(filterStatus, ignoreCase = true) }
+    val unifiedWithdrawals by viewModel.unifiedWithdrawals.collectAsStateWithLifecycle()
+    val verifiedBankDeposits by viewModel.verifiedBankDeposits.collectAsStateWithLifecycle()
+    val mergedWithdrawals = remember(unifiedWithdrawals, payoutRequests) {
+        val byId = LinkedHashMap<String, PayoutRequest>()
+        unifiedWithdrawals.forEach { if (it.id.isNotBlank()) byId[it.id] = it }
+        payoutRequests.forEach { if (it.id.isNotBlank() && !byId.containsKey(it.id)) byId[it.id] = it }
+        byId.values.sortedByDescending { it.requestedAt }
     }
-    val filteredWithdrawals = remember(payoutRequests, filterStatus) {
-        val wList = payoutRequests.filter { !it.isDeposit }
-        if (filterStatus == "ALL") wList
-        else wList.filter { it.status.equals(filterStatus, ignoreCase = true) }
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        // Dynamic Merchant UPI ID Quick-Update Bar
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(Color(0xFF0A0A0D), RoundedCornerShape(8.dp))
-                .border(0.5.dp, HairlineBorder, RoundedCornerShape(8.dp))
-                .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Icon(Icons.Default.QrCode, contentDescription = null, tint = AccentAmber, modifier = Modifier.size(16.dp))
-                    Text(
-                        text = "Dynamic Merchant UPI",
-                        color = TextPrimaryWhite,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-                AdminActionChip(
-                    label = "Sync UPI",
-                    color = AccentGreen,
-                    icon = Icons.Default.Sync,
-                    onClick = {
-                        viewModel.saveSystemConfig(
-                            systemConfig.copy(
-                                upiId = dynamicUpiId.trim(),
-                                upiMerchantName = dynamicMerchantName.trim(),
-                                updatedAt = System.currentTimeMillis()
-                            )
-                        )
-                    }
-                )
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedTextField(
-                    value = dynamicUpiId,
-                    onValueChange = { dynamicUpiId = it },
-                    label = { Text("UPI ID (VPA)", fontSize = 10.sp) },
-                    singleLine = true,
-                    modifier = Modifier.weight(0.55f)
-                )
-                OutlinedTextField(
-                    value = dynamicMerchantName,
-                    onValueChange = { dynamicMerchantName = it },
-                    label = { Text("Payee Name", fontSize = 10.sp) },
-                    singleLine = true,
-                    modifier = Modifier.weight(0.45f)
-                )
-            }
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            listOf("ALL", "PENDING", "APPROVED", "COMPLETED", "REJECTED").forEach { st ->
-                val selected = filterStatus == st
-                Text(
-                    text = st,
-                    color = if (selected) TextPrimaryWhite else TextSecondaryZinc,
-                    fontSize = 11.sp,
-                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                    modifier = Modifier
-                        .clickable { filterStatus = st }
-                        .padding(vertical = 4.dp)
-                )
-            }
-        }
-
-        HorizontalDivider(thickness = 0.5.dp, color = HairlineBorder)
-
-        // 2A. Deposit Verification Queue
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Icon(Icons.Default.QrCodeScanner, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(18.dp))
-            Text(
-                text = "Deposits (${filteredDeposits.size})",
-                color = TextPrimaryWhite,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold
-            )
-        }
-
-        if (filteredDeposits.isEmpty()) {
-            Text(
-                text = "No deposit requests matching '$filterStatus'.",
-                color = TextSecondaryZinc,
-                fontSize = 12.sp,
-                modifier = Modifier.padding(vertical = 8.dp)
-            )
-        } else {
-            filteredDeposits.forEach { req ->
-                val stColor = when (req.status.uppercase()) {
-                    "APPROVED", "COMPLETED" -> AccentGreen
-                    "REJECTED" -> AccentRed
-                    else -> AccentAmber
-                }
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(5.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "₹${"%.2f".format(req.amount)} VT • ${req.username.ifBlank { req.userId }}",
-                            color = TextPrimaryWhite,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
-                        )
-                        Text(
-                            text = req.status.uppercase(),
-                            color = stColor,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
-                    Text(
-                        text = "${req.paymentMethod} • UTR: ${req.utrNumber.ifBlank { req.transactionId.ifBlank { "N/A" } }}",
-                        color = TextSecondaryZinc,
-                        fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace
-                    )
-                    if (req.status.equals("PENDING", ignoreCase = true)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            AdminActionChip(
-                                label = "Approve Deposit",
-                                color = AccentGreen,
-                                onClick = { viewModel.approveDepositRequest(req) },
-                                iconOnly = true
-                            )
-                            AdminActionChip(
-                                label = "Reject UTR",
-                                color = AccentRed,
-                                onClick = { viewModel.rejectDepositRequest(req, "Invalid or unverifiable UTR reference") },
-                                iconOnly = true
-                            )
-                        }
-                    }
-                }
-                HorizontalDivider(thickness = 0.5.dp, color = HairlineBorder)
-            }
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // 2B. Withdrawal Requests Queue
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Icon(Icons.Default.Payments, contentDescription = null, tint = AccentAmber, modifier = Modifier.size(18.dp))
-            Text(
-                text = "Withdrawals (${filteredWithdrawals.size})",
-                color = TextPrimaryWhite,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold
-            )
-        }
-
-        if (filteredWithdrawals.isEmpty()) {
-            Text(
-                text = "No withdrawal requests matching '$filterStatus'.",
-                color = TextSecondaryZinc,
-                fontSize = 12.sp,
-                modifier = Modifier.padding(vertical = 8.dp)
-            )
-        } else {
-            filteredWithdrawals.forEach { wReq ->
-                val stColor = when (wReq.status.uppercase()) {
-                    "APPROVED", "COMPLETED" -> AccentGreen
-                    "REJECTED" -> AccentRed
-                    else -> AccentAmber
-                }
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(5.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "₹${"%.2f".format(wReq.vtAmount)} • ${wReq.username.ifBlank { wReq.uid }}",
-                            color = TextPrimaryWhite,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
-                        )
-                        Text(
-                            text = wReq.status.uppercase(),
-                            color = stColor,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
-                    Text(
-                        text = "${wReq.paymentMethod} • ${wReq.paymentId}",
-                        color = TextSecondaryZinc,
-                        fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace
-                    )
-                    if (wReq.status.equals("PENDING", ignoreCase = true)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            AdminActionChip(
-                                label = "Approve Payout",
-                                color = AccentGreen,
-                                onClick = { viewModel.approvePayout(wReq) },
-                                iconOnly = true
-                            )
-                            AdminActionChip(
-                                label = "Reject & Refund",
-                                color = AccentRed,
-                                onClick = { viewModel.rejectPayout(wReq, "Invalid UPI details — Amount refunded to wallet") },
-                                iconOnly = true
-                            )
-                        }
-                    }
-                }
-                HorizontalDivider(thickness = 0.5.dp, color = HairlineBorder)
-            }
-        }
-    }
+    WalletUpiVoucherModuleSection(
+        viewModel = viewModel,
+        depositRequests = depositRequests,
+        withdrawals = mergedWithdrawals,
+        verifiedUtrs = verifiedBankDeposits
+    )
 }
 
 // ============================================================================
@@ -2820,13 +2260,12 @@ private fun TokensAndMissionsManagerSection(
 }
 
 // ============================================================================
-// SECTION 6: SYSTEM CONFIG (/system_config) & PROMOTIONAL BANNERS (/banners)
+// MODULE 7A: LIVE SYSTEM CONFIG (/system_config) — CLEAN 6 CORE FEATURE FLAGS ONLY
 // ============================================================================
 @Composable
-private fun SystemConfigAndBannersSection(
+private fun SystemConfigCleanSection(
     viewModel: TournamentDashboardViewModel,
-    systemConfig: SystemConfig,
-    banners: List<AppAnnouncementBanner>
+    systemConfig: SystemConfig
 ) {
     var maintenanceMode by remember(systemConfig) { mutableStateOf(systemConfig.maintenanceMode) }
     var maintenanceTitle by remember(systemConfig) { mutableStateOf(systemConfig.maintenanceTitle) }
@@ -2838,8 +2277,8 @@ private fun SystemConfigAndBannersSection(
     var latestVersionName by remember(systemConfig) { mutableStateOf(systemConfig.latestVersionName) }
     var updateDownloadUrl by remember(systemConfig) { mutableStateOf(systemConfig.updateDownloadUrl) }
     var updateChangelog by remember(systemConfig) { mutableStateOf(systemConfig.updateChangelog) }
-    var upiId by remember(systemConfig) { mutableStateOf(systemConfig.upiId) }
-    var upiMerchantName by remember(systemConfig) { mutableStateOf(systemConfig.upiMerchantName) }
+    var upiId by remember(systemConfig) { mutableStateOf(systemConfig.upiId.ifBlank { "veloxyra.anant@fam" }) }
+    var upiMerchantName by remember(systemConfig) { mutableStateOf(systemConfig.upiMerchantName.ifBlank { "VeloRix Esports" }) }
     var minDepositVt by remember(systemConfig) { mutableStateOf(systemConfig.minDepositVt.toString()) }
     var minWithdrawalVt by remember(systemConfig) { mutableStateOf(systemConfig.minWithdrawalVt.toString()) }
     var tokenConversionRate by remember(systemConfig) { mutableStateOf(systemConfig.tokenConversionRate.toString()) }
@@ -2849,36 +2288,19 @@ private fun SystemConfigAndBannersSection(
     var discordUrl by remember(systemConfig) { mutableStateOf(systemConfig.discordUrl) }
     var vpnBlockEnabled by remember(systemConfig) { mutableStateOf(systemConfig.vpnBlockEnabled) }
 
-    // OTA Live Config & Calendar Festival Override State
     var otaPatchVersion by remember(systemConfig) { mutableStateOf(systemConfig.otaPatchVersion.toString()) }
     var otaReleaseNotes by remember(systemConfig) { mutableStateOf(systemConfig.otaReleaseNotes) }
     var liveLobbyTicker by remember(systemConfig) { mutableStateOf(systemConfig.liveLobbyTicker) }
-    var activeFestivalOverride by remember(systemConfig) { mutableStateOf(systemConfig.activeFestivalOverride) }
-    var customFestivalTitle by remember(systemConfig) { mutableStateOf(systemConfig.customFestivalTitle) }
-    var customFestivalMessage by remember(systemConfig) { mutableStateOf(systemConfig.customFestivalMessage) }
-    var customAttractingTitle by remember(systemConfig) { mutableStateOf(systemConfig.customAttractingTitle) }
-    var customAttractingMessage by remember(systemConfig) { mutableStateOf(systemConfig.customAttractingMessage) }
-    var attractingAlertWeight by remember(systemConfig) { mutableStateOf(systemConfig.attractingAlertWeight.toString()) }
-    var timeContextualWeight by remember(systemConfig) { mutableStateOf(systemConfig.timeContextualWeight.toString()) }
-    var weeklyCalendarWeight by remember(systemConfig) { mutableStateOf(systemConfig.weeklyCalendarWeight.toString()) }
-    var featureFlagsMap by remember(systemConfig) {
-        mutableStateOf(
-            SystemConfig.defaultFeatureFlags().toMutableMap().apply {
-                putAll(systemConfig.featureFlags)
-            }.toMap()
-        )
-    }
 
-    // Promotional Banner Creator State
-    var bannerTitle by remember { mutableStateOf("") }
-    var bannerSubtitle by remember { mutableStateOf("") }
-    var bannerBadgeText by remember { mutableStateOf("OFFICIAL") }
-    var bannerCtaText by remember { mutableStateOf("JOIN NOW") }
-    var bannerActionType by remember { mutableStateOf("TOURNAMENT") }
-    var bannerGradientTheme by remember { mutableStateOf("INDIGO_VIOLET") }
-    var bannerImageUrl by remember { mutableStateOf("") }
-    var bannerActionUrl by remember { mutableStateOf("") }
-    var bannerPriority by remember { mutableStateOf("1") }
+    // Strictly the 6 Active Core Feature Flags
+    var featureFlagsMap by remember(systemConfig) {
+        val activeKeys = SystemConfig.ALL_FEATURE_FLAG_METADATA.map { it.first }.toSet()
+        val defaults = SystemConfig.defaultFeatureFlags().toMutableMap()
+        systemConfig.featureFlags.forEach { (k, v) ->
+            if (k in activeKeys) defaults[k] = v
+        }
+        mutableStateOf(defaults.toMap())
+    }
 
     fun publishLiveConfigNow() {
         viewModel.saveSystemConfig(
@@ -2893,8 +2315,8 @@ private fun SystemConfigAndBannersSection(
                 latestVersionName = latestVersionName.trim(),
                 updateDownloadUrl = updateDownloadUrl.trim(),
                 updateChangelog = updateChangelog.trim(),
-                upiId = upiId.trim(),
-                upiMerchantName = upiMerchantName.trim(),
+                upiId = upiId.trim().ifBlank { "veloxyra.anant@fam" },
+                upiMerchantName = upiMerchantName.trim().ifBlank { "VeloRix Esports" },
                 minDepositVt = minDepositVt.toDoubleOrNull() ?: 10.0,
                 minWithdrawalVt = minWithdrawalVt.toDoubleOrNull() ?: 50.0,
                 tokenConversionRate = tokenConversionRate.toIntOrNull() ?: 10,
@@ -2906,14 +2328,6 @@ private fun SystemConfigAndBannersSection(
                 otaPatchVersion = (otaPatchVersion.toIntOrNull() ?: 1).coerceAtLeast(1),
                 otaReleaseNotes = otaReleaseNotes.trim(),
                 liveLobbyTicker = liveLobbyTicker.trim(),
-                activeFestivalOverride = activeFestivalOverride,
-                customFestivalTitle = customFestivalTitle.trim(),
-                customFestivalMessage = customFestivalMessage.trim(),
-                customAttractingTitle = customAttractingTitle.trim(),
-                customAttractingMessage = customAttractingMessage.trim(),
-                attractingAlertWeight = (attractingAlertWeight.toIntOrNull() ?: 65).coerceIn(0, 100),
-                timeContextualWeight = (timeContextualWeight.toIntOrNull() ?: 20).coerceIn(0, 100),
-                weeklyCalendarWeight = (weeklyCalendarWeight.toIntOrNull() ?: 15).coerceIn(0, 100),
                 featureFlags = featureFlagsMap,
                 updatedAt = System.currentTimeMillis()
             )
@@ -2938,14 +2352,14 @@ private fun SystemConfigAndBannersSection(
             ) {
                 Icon(Icons.Default.Tune, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(18.dp))
                 Text(
-                    text = "OTA Live Config & 14 Flags",
+                    text = "Live System Config",
                     color = TextPrimaryWhite,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold
                 )
             }
             AdminActionChip(
-                label = "Publish OTA v$otaPatchVersion",
+                label = "Publish Config",
                 color = AccentGreen,
                 icon = Icons.Default.CloudUpload,
                 onClick = { publishLiveConfigNow() }
@@ -2954,7 +2368,7 @@ private fun SystemConfigAndBannersSection(
 
         HorizontalDivider(thickness = 0.5.dp, color = HairlineBorder)
 
-        // 1. OTA Patch Version + +1 Bump & Release Notes + Live Lobby Ticker
+        // 1. Live Lobby Ticker & Config Version
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -2963,13 +2377,13 @@ private fun SystemConfigAndBannersSection(
             OutlinedTextField(
                 value = otaPatchVersion,
                 onValueChange = { otaPatchVersion = it },
-                label = { Text("OTA Patch #", fontSize = 10.sp) },
+                label = { Text("Config Rev #", fontSize = 10.sp) },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 modifier = Modifier.width(105.dp)
             )
             AdminActionChip(
-                label = "+1 Bump",
+                label = "+1 Rev",
                 color = AccentAmber,
                 icon = Icons.Default.Add,
                 onClick = {
@@ -2980,7 +2394,7 @@ private fun SystemConfigAndBannersSection(
             OutlinedTextField(
                 value = otaReleaseNotes,
                 onValueChange = { otaReleaseNotes = it },
-                label = { Text("OTA Release Notes", fontSize = 10.sp) },
+                label = { Text("Release Notes", fontSize = 10.sp) },
                 singleLine = true,
                 modifier = Modifier.weight(1f)
             )
@@ -2989,131 +2403,15 @@ private fun SystemConfigAndBannersSection(
         OutlinedTextField(
             value = liveLobbyTicker,
             onValueChange = { liveLobbyTicker = it },
-            label = { Text("Live Lobby Ticker Banner Text (e.g. MEGA BERMUDA GRAND FINALS AT 9 PM!)", fontSize = 10.sp) },
+            label = { Text("Live Lobby Ticker Banner Text", fontSize = 10.sp) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
         )
 
         HorizontalDivider(thickness = 0.5.dp, color = HairlineBorder)
 
-        // 2. Calendar Festival Theme & Alert Override (21+ Festivals + AUTO + CUSTOM)
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Icon(Icons.Default.Celebration, contentDescription = null, tint = AccentAmber, modifier = Modifier.size(16.dp))
-            Text(
-                text = "Calendar Festival Theme Override: $activeFestivalOverride",
-                color = TextPrimaryWhite,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold
-            )
-        }
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            SystemConfig.ALL_FESTIVAL_OPTIONS.forEach { (key, label) ->
-                val selected = activeFestivalOverride.equals(key, ignoreCase = true)
-                Box(
-                    modifier = Modifier
-                        .background(
-                            if (selected) AccentAmber.copy(alpha = 0.16f) else Color(0xFF0A0A0D),
-                            RoundedCornerShape(6.dp)
-                        )
-                        .border(
-                            0.5.dp,
-                            if (selected) AccentAmber else HairlineBorder,
-                            RoundedCornerShape(6.dp)
-                        )
-                        .clickable { activeFestivalOverride = key }
-                        .padding(horizontal = 9.dp, vertical = 6.dp)
-                ) {
-                    Text(
-                        text = if (key == "AUTO") "AUTO (Calendar)" else key.replace("_", " "),
-                        color = if (selected) AccentAmber else TextSecondaryZinc,
-                        fontSize = 10.sp,
-                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                        maxLines = 1
-                    )
-                }
-            }
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            OutlinedTextField(
-                value = customFestivalTitle,
-                onValueChange = { customFestivalTitle = it },
-                label = { Text("Custom Festival Title", fontSize = 10.sp) },
-                singleLine = true,
-                modifier = Modifier.weight(0.45f)
-            )
-            OutlinedTextField(
-                value = customFestivalMessage,
-                onValueChange = { customFestivalMessage = it },
-                label = { Text("Custom Festival Alert Message", fontSize = 10.sp) },
-                singleLine = true,
-                modifier = Modifier.weight(0.55f)
-            )
-        }
-
-        // 3. Attracting Esports Alert Customizer & Probability Weights (65 / 20 / 15)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            OutlinedTextField(
-                value = customAttractingTitle,
-                onValueChange = { customAttractingTitle = it },
-                label = { Text("Attracting Alert Title", fontSize = 10.sp) },
-                singleLine = true,
-                modifier = Modifier.weight(0.45f)
-            )
-            OutlinedTextField(
-                value = customAttractingMessage,
-                onValueChange = { customAttractingMessage = it },
-                label = { Text("Attracting Alert Message", fontSize = 10.sp) },
-                singleLine = true,
-                modifier = Modifier.weight(0.55f)
-            )
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            OutlinedTextField(
-                value = attractingAlertWeight,
-                onValueChange = { attractingAlertWeight = it },
-                label = { Text("Attracting % (65)", fontSize = 10.sp) },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.weight(1f)
-            )
-            OutlinedTextField(
-                value = timeContextualWeight,
-                onValueChange = { timeContextualWeight = it },
-                label = { Text("Time-of-Day % (20)", fontSize = 10.sp) },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.weight(1f)
-            )
-            OutlinedTextField(
-                value = weeklyCalendarWeight,
-                onValueChange = { weeklyCalendarWeight = it },
-                label = { Text("Weekly % (15)", fontSize = 10.sp) },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.weight(1f)
-            )
-        }
-
-        HorizontalDivider(thickness = 0.5.dp, color = HairlineBorder)
-
-        // 4. All 14 Dynamic Feature Flag Switches
+        // 2. Strictly 6 Active Core Feature Flags
+        val activeFlagsCount = SystemConfig.ALL_FEATURE_FLAG_METADATA.size
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -3125,18 +2423,16 @@ private fun SystemConfigAndBannersSection(
             ) {
                 Icon(Icons.Default.ToggleOn, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(18.dp))
                 Text(
-                    text = "14 Dynamic Feature Flags (${featureFlagsMap.count { it.value }}/14 ON)",
+                    text = "Core Feature Flags (${featureFlagsMap.count { it.value }}/$activeFlagsCount ON)",
                     color = TextPrimaryWhite,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold
                 )
             }
             AdminActionChip(
-                label = "Enable All 14",
+                label = "Enable All $activeFlagsCount",
                 color = AccentBlue,
-                onClick = {
-                    featureFlagsMap = SystemConfig.defaultFeatureFlags()
-                }
+                onClick = { featureFlagsMap = SystemConfig.defaultFeatureFlags() }
             )
         }
 
@@ -3150,18 +2446,18 @@ private fun SystemConfigAndBannersSection(
                     Row(
                         modifier = Modifier
                             .weight(1f)
-                            .background(Color(0xFF0A0A0D), RoundedCornerShape(6.dp))
+                            .background(Color(0xFF0A0A0D), RoundedCornerShape(8.dp))
                             .border(
                                 0.5.dp,
                                 if (enabled) AccentGreen.copy(alpha = 0.45f) else HairlineBorder,
-                                RoundedCornerShape(6.dp)
+                                RoundedCornerShape(8.dp)
                             )
                             .clickable {
                                 featureFlagsMap = featureFlagsMap.toMutableMap().apply {
                                     put(flagKey, !enabled)
                                 }
                             }
-                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                            .padding(horizontal = 10.dp, vertical = 9.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -3190,12 +2486,15 @@ private fun SystemConfigAndBannersSection(
                         )
                     }
                 }
+                if (pair.size == 1) {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
             }
         }
 
         HorizontalDivider(thickness = 0.5.dp, color = HairlineBorder)
 
-        // 5. System Situation Controls: Clean 2-Column Non-Overlapping Toggle Grid
+        // 3. System Controls: Clean 2-Column Non-Overlapping Toggle Grid
         val systemToggles = listOf(
             Triple("Maintenance Mode", maintenanceMode, AccentAmber) to { v: Boolean -> maintenanceMode = v },
             Triple("Force APK Update", forceUpdateRequired, AccentRed) to { v: Boolean -> forceUpdateRequired = v },
@@ -3344,7 +2643,7 @@ private fun SystemConfigAndBannersSection(
             OutlinedTextField(
                 value = tokenConversionRate,
                 onValueChange = { tokenConversionRate = it },
-                label = { Text("Tokens per 1 VT", fontSize = 11.sp) },
+                label = { Text("Tokens / 1 VT", fontSize = 11.sp) },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 modifier = Modifier.weight(1f)
@@ -3391,199 +2690,31 @@ private fun SystemConfigAndBannersSection(
                 modifier = Modifier.weight(1f)
             )
         }
-
-        HorizontalDivider(thickness = 0.5.dp, color = HairlineBorder)
-
-        // 6B. Promotional Banners (/banners/{bannerId}) with Badge, CTA, ActionType & GradientTheme
-        Text(
-            text = "Promotional Home Banners (/banners/{bannerId})",
-            color = TextPrimaryWhite,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Bold
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            OutlinedTextField(
-                value = bannerTitle,
-                onValueChange = { bannerTitle = it },
-                label = { Text("Banner Title", fontSize = 10.sp) },
-                singleLine = true,
-                modifier = Modifier.weight(1f)
-            )
-            OutlinedTextField(
-                value = bannerSubtitle,
-                onValueChange = { bannerSubtitle = it },
-                label = { Text("Subtitle", fontSize = 10.sp) },
-                singleLine = true,
-                modifier = Modifier.weight(1f)
-            )
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            OutlinedTextField(
-                value = bannerBadgeText,
-                onValueChange = { bannerBadgeText = it },
-                label = { Text("Badge (HOT / LIVE)", fontSize = 10.sp) },
-                singleLine = true,
-                modifier = Modifier.weight(1f)
-            )
-            OutlinedTextField(
-                value = bannerCtaText,
-                onValueChange = { bannerCtaText = it },
-                label = { Text("CTA Text", fontSize = 10.sp) },
-                singleLine = true,
-                modifier = Modifier.weight(1f)
-            )
-            OutlinedTextField(
-                value = bannerActionType,
-                onValueChange = { bannerActionType = it },
-                label = { Text("Action (TOURNAMENT/WALLET)", fontSize = 10.sp) },
-                singleLine = true,
-                modifier = Modifier.weight(1f)
-            )
-        }
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            listOf("INDIGO_VIOLET", "AMBER_GOLD", "EMERALD_CYBER", "CRIMSON_FIRE").forEach { theme ->
-                val sel = bannerGradientTheme == theme
-                Box(
-                    modifier = Modifier
-                        .background(if (sel) AccentBlue.copy(alpha = 0.16f) else Color(0xFF0A0A0D), RoundedCornerShape(6.dp))
-                        .border(0.5.dp, if (sel) AccentBlue else HairlineBorder, RoundedCornerShape(6.dp))
-                        .clickable { bannerGradientTheme = theme }
-                        .padding(horizontal = 9.dp, vertical = 5.dp)
-                ) {
-                    Text(
-                        text = theme,
-                        color = if (sel) AccentBlue else TextSecondaryZinc,
-                        fontSize = 10.sp,
-                        fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal
-                    )
-                }
-            }
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            OutlinedTextField(
-                value = bannerImageUrl,
-                onValueChange = { bannerImageUrl = it },
-                label = { Text("Banner Image URL (https://...)", fontSize = 10.sp) },
-                singleLine = true,
-                modifier = Modifier.weight(1f)
-            )
-            OutlinedTextField(
-                value = bannerActionUrl,
-                onValueChange = { bannerActionUrl = it },
-                label = { Text("Target ID / Deep Link", fontSize = 10.sp) },
-                singleLine = true,
-                modifier = Modifier.weight(0.8f)
-            )
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            OutlinedTextField(
-                value = bannerPriority,
-                onValueChange = { bannerPriority = it },
-                label = { Text("Order", fontSize = 10.sp) },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.width(90.dp)
-            )
-            AdminActionChip(
-                label = "Publish Banner",
-                color = AccentBlue,
-                icon = Icons.Default.Add,
-                onClick = {
-                    if (bannerTitle.isNotBlank()) {
-                        viewModel.savePromotionalBanner(
-                            AppAnnouncementBanner(
-                                id = "banner_${System.currentTimeMillis()}",
-                                title = bannerTitle.trim(),
-                                subtitle = bannerSubtitle.trim(),
-                                message = bannerSubtitle.trim(),
-                                badgeText = bannerBadgeText.trim().ifBlank { "OFFICIAL" },
-                                ctaText = bannerCtaText.trim().ifBlank { "JOIN NOW" },
-                                actionType = bannerActionType.trim().ifBlank { "TOURNAMENT" },
-                                targetId = bannerActionUrl.trim(),
-                                gradientTheme = bannerGradientTheme,
-                                imageUrl = bannerImageUrl.trim(),
-                                actionUrl = bannerActionUrl.trim(),
-                                targetUrl = bannerActionUrl.trim(),
-                                isActive = true,
-                                priority = bannerPriority.toIntOrNull() ?: 1
-                            )
-                        )
-                        bannerTitle = ""
-                        bannerSubtitle = ""
-                        bannerImageUrl = ""
-                        bannerActionUrl = ""
-                    }
-                }
-            )
-        }
-
-        banners.forEach { b ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 6.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "[${b.badgeText.ifBlank { "OFFICIAL" }}] ${b.title} • ${b.gradientTheme.ifBlank { "INDIGO_VIOLET" }} (#${b.priority})",
-                        color = TextPrimaryWhite,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        text = "${b.subtitle.ifBlank { b.message }} • CTA: ${b.ctaText.ifBlank { "JOIN NOW" }} (${b.actionType})",
-                        color = TextSecondaryZinc,
-                        fontSize = 11.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                AdminActionChip(
-                    label = "Delete",
-                    color = AccentRed,
-                    onClick = { viewModel.deletePromotionalBanner(b.id) },
-                    iconOnly = true
-                )
-            }
-            HorizontalDivider(thickness = 0.5.dp, color = HairlineBorder)
-        }
     }
 }
 
 // ============================================================================
-// SECTION 4D: TOURNAMENT LOBBY CHAT & ADMIN MODERATION
+// MODULE 5B: TOURNAMENT LOBBY CHAT MODERATION & CHAT REPORTS QUEUE
 // ============================================================================
 @Composable
 fun TournamentLobbyChatModeratorSection(
     viewModel: TournamentDashboardViewModel,
     tournaments: List<Tournament>,
-    initialTournamentId: String? = null
+    initialTournamentId: String? = null,
+    chatReports: List<ChatReportItem>? = null
 ) {
     var selectedTournamentId by remember(tournaments, initialTournamentId) {
         mutableStateOf(initialTournamentId ?: tournaments.firstOrNull()?.id ?: "")
     }
     var messageInput by remember { mutableStateOf("") }
     var pinNewMessage by remember { mutableStateOf(false) }
+    var chatViewMode by remember { mutableStateOf("FEED") } // FEED | REPORTS
+
+    val liveReports by viewModel.chatReports.collectAsStateWithLifecycle()
+    val effectiveReports = chatReports ?: liveReports
+    val pendingReportsCount = remember(effectiveReports) {
+        effectiveReports.count { !it.status.equals("RESOLVED", true) }
+    }
 
     val chatFlow = remember(selectedTournamentId) {
         if (selectedTournamentId.isNotBlank()) {
@@ -3596,23 +2727,78 @@ fun TournamentLobbyChatModeratorSection(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(PureBlackBg)
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Text(
-            text = "LIVE TOURNAMENT LOBBY CHAT MODERATION",
-            color = TextPrimaryWhite,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Bold
-        )
-        Text(
-            text = "/tournament_chats/{tournamentId} & /tournaments/{tournamentId}/chat (RTDB & Firestore)",
-            color = TextSecondaryZinc,
-            fontSize = 11.sp,
-            fontFamily = FontFamily.Monospace
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Lobby Chat & Reports Moderation",
+                    color = TextPrimaryWhite,
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "/tournaments/{id}/chat_messages • /chat_reports",
+                    color = TextSecondaryZinc,
+                    fontSize = 10.5.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+        }
 
-        if (tournaments.isEmpty()) {
+        // Toggle between Live Feed and Reported Messages Queue
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            listOf(
+                "FEED" to "Live Lobby Chat (${messages.size})",
+                "REPORTS" to if (pendingReportsCount > 0) "Chat Reports ($pendingReportsCount Pending)" else "Chat Reports (${effectiveReports.size})"
+            ).forEach { (key, label) ->
+                val sel = chatViewMode == key
+                val tint = if (key == "REPORTS" && pendingReportsCount > 0) AccentRed else AccentBlue
+                Box(
+                    modifier = Modifier
+                        .background(if (sel) tint.copy(alpha = 0.16f) else Color(0xFF0A0A0D), RoundedCornerShape(10.dp))
+                        .border(0.75.dp, if (sel) tint else HairlineBorder, RoundedCornerShape(10.dp))
+                        .clickable { chatViewMode = key }
+                        .padding(horizontal = 12.dp, vertical = 7.dp)
+                ) {
+                    Text(
+                        text = label,
+                        color = if (sel) TextPrimaryWhite else TextSecondaryZinc,
+                        fontSize = 11.sp,
+                        fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
+            }
+        }
+
+        HorizontalDivider(thickness = 0.5.dp, color = HairlineBorder)
+
+        if (chatViewMode == "REPORTS") {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+            ) {
+                ChatReportsQueueBlock(
+                    viewModel = viewModel,
+                    chatReports = effectiveReports
+                )
+            }
+        } else if (tournaments.isEmpty()) {
             Text(
                 text = "No tournaments available. Create a tournament first to moderate its lobby chat.",
                 color = TextSecondaryZinc,
@@ -3632,12 +2818,12 @@ fun TournamentLobbyChatModeratorSection(
                         modifier = Modifier
                             .border(
                                 0.5.dp,
-                                if (isSelected) TextPrimaryWhite else HairlineBorder,
-                                RoundedCornerShape(4.dp)
+                                if (isSelected) AccentBlue else HairlineBorder,
+                                RoundedCornerShape(8.dp)
                             )
                             .background(
-                                if (isSelected) TextPrimaryWhite.copy(alpha = 0.12f) else PureBlackBg,
-                                RoundedCornerShape(4.dp)
+                                if (isSelected) AccentBlue.copy(alpha = 0.14f) else Color(0xFF0A0A0D),
+                                RoundedCornerShape(8.dp)
                             )
                             .clickable { selectedTournamentId = t.id }
                             .padding(horizontal = 10.dp, vertical = 6.dp)
@@ -3646,7 +2832,9 @@ fun TournamentLobbyChatModeratorSection(
                             text = "${t.title} (${t.status})",
                             color = if (isSelected) TextPrimaryWhite else TextSecondaryZinc,
                             fontSize = 11.sp,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                            maxLines = 1,
+                            softWrap = false
                         )
                     }
                 }
@@ -3664,7 +2852,7 @@ fun TournamentLobbyChatModeratorSection(
             ) {
                 if (messages.isEmpty()) {
                     Text(
-                        text = "No lobby messages yet for this tournament. Send an official admin announcement below.",
+                        text = "No lobby messages yet for this tournament. Send an official VeloRix Admin announcement below.",
                         color = TextSecondaryZinc,
                         fontSize = 12.sp,
                         modifier = Modifier.padding(vertical = 16.dp)
@@ -3675,7 +2863,7 @@ fun TournamentLobbyChatModeratorSection(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(vertical = 4.dp),
-                            verticalArrangement = Arrangement.spacedBy(3.dp)
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -3684,31 +2872,43 @@ fun TournamentLobbyChatModeratorSection(
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier.weight(1f)
                                 ) {
                                     if (msg.isPinned) {
                                         Text(
-                                            text = "📌 PINNED",
+                                            text = "PINNED",
                                             color = AccentAmber,
-                                            fontSize = 10.sp,
+                                            fontSize = 9.5.sp,
                                             fontWeight = FontWeight.Bold,
                                             fontFamily = FontFamily.Monospace
                                         )
                                     }
-                                    if (msg.isAdmin) {
+                                    if (msg.isAdmin || msg.isSystemMessage) {
                                         Text(
-                                            text = "[OFFICIAL ADMIN]",
+                                            text = "[ADMIN]",
                                             color = AccentGreen,
-                                            fontSize = 10.sp,
+                                            fontSize = 9.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                    }
+                                    if (msg.isDeleted) {
+                                        Text(
+                                            text = "[REMOVED]",
+                                            color = AccentRed,
+                                            fontSize = 9.5.sp,
                                             fontWeight = FontWeight.Bold,
                                             fontFamily = FontFamily.Monospace
                                         )
                                     }
                                     Text(
                                         text = msg.senderName,
-                                        color = if (msg.isAdmin) AccentGreen else TextPrimaryWhite,
+                                        color = if (msg.isAdmin || msg.isSystemMessage) AccentGreen else TextPrimaryWhite,
                                         fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
                                 Text(
@@ -3719,31 +2919,36 @@ fun TournamentLobbyChatModeratorSection(
                                 )
                             }
                             Text(
-                                text = msg.message,
-                                color = TextPrimaryWhite,
+                                text = msg.displayText,
+                                color = if (msg.isDeleted) TextSecondaryZinc else TextPrimaryWhite,
                                 fontSize = 12.sp
                             )
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                AdminActionChip(
-                                    label = if (msg.isPinned) "Unpin" else "Pin",
-                                    color = AccentAmber,
-                                    onClick = {
-                                        viewModel.togglePinTournamentChat(
-                                            selectedTournamentId,
-                                            msg.id,
-                                            !msg.isPinned
-                                        )
-                                    }
-                                )
-                                AdminActionChip(
-                                    label = "Delete",
-                                    color = AccentRed,
-                                    onClick = {
-                                        viewModel.deleteTournamentChat(selectedTournamentId, msg.id)
-                                    }
-                                )
+                            if (!msg.isDeleted) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    AdminActionChip(
+                                        label = if (msg.isPinned) "Unpin" else "Pin",
+                                        color = AccentAmber,
+                                        onClick = {
+                                            viewModel.togglePinTournamentChat(
+                                                selectedTournamentId,
+                                                msg.id,
+                                                !msg.isPinned
+                                            )
+                                        }
+                                    )
+                                    AdminActionChip(
+                                        label = "Soft Delete",
+                                        color = AccentRed,
+                                        onClick = {
+                                            viewModel.deleteTournamentChat(selectedTournamentId, msg.id)
+                                        }
+                                    )
+                                }
                             }
                         }
                         HorizontalDivider(thickness = 0.5.dp, color = HairlineBorder)
@@ -3765,11 +2970,11 @@ fun TournamentLobbyChatModeratorSection(
                 OutlinedTextField(
                     value = messageInput,
                     onValueChange = { messageInput = it },
-                    label = { Text("Post Official Admin Lobby Message...", fontSize = 11.sp) },
+                    label = { Text("Post Official VeloRix Admin Announcement...", fontSize = 11.sp) },
                     singleLine = true,
                     modifier = Modifier.weight(1f),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = TextPrimaryWhite,
+                        focusedBorderColor = AccentBlue,
                         unfocusedBorderColor = HairlineBorder,
                         focusedTextColor = TextPrimaryWhite,
                         unfocusedTextColor = TextPrimaryWhite

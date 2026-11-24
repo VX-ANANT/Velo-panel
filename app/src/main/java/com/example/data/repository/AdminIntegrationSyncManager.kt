@@ -420,6 +420,17 @@ class AdminIntegrationSyncManager(
             try { firestore.collection("account_deletion_requests").document(req.requestId).set(statusUpdates, SetOptions.merge()).await() } catch (_: Exception) {}
             try { firestore.collection("admin_channels").document("account_deletion_requests").collection("items").document(req.requestId).set(statusUpdates, SetOptions.merge()).await() } catch (_: Exception) {}
 
+            // Sync linked ticket across My Tickets desk
+            syncLinkedTicketAcrossAllPaths(
+                ticketId = req.requestId,
+                userId = uid,
+                status = "RESOLVED",
+                adminReply = "Your DPDP Account Deletion request has been approved and your account data has been permanently purged.",
+                deliveredRedeemCode = "",
+                adminEmail = adminEmail,
+                now = now
+            )
+
             writeAuditLog(
                 action = "DPDP_ACCOUNT_PURGED",
                 detail = "Permanently purged user ${req.username} ($uid) per DPDP request #${req.requestId}",
@@ -467,6 +478,16 @@ class AdminIntegrationSyncManager(
             try { database.child("admin_channels").child("account_deletion_requests").child(req.requestId).updateChildren(reqUpdates).await() } catch (_: Exception) {}
             try { firestore.collection("account_deletion_requests").document(req.requestId).set(reqUpdates, SetOptions.merge()).await() } catch (_: Exception) {}
             try { firestore.collection("admin_channels").document("account_deletion_requests").collection("items").document(req.requestId).set(reqUpdates, SetOptions.merge()).await() } catch (_: Exception) {}
+
+            syncLinkedTicketAcrossAllPaths(
+                ticketId = req.requestId,
+                userId = uid,
+                status = "REJECTED",
+                adminReply = "Your account deletion request was cancelled/restored by Admin. Your account is ACTIVE.",
+                deliveredRedeemCode = "",
+                adminEmail = adminEmail,
+                now = now
+            )
 
             if (uid.isNotBlank()) {
                 sendTargetedUserNotification(
@@ -807,7 +828,7 @@ class AdminIntegrationSyncManager(
     }
 
     // =========================================================================
-    // SECTION 4D: TOURNAMENT LOBBY CHAT & ADMIN MODERATION
+    // SECTION 4D: TOURNAMENT LOBBY CHAT & ADMIN MODERATION (/tournaments/{id}/chat_messages)
     // =========================================================================
 
     fun getTournamentChatStream(tournamentId: String): Flow<List<TournamentChatMessage>> = callbackFlow {
@@ -829,34 +850,66 @@ class AdminIntegrationSyncManager(
         fun parseSnap(snap: DataSnapshot): TournamentChatMessage? {
             if (!snap.exists()) return null
             val id = snap.child("id").value?.toString() ?: snap.key ?: return null
-            val msg = snap.child("message").value?.toString() ?: snap.child("text").value?.toString() ?: ""
+            val msg = snap.child("text").value?.toString()
+                ?: snap.child("message").value?.toString() ?: ""
             if (id.isBlank() || msg.isBlank()) return null
+            val role = snap.child("senderRole").value?.toString() ?: "PLAYER"
+            val isSys = safeBool(snap.child("isSystemMessage").value)
+            val isAdm = safeBool(snap.child("isAdmin").value) || role.equals("ADMIN", true) || isSys
             return TournamentChatMessage(
                 id = id,
                 tournamentId = snap.child("tournamentId").value?.toString() ?: tournamentId,
                 senderId = snap.child("senderId").value?.toString() ?: snap.child("userId").value?.toString() ?: "",
                 senderName = snap.child("senderName").value?.toString() ?: snap.child("username").value?.toString() ?: "Player",
                 senderAvatar = snap.child("senderAvatar").value?.toString() ?: snap.child("avatarUrl").value?.toString() ?: "avatar_1",
-                senderRole = snap.child("senderRole").value?.toString() ?: "PLAYER",
+                senderRole = role,
                 message = msg,
-                isAdmin = safeBool(snap.child("isAdmin").value) || snap.child("senderRole").value?.toString()?.equals("ADMIN", true) == true,
+                text = msg,
+                isAdmin = isAdm,
+                isSystemMessage = isSys,
+                messageType = snap.child("messageType").value?.toString() ?: if (isAdm) "ANNOUNCEMENT" else "TEXT",
+                channel = snap.child("channel").value?.toString() ?: "ALL",
+                isDeleted = safeBool(snap.child("isDeleted").value),
                 isPinned = safeBool(snap.child("isPinned").value),
                 timestamp = safeLong(snap.child("timestamp").value ?: snap.child("createdAt").value, System.currentTimeMillis())
             )
         }
 
+        fun parseDoc(doc: DocumentSnapshot): TournamentChatMessage? {
+            if (!doc.exists()) return null
+            val msg = doc.getString("text") ?: doc.getString("message") ?: ""
+            if (msg.isBlank()) return null
+            val role = doc.getString("senderRole") ?: "PLAYER"
+            val isSys = doc.getBoolean("isSystemMessage") ?: false
+            val isAdm = (doc.getBoolean("isAdmin") ?: false) || role.equals("ADMIN", true) || isSys
+            return TournamentChatMessage(
+                id = doc.id,
+                tournamentId = tournamentId,
+                senderId = doc.getString("senderId") ?: doc.getString("userId") ?: "",
+                senderName = doc.getString("senderName") ?: doc.getString("username") ?: "Player",
+                senderAvatar = doc.getString("senderAvatar") ?: "avatar_1",
+                senderRole = role,
+                message = msg,
+                text = msg,
+                isAdmin = isAdm,
+                isSystemMessage = isSys,
+                messageType = doc.getString("messageType") ?: if (isAdm) "ANNOUNCEMENT" else "TEXT",
+                channel = doc.getString("channel") ?: "ALL",
+                isDeleted = doc.getBoolean("isDeleted") ?: false,
+                isPinned = doc.getBoolean("isPinned") ?: false,
+                timestamp = safeLong(doc.get("timestamp"), System.currentTimeMillis())
+            )
+        }
+
         val rtdbRefs = listOf(
+            database.child("tournaments").child(tournamentId).child("chat_messages"),
             database.child("tournament_chats").child(tournamentId),
             database.child("tournaments").child(tournamentId).child("chat")
         )
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                val seenIds = mutableSetOf<String>()
                 snapshot.children.forEach { c ->
-                    parseSnap(c)?.let {
-                        chatMap[it.id] = it
-                        seenIds.add(it.id)
-                    }
+                    parseSnap(c)?.let { chatMap[it.id] = it }
                 }
                 emitChat()
             }
@@ -864,35 +917,26 @@ class AdminIntegrationSyncManager(
         }
         rtdbRefs.forEach { it.addValueEventListener(listener) }
 
-        val fsListener = try {
+        val fsListeners = mutableListOf<ListenerRegistration>()
+        listOf(
+            firestore.collection("tournaments").document(tournamentId).collection("chat_messages"),
             firestore.collection("tournaments").document(tournamentId).collection("chat")
-                .addSnapshotListener { snap, err ->
+        ).forEach { col ->
+            try {
+                fsListeners.add(col.addSnapshotListener { snap, err ->
                     if (err == null && snap != null) {
                         snap.documents.forEach { doc ->
-                            val msg = doc.getString("message") ?: doc.getString("text") ?: ""
-                            if (msg.isNotBlank()) {
-                                chatMap[doc.id] = TournamentChatMessage(
-                                    id = doc.id,
-                                    tournamentId = tournamentId,
-                                    senderId = doc.getString("senderId") ?: doc.getString("userId") ?: "",
-                                    senderName = doc.getString("senderName") ?: doc.getString("username") ?: "Player",
-                                    senderAvatar = doc.getString("senderAvatar") ?: "avatar_1",
-                                    senderRole = doc.getString("senderRole") ?: "PLAYER",
-                                    message = msg,
-                                    isAdmin = doc.getBoolean("isAdmin") ?: false,
-                                    isPinned = doc.getBoolean("isPinned") ?: false,
-                                    timestamp = safeLong(doc.get("timestamp"), System.currentTimeMillis())
-                                )
-                            }
+                            parseDoc(doc)?.let { chatMap[it.id] = it }
                         }
                         emitChat()
                     }
-                }
-        } catch (_: Exception) { null }
+                })
+            } catch (_: Exception) {}
+        }
 
         awaitClose {
             rtdbRefs.forEach { it.removeEventListener(listener) }
-            fsListener?.remove()
+            fsListeners.forEach { it.remove() }
         }
     }
 
@@ -900,49 +944,67 @@ class AdminIntegrationSyncManager(
         tournamentId: String,
         message: String,
         isPinned: Boolean,
-        adminName: String = "VeloRix Official Admin"
+        adminName: String = "VeloRix Admin"
     ) {
         if (tournamentId.isBlank() || message.isBlank()) return
         val now = System.currentTimeMillis()
         val msgId = "chat_adm_${now}"
-        val adminUid = auth.currentUser?.uid ?: "admin_master"
+        val cleanMsg = message.trim()
         val payload = mapOf(
             "id" to msgId,
             "tournamentId" to tournamentId,
-            "senderId" to adminUid,
-            "senderName" to adminName,
+            "senderId" to "admin",
+            "senderName" to adminName.ifBlank { "VeloRix Admin" },
             "senderAvatar" to "avatar_1",
             "senderRole" to "ADMIN",
-            "message" to message.trim(),
+            "text" to cleanMsg,
+            "message" to cleanMsg,
             "isAdmin" to true,
+            "isSystemMessage" to true,
+            "messageType" to "ANNOUNCEMENT",
+            "channel" to "ALL",
+            "isDeleted" to false,
             "isPinned" to isPinned,
             "timestamp" to now
         )
+        try { database.child("tournaments").child(tournamentId).child("chat_messages").child(msgId).setValue(payload).await() } catch (_: Exception) {}
         try { database.child("tournament_chats").child(tournamentId).child(msgId).setValue(payload).await() } catch (_: Exception) {}
         try { database.child("tournaments").child(tournamentId).child("chat").child(msgId).setValue(payload).await() } catch (_: Exception) {}
+        try { firestore.collection("tournaments").document(tournamentId).collection("chat_messages").document(msgId).set(payload).await() } catch (_: Exception) {}
         try { firestore.collection("tournaments").document(tournamentId).collection("chat").document(msgId).set(payload).await() } catch (_: Exception) {}
-        GlobalErrorManager.emitSuccess(if (isPinned) "Pinned Admin announcement posted to lobby chat!" else "Admin message sent to lobby chat!")
+        GlobalErrorManager.emitSuccess(if (isPinned) "Pinned Admin announcement posted to lobby chat!" else "Admin announcement sent to lobby chat!")
     }
 
     suspend fun togglePinTournamentChatMessage(tournamentId: String, messageId: String, isPinned: Boolean) {
         if (tournamentId.isBlank() || messageId.isBlank()) return
-        val updates = mapOf<String, Any>("isPinned" to isPinned)
+        val updates = mapOf<String, Any>("isPinned" to isPinned, "updatedAt" to System.currentTimeMillis())
+        try { database.child("tournaments").child(tournamentId).child("chat_messages").child(messageId).updateChildren(updates).await() } catch (_: Exception) {}
         try { database.child("tournament_chats").child(tournamentId).child(messageId).updateChildren(updates).await() } catch (_: Exception) {}
         try { database.child("tournaments").child(tournamentId).child("chat").child(messageId).updateChildren(updates).await() } catch (_: Exception) {}
+        try { firestore.collection("tournaments").document(tournamentId).collection("chat_messages").document(messageId).set(updates, SetOptions.merge()).await() } catch (_: Exception) {}
         try { firestore.collection("tournaments").document(tournamentId).collection("chat").document(messageId).set(updates, SetOptions.merge()).await() } catch (_: Exception) {}
         GlobalErrorManager.emitSuccess(if (isPinned) "Message pinned to top of lobby chat!" else "Message unpinned.")
     }
 
     suspend fun deleteTournamentChatMessage(tournamentId: String, messageId: String) {
         if (tournamentId.isBlank() || messageId.isBlank()) return
-        try { database.child("tournament_chats").child(tournamentId).child(messageId).removeValue().await() } catch (_: Exception) {}
-        try { database.child("tournaments").child(tournamentId).child("chat").child(messageId).removeValue().await() } catch (_: Exception) {}
-        try { firestore.collection("tournaments").document(tournamentId).collection("chat").document(messageId).delete().await() } catch (_: Exception) {}
-        GlobalErrorManager.emitSuccess("Chat message deleted from lobby.")
+        val softDelete = mapOf<String, Any>(
+            "isDeleted" to true,
+            "isPinned" to false,
+            "text" to "Message removed by Admin",
+            "message" to "Message removed by Admin",
+            "updatedAt" to System.currentTimeMillis()
+        )
+        try { database.child("tournaments").child(tournamentId).child("chat_messages").child(messageId).updateChildren(softDelete).await() } catch (_: Exception) {}
+        try { database.child("tournament_chats").child(tournamentId).child(messageId).updateChildren(softDelete).await() } catch (_: Exception) {}
+        try { database.child("tournaments").child(tournamentId).child("chat").child(messageId).updateChildren(softDelete).await() } catch (_: Exception) {}
+        try { firestore.collection("tournaments").document(tournamentId).collection("chat_messages").document(messageId).set(softDelete, SetOptions.merge()).await() } catch (_: Exception) {}
+        try { firestore.collection("tournaments").document(tournamentId).collection("chat").document(messageId).set(softDelete, SetOptions.merge()).await() } catch (_: Exception) {}
+        GlobalErrorManager.emitSuccess("Chat message soft-deleted ('Message removed by Admin').")
     }
 
     // =========================================================================
-    // SECTION 5A & 5C: DEPOSIT REQUESTS, TOKEN CONVERSIONS & MISSIONS
+    // SECTION 5A & 5C: DEPOSIT REQUESTS (/deposit_requests + /upi_payment_orders), TOKEN CONVERSIONS & MISSIONS
     // =========================================================================
 
     fun getDepositRequestsStream(): Flow<List<DepositRequest>> = callbackFlow {
@@ -952,22 +1014,28 @@ class AdminIntegrationSyncManager(
             trySend(depMap.values.sortedByDescending { it.requestedAt })
         }
 
-        fun parseSnap(snap: DataSnapshot): DepositRequest? {
+        fun parseSnap(snap: DataSnapshot, isUpiOrder: Boolean = false): DepositRequest? {
             if (!snap.exists()) return null
             val id = snap.child("id").value?.toString()
                 ?: snap.child("requestId").value?.toString()
+                ?: snap.child("orderId").value?.toString()
                 ?: snap.key ?: return null
             if (id.isBlank()) return null
+            val orderId = snap.child("orderId").value?.toString() ?: if (isUpiOrder) id else ""
+            val txId = snap.child("transactionId").value?.toString() ?: snap.child("txId").value?.toString() ?: ""
             return DepositRequest(
                 id = id,
                 requestId = id,
+                orderId = orderId,
+                transactionId = txId,
                 userId = snap.child("userId").value?.toString() ?: snap.child("uid").value?.toString() ?: "",
+                username = snap.child("username").value?.toString() ?: snap.child("userName").value?.toString() ?: "Player",
                 userName = snap.child("username").value?.toString() ?: snap.child("userName").value?.toString() ?: "Player",
                 userEmail = snap.child("userEmail").value?.toString() ?: snap.child("email").value?.toString() ?: "",
                 amount = safeDouble(snap.child("amount").value ?: snap.child("vtAmount").value),
-                utrNumber = snap.child("utrNumber").value?.toString() ?: snap.child("paymentRef").value?.toString() ?: snap.child("upiId").value?.toString() ?: "",
-                paymentMethod = snap.child("paymentMethod").value?.toString() ?: snap.child("method").value?.toString() ?: "UPI_MANUAL_UTR",
-                screenshotUrl = snap.child("screenshotUrl").value?.toString() ?: "",
+                utrNumber = snap.child("utrNumber").value?.toString() ?: snap.child("utr").value?.toString() ?: snap.child("paymentRef").value?.toString() ?: "",
+                paymentMethod = snap.child("paymentMethod").value?.toString() ?: snap.child("method").value?.toString() ?: if (isUpiOrder) "UPI_ORDER" else "UPI_MANUAL",
+                screenshotUrl = snap.child("screenshotUrl").value?.toString() ?: snap.child("paymentScreenshotUrl").value?.toString() ?: "",
                 status = snap.child("status").value?.toString()?.uppercase() ?: "PENDING",
                 requestedAt = safeLong(snap.child("createdAt").value ?: snap.child("requestedAt").value ?: snap.child("timestamp").value, System.currentTimeMillis()),
                 processedAt = safeLong(snap.child("processedAt").value, 0L),
@@ -975,20 +1043,27 @@ class AdminIntegrationSyncManager(
             )
         }
 
-        val rtdbRefs = listOf(
-            database.child("deposit_requests"),
-            database.child("admin_channels").child("deposit_requests")
-        )
-        val listener = object : ValueEventListener {
+        val depRef = database.child("deposit_requests")
+        val orderRef = database.child("upi_payment_orders")
+        val chRef = database.child("admin_channels").child("deposit_requests")
+
+        val depListener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                snapshot.children.forEach { c ->
-                    parseSnap(c)?.let { depMap[it.id] = it }
-                }
+                snapshot.children.forEach { c -> parseSnap(c, false)?.let { depMap[it.id] = it } }
                 emitDeposits()
             }
             override fun onCancelled(error: DatabaseError) { emitDeposits() }
         }
-        rtdbRefs.forEach { it.addValueEventListener(listener) }
+        val orderListener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                snapshot.children.forEach { c -> parseSnap(c, true)?.let { depMap.putIfAbsent(it.id, it) } }
+                emitDeposits()
+            }
+            override fun onCancelled(error: DatabaseError) { emitDeposits() }
+        }
+        depRef.addValueEventListener(depListener)
+        chRef.addValueEventListener(depListener)
+        orderRef.addValueEventListener(orderListener)
 
         val fsReg = try {
             firestore.collection("deposit_requests").addSnapshotListener { snap, err ->
@@ -998,12 +1073,15 @@ class AdminIntegrationSyncManager(
                         depMap[id] = DepositRequest(
                             id = id,
                             requestId = id,
+                            orderId = doc.getString("orderId") ?: "",
+                            transactionId = doc.getString("transactionId") ?: "",
                             userId = doc.getString("userId") ?: doc.getString("uid") ?: "",
+                            username = doc.getString("username") ?: doc.getString("userName") ?: "Player",
                             userName = doc.getString("username") ?: doc.getString("userName") ?: "Player",
                             userEmail = doc.getString("userEmail") ?: doc.getString("email") ?: "",
                             amount = safeDouble(doc.get("amount") ?: doc.get("vtAmount")),
-                            utrNumber = doc.getString("utrNumber") ?: doc.getString("paymentRef") ?: "",
-                            paymentMethod = doc.getString("paymentMethod") ?: doc.getString("method") ?: "UPI_MANUAL_UTR",
+                            utrNumber = doc.getString("utrNumber") ?: doc.getString("utr") ?: doc.getString("paymentRef") ?: "",
+                            paymentMethod = doc.getString("paymentMethod") ?: doc.getString("method") ?: "UPI_MANUAL",
                             screenshotUrl = doc.getString("screenshotUrl") ?: "",
                             status = doc.getString("status")?.uppercase() ?: "PENDING",
                             requestedAt = safeLong(doc.get("createdAt") ?: doc.get("requestedAt"), System.currentTimeMillis()),
@@ -1017,7 +1095,9 @@ class AdminIntegrationSyncManager(
         } catch (_: Exception) { null }
 
         awaitClose {
-            rtdbRefs.forEach { it.removeEventListener(listener) }
+            depRef.removeEventListener(depListener)
+            chRef.removeEventListener(depListener)
+            orderRef.removeEventListener(orderListener)
             fsReg?.remove()
         }
     }
@@ -1208,7 +1288,7 @@ class AdminIntegrationSyncManager(
                 showDeveloperModal = safeBool(snap.child("showDeveloperModal").value, false),
                 upiId = snap.child("upiId").value?.toString()
                     ?: snap.child("merchantUpiId").value?.toString()
-                    ?: "velorixesports@upi",
+                    ?: "veloxyra.anant@fam",
                 upiMerchantName = snap.child("upiMerchantName").value?.toString()
                     ?: snap.child("merchantName").value?.toString()
                     ?: "VeloRix Esports",
@@ -1222,16 +1302,8 @@ class AdminIntegrationSyncManager(
                 vpnBlockEnabled = safeBool(snap.child("vpnBlockEnabled").value ?: snap.child("vpnRestrictionEnabled").value, false),
                 otaPatchVersion = safeInt(snap.child("otaPatchVersion").value, 1).coerceAtLeast(1),
                 otaReleaseNotes = snap.child("otaReleaseNotes").value?.toString()
-                    ?: "Live OTA Hot-Patch Active — Zero Play Store Update Needed",
+                    ?: "Live OTA Config Active",
                 liveLobbyTicker = snap.child("liveLobbyTicker").value?.toString() ?: "",
-                activeFestivalOverride = snap.child("activeFestivalOverride").value?.toString() ?: "AUTO",
-                customFestivalTitle = snap.child("customFestivalTitle").value?.toString() ?: "",
-                customFestivalMessage = snap.child("customFestivalMessage").value?.toString() ?: "",
-                customAttractingTitle = snap.child("customAttractingTitle").value?.toString() ?: "",
-                customAttractingMessage = snap.child("customAttractingMessage").value?.toString() ?: "",
-                attractingAlertWeight = safeInt(snap.child("attractingAlertWeight").value, 65),
-                timeContextualWeight = safeInt(snap.child("timeContextualWeight").value, 20),
-                weeklyCalendarWeight = safeInt(snap.child("weeklyCalendarWeight").value, 15),
                 featureFlags = parseFeatureFlagsFromSnap(snap),
                 updatedAt = safeLong(snap.child("updatedAt").value, System.currentTimeMillis())
             )
@@ -1261,9 +1333,13 @@ class AdminIntegrationSyncManager(
                     if (err == null && doc != null && doc.exists()) {
                         val rawFlags = (doc.get("featureFlags") as? Map<*, *>)
                             ?: (doc.get("feature_flags") as? Map<*, *>)
+                        val activeKeys = SystemConfig.defaultFeatureFlags().keys
                         val parsedFlags = SystemConfig.defaultFeatureFlags().toMutableMap()
                         rawFlags?.forEach { (k, v) ->
-                            if (k != null) parsedFlags[k.toString()] = safeBool(v, true)
+                            val keyStr = k?.toString()
+                            if (keyStr != null && keyStr in activeKeys) {
+                                parsedFlags[keyStr] = safeBool(v, true)
+                            }
                         }
                         latestConfig = SystemConfig(
                             maintenanceMode = doc.getBoolean("maintenanceMode") ?: doc.getBoolean("isMaintenance") ?: latestConfig.maintenanceMode,
@@ -1290,14 +1366,6 @@ class AdminIntegrationSyncManager(
                             otaPatchVersion = safeInt(doc.get("otaPatchVersion"), latestConfig.otaPatchVersion).coerceAtLeast(1),
                             otaReleaseNotes = doc.getString("otaReleaseNotes") ?: latestConfig.otaReleaseNotes,
                             liveLobbyTicker = doc.getString("liveLobbyTicker") ?: latestConfig.liveLobbyTicker,
-                            activeFestivalOverride = doc.getString("activeFestivalOverride") ?: latestConfig.activeFestivalOverride,
-                            customFestivalTitle = doc.getString("customFestivalTitle") ?: latestConfig.customFestivalTitle,
-                            customFestivalMessage = doc.getString("customFestivalMessage") ?: latestConfig.customFestivalMessage,
-                            customAttractingTitle = doc.getString("customAttractingTitle") ?: latestConfig.customAttractingTitle,
-                            customAttractingMessage = doc.getString("customAttractingMessage") ?: latestConfig.customAttractingMessage,
-                            attractingAlertWeight = safeInt(doc.get("attractingAlertWeight"), latestConfig.attractingAlertWeight),
-                            timeContextualWeight = safeInt(doc.get("timeContextualWeight"), latestConfig.timeContextualWeight),
-                            weeklyCalendarWeight = safeInt(doc.get("weeklyCalendarWeight"), latestConfig.weeklyCalendarWeight),
                             featureFlags = parsedFlags,
                             updatedAt = safeLong(doc.get("updatedAt"), latestConfig.updatedAt)
                         )
@@ -1315,8 +1383,11 @@ class AdminIntegrationSyncManager(
     suspend fun saveSystemConfig(config: SystemConfig, adminEmail: String) {
         try {
             val now = System.currentTimeMillis()
+            val activeKeys = SystemConfig.defaultFeatureFlags().keys
             val mergedFlags = SystemConfig.defaultFeatureFlags().toMutableMap().apply {
-                putAll(config.featureFlags)
+                config.featureFlags.forEach { (k, v) ->
+                    if (k in activeKeys) put(k, v)
+                }
             }
             val payload = mapOf<String, Any>(
                 "maintenanceMode" to config.maintenanceMode,
@@ -1352,14 +1423,6 @@ class AdminIntegrationSyncManager(
                 "otaPatchVersion" to config.otaPatchVersion,
                 "otaReleaseNotes" to config.otaReleaseNotes,
                 "liveLobbyTicker" to config.liveLobbyTicker,
-                "activeFestivalOverride" to config.activeFestivalOverride,
-                "customFestivalTitle" to config.customFestivalTitle,
-                "customFestivalMessage" to config.customFestivalMessage,
-                "customAttractingTitle" to config.customAttractingTitle,
-                "customAttractingMessage" to config.customAttractingMessage,
-                "attractingAlertWeight" to config.attractingAlertWeight,
-                "timeContextualWeight" to config.timeContextualWeight,
-                "weeklyCalendarWeight" to config.weeklyCalendarWeight,
                 "featureFlags" to mergedFlags,
                 "feature_flags" to mergedFlags,
                 "updatedAt" to now,
@@ -1389,22 +1452,7 @@ class AdminIntegrationSyncManager(
             try { firestore.collection("system_config").document("app_settings").set(payload, SetOptions.merge()).await() } catch (_: Exception) {}
             try { firestore.collection("app_config").document("global").set(payload, SetOptions.merge()).await() } catch (_: Exception) {}
 
-            // 3. Log OTA Live Patch to /admin_channels/ota_live_patches
-            val patchLogId = "ota_patch_${config.otaPatchVersion}_${now}"
-            val patchLogPayload = mapOf<String, Any>(
-                "id" to patchLogId,
-                "channelType" to "ota_live_patches",
-                "title" to "OTA Patch v${config.otaPatchVersion} • Festival: ${config.activeFestivalOverride}",
-                "details" to config.otaReleaseNotes.ifBlank { "Live OTA Config Synced" },
-                "status" to "COMPLETED",
-                "processedBy" to adminEmail,
-                "createdAt" to now,
-                "timestamp" to now
-            )
-            try { database.child("admin_channels").child("ota_live_patches").child(patchLogId).setValue(patchLogPayload).await() } catch (_: Exception) {}
-            try { firestore.collection("admin_channels").document("ota_live_patches").collection("items").document(patchLogId).set(patchLogPayload).await() } catch (_: Exception) {}
-
-            // 4. Push SYSTEM_CONFIG_UPDATED to /global_app_state
+            // 3. Push SYSTEM_CONFIG_UPDATED to /global_app_state
             publishGlobalAppStateEvent(
                 eventType = "SYSTEM_CONFIG_UPDATED",
                 payload = mapOf(
@@ -1412,17 +1460,16 @@ class AdminIntegrationSyncManager(
                     "isForceUpdate" to config.forceUpdateRequired,
                     "showBanners" to config.showBanners,
                     "otaPatchVersion" to config.otaPatchVersion,
-                    "activeFestivalOverride" to config.activeFestivalOverride,
                     "upiId" to config.upiId
                 )
             )
             writeAuditLog(
                 action = "SYSTEM_CONFIG_UPDATED",
-                detail = "OTA Patch v${config.otaPatchVersion} • Festival=${config.activeFestivalOverride} • Maintenance=${config.maintenanceMode} • UPI=${config.upiId}",
+                detail = "Live Config v${config.otaPatchVersion} • Maintenance=${config.maintenanceMode} • 6 Core Flags • UPI=${config.upiId}",
                 adminEmail = adminEmail,
                 targetId = "global"
             )
-            GlobalErrorManager.emitSuccess("OTA Live Config v${config.otaPatchVersion}, 14 Feature Flags & UPI synced across RTDB & Firestore!")
+            GlobalErrorManager.emitSuccess("System Config v${config.otaPatchVersion}, 6 Core Feature Flags & UPI synced across RTDB & Firestore!")
         } catch (e: Exception) {
             GlobalErrorManager.emitError("Failed to save system config: ${e.message}")
         }
@@ -1535,12 +1582,16 @@ class AdminIntegrationSyncManager(
         payload: Map<String, Any> = emptyMap()
     ) {
         val now = System.currentTimeMillis()
+        val eventId = "evt_${now}_${(100..999).random()}"
         val stateMap = mapOf<String, Any>(
+            "eventId" to eventId,
             "eventType" to eventType,
             "source" to "ADMIN_PANEL",
             "tournamentId" to tournamentId,
             "affectedUserId" to affectedUserId,
             "timestamp" to now,
+            "lastUpdatedAt" to now,
+            "version" to now,
             "payload" to payload
         )
         try { database.child("global_app_state").updateChildren(stateMap).await() } catch (_: Exception) {}
@@ -1982,6 +2033,7 @@ class AdminIntegrationSyncManager(
                     "status" to if (wonAnything) "WON" else "PARTICIPATED"
                 )
                 try { database.child("users").child(uid).child("match_stats").child(matchStatId).setValue(matchStatPayload).await() } catch (_: Exception) {}
+                try { database.child("match_stats").child(uid).child(matchStatId).setValue(matchStatPayload).await() } catch (_: Exception) {}
                 try { database.child("users").child(uid).child("matchHistory").child(tournamentId).setValue(matchStatPayload).await() } catch (_: Exception) {}
                 try { firestore.collection("users").document(uid).collection("match_stats").document(matchStatId).set(matchStatPayload).await() } catch (_: Exception) {}
 
@@ -2407,5 +2459,1075 @@ class AdminIntegrationSyncManager(
             return false
         }
     }
+
+    // =========================================================================
+    // SHARED HELPER: SYNC TICKET REPLY / STATUS / REDEEM CODE ACROSS ALL 8 PATHS
+    // =========================================================================
+
+    private suspend fun syncLinkedTicketAcrossAllPaths(
+        ticketId: String,
+        userId: String,
+        status: String,
+        adminReply: String,
+        deliveredRedeemCode: String,
+        adminEmail: String,
+        now: Long = System.currentTimeMillis(),
+        channelNode: String = ""
+    ) {
+        val cleanId = ticketId.trim()
+        if (cleanId.isBlank()) return
+        val updates = mutableMapOf<String, Any>(
+            "status" to status.uppercase(),
+            "adminReply" to adminReply,
+            "adminNote" to adminReply,
+            "updatedAt" to now,
+            "processedBy" to adminEmail
+        )
+        if (deliveredRedeemCode.isNotBlank()) {
+            updates["deliveredRedeemCode"] = deliveredRedeemCode.trim()
+        }
+
+        // RTDB 4 core ticket paths (+ optional channel node)
+        try { database.child("admin_requests").child("all").child(cleanId).updateChildren(updates).await() } catch (_: Exception) {}
+        try { database.child("support_tickets").child(cleanId).updateChildren(updates).await() } catch (_: Exception) {}
+        try { database.child("reports").child(cleanId).updateChildren(updates).await() } catch (_: Exception) {}
+        if (userId.isNotBlank()) {
+            try { database.child("users").child(userId).child("reports").child(cleanId).updateChildren(updates).await() } catch (_: Exception) {}
+        }
+        if (channelNode.isNotBlank() && channelNode != "all") {
+            try { database.child("admin_requests").child(channelNode).child(cleanId).updateChildren(updates).await() } catch (_: Exception) {}
+        }
+
+        // Firestore 4 core ticket paths
+        try { firestore.collection("admin_requests").document(cleanId).set(updates, SetOptions.merge()).await() } catch (_: Exception) {}
+        try { firestore.collection("support_tickets").document(cleanId).set(updates, SetOptions.merge()).await() } catch (_: Exception) {}
+        try { firestore.collection("reports").document(cleanId).set(updates, SetOptions.merge()).await() } catch (_: Exception) {}
+        if (userId.isNotBlank()) {
+            try { firestore.collection("users").document(userId).collection("reports").document(cleanId).set(updates, SetOptions.merge()).await() } catch (_: Exception) {}
+        }
+
+        // Send in-app notification to /users/{userId}/notifications/notif_ticket_{id}_{now}
+        if (userId.isNotBlank()) {
+            val notifId = "notif_ticket_${cleanId}_${now}"
+            val titleText = if (deliveredRedeemCode.isNotBlank()) {
+                "🎁 Redeem Code Delivered (#${cleanId.takeLast(6)})"
+            } else {
+                "Ticket Update: ${status.uppercase()} (#${cleanId.takeLast(6)})"
+            }
+            val notifPayload = mapOf<String, Any>(
+                "id" to notifId,
+                "userId" to userId,
+                "title" to titleText,
+                "message" to adminReply.ifBlank { "Your ticket status was updated to ${status.uppercase()}." },
+                "type" to "SUPPORT",
+                "ticketId" to cleanId,
+                "deliveredRedeemCode" to deliveredRedeemCode.trim(),
+                "timestamp" to now,
+                "isRead" to false
+            )
+            try { database.child("users").child(userId).child("notifications").child(notifId).setValue(notifPayload).await() } catch (_: Exception) {}
+            try { database.child("notifications").child(userId).child(notifId).setValue(notifPayload).await() } catch (_: Exception) {}
+            try { firestore.collection("users").document(userId).collection("notifications").document(notifId).set(notifPayload).await() } catch (_: Exception) {}
+        }
+    }
+
+    // =========================================================================
+    // MODULE 2: PRE-VERIFY UTR (/verified_bank_deposits), FULL DEPOSIT & DUAL WITHDRAWAL DESK
+    // =========================================================================
+
+    fun getVerifiedBankDepositsStream(): Flow<List<VerifiedBankDeposit>> = callbackFlow {
+        val map = mutableMapOf<String, VerifiedBankDeposit>()
+        fun emit() { trySend(map.values.sortedByDescending { it.timestamp }) }
+
+        val ref = database.child("verified_bank_deposits")
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                snapshot.children.forEach { c ->
+                    val utr = c.child("utr").value?.toString() ?: c.key ?: ""
+                    if (utr.isNotBlank()) {
+                        map[utr] = VerifiedBankDeposit(
+                            utr = utr,
+                            amount = safeDouble(c.child("amount").value),
+                            claimed = safeBool(c.child("claimed").value),
+                            claimedBy = c.child("claimedBy").value?.toString() ?: "",
+                            verifiedBy = c.child("verifiedBy").value?.toString() ?: "",
+                            timestamp = safeLong(c.child("timestamp").value, System.currentTimeMillis())
+                        )
+                    }
+                }
+                emit()
+            }
+            override fun onCancelled(error: DatabaseError) { emit() }
+        }
+        ref.addValueEventListener(listener)
+
+        val fsReg = try {
+            firestore.collection("verified_bank_deposits").addSnapshotListener { snap, err ->
+                if (err == null && snap != null) {
+                    snap.documents.forEach { d ->
+                        val utr = d.getString("utr") ?: d.id
+                        map[utr] = VerifiedBankDeposit(
+                            utr = utr,
+                            amount = safeDouble(d.get("amount")),
+                            claimed = d.getBoolean("claimed") ?: false,
+                            claimedBy = d.getString("claimedBy") ?: "",
+                            verifiedBy = d.getString("verifiedBy") ?: "",
+                            timestamp = safeLong(d.get("timestamp"), System.currentTimeMillis())
+                        )
+                    }
+                    emit()
+                }
+            }
+        } catch (_: Exception) { null }
+
+        awaitClose {
+            ref.removeEventListener(listener)
+            fsReg?.remove()
+        }
+    }
+
+    suspend fun preVerifyBankUtr(utr: String, amount: Double, adminEmail: String): Boolean {
+        val cleanUtr = utr.trim().replace(Regex("[^A-Za-z0-9]"), "")
+        if (cleanUtr.length < 6 || amount <= 0.0) {
+            GlobalErrorManager.emitError("Enter a valid 12-digit UTR and amount > ₹0.")
+            return false
+        }
+        return try {
+            val now = System.currentTimeMillis()
+            val payload = mapOf<String, Any>(
+                "utr" to cleanUtr,
+                "amount" to amount,
+                "claimed" to false,
+                "claimedBy" to "",
+                "verifiedBy" to adminEmail,
+                "timestamp" to now
+            )
+            try { database.child("verified_bank_deposits").child(cleanUtr).setValue(payload).await() } catch (_: Exception) {}
+            try { firestore.collection("verified_bank_deposits").document(cleanUtr).set(payload).await() } catch (_: Exception) {}
+            writeAuditLog(
+                action = "UTR_PRE_VERIFIED",
+                detail = "Pre-verified Bank UTR $cleanUtr for ₹${amount.toInt()} (Auto-Claim Ready)",
+                adminEmail = adminEmail,
+                targetId = cleanUtr
+            )
+            GlobalErrorManager.emitSuccess("UTR $cleanUtr (₹${amount.toInt()}) pre-verified in /verified_bank_deposits!")
+            true
+        } catch (e: Exception) {
+            GlobalErrorManager.emitError("Failed to pre-verify UTR: ${e.message}")
+            false
+        }
+    }
+
+    suspend fun approveDepositRequestFull(req: DepositRequest, adminEmail: String): Boolean {
+        val reqId = req.id.ifBlank { req.requestId }.trim()
+        val uid = req.effectiveUserId.trim()
+        if (reqId.isBlank() || uid.isBlank() || req.amount <= 0.0) {
+            GlobalErrorManager.emitError("Invalid deposit request data.")
+            return false
+        }
+        return try {
+            val now = System.currentTimeMillis()
+            val statusMap = mapOf<String, Any>(
+                "status" to "APPROVED",
+                "processedAt" to now,
+                "processedBy" to adminEmail,
+                "updatedAt" to now
+            )
+            try { database.child("deposit_requests").child(reqId).updateChildren(statusMap).await() } catch (_: Exception) {}
+            try { database.child("admin_channels").child("deposit_requests").child(reqId).updateChildren(statusMap).await() } catch (_: Exception) {}
+            try { firestore.collection("deposit_requests").document(reqId).set(statusMap, SetOptions.merge()).await() } catch (_: Exception) {}
+
+            val orderId = req.orderId.ifBlank { reqId }
+            val orderSuccessMap = mapOf<String, Any>("status" to "SUCCESS", "processedAt" to now, "processedBy" to adminEmail)
+            try { database.child("upi_payment_orders").child(orderId).updateChildren(orderSuccessMap).await() } catch (_: Exception) {}
+
+            // Increment user balance & depositBalance
+            val userSnap = try { database.child("users").child(uid).get().await() } catch (_: Exception) { null }
+            val curDep = safeDouble(userSnap?.child("depositBalance")?.value ?: userSnap?.child("depositFunds")?.value)
+            val curWin = safeDouble(userSnap?.child("winningsBalance")?.value ?: userSnap?.child("winningFunds")?.value)
+            val curBon = safeDouble(userSnap?.child("bonusBalance")?.value ?: userSnap?.child("bonusFunds")?.value)
+            val curBal = safeDouble(userSnap?.child("balance")?.value ?: userSnap?.child("funds")?.value, curDep + curWin + curBon)
+            val curVer = safeInt(userSnap?.child("version")?.value, 1)
+
+            val newDep = curDep + req.amount
+            val newBal = (curBal + req.amount).coerceAtLeast(newDep + curWin + curBon)
+            val userUpdates = mapOf<String, Any>(
+                "depositBalance" to newDep,
+                "depositFunds" to newDep,
+                "deposit_funds" to newDep,
+                "balance" to newBal,
+                "funds" to newBal,
+                "walletBalance" to newBal,
+                "version" to (curVer + 1),
+                "updatedAt" to now
+            )
+            try { database.child("users").child(uid).updateChildren(userUpdates).await() } catch (_: Exception) {}
+            try { database.child("userProfiles").child(uid).updateChildren(userUpdates).await() } catch (_: Exception) {}
+            try { firestore.collection("users").document(uid).set(userUpdates, SetOptions.merge()).await() } catch (_: Exception) {}
+
+            val txId = req.transactionId.ifBlank { "dep_${reqId}" }
+            val txPayload = mapOf<String, Any>(
+                "id" to txId,
+                "userId" to uid,
+                "uid" to uid,
+                "type" to "DEPOSIT",
+                "amount" to req.amount,
+                "status" to "SUCCESS",
+                "utrNumber" to req.utrNumber,
+                "detail" to "UPI Deposit Approved (UTR: ${req.utrNumber.ifBlank { reqId }})",
+                "description" to "UPI Deposit Approved (UTR: ${req.utrNumber.ifBlank { reqId }})",
+                "isPositive" to true,
+                "timestamp" to now
+            )
+            try { database.child("transactions").child(txId).setValue(txPayload).await() } catch (_: Exception) {}
+            try { database.child("users").child(uid).child("transactions").child(txId).setValue(txPayload).await() } catch (_: Exception) {}
+            try { firestore.collection("transactions").document(txId).set(txPayload, SetOptions.merge()).await() } catch (_: Exception) {}
+
+            if (req.utrNumber.isNotBlank()) {
+                try {
+                    database.child("verified_bank_deposits").child(req.utrNumber.trim())
+                        .updateChildren(mapOf("claimed" to true, "claimedBy" to uid, "updatedAt" to now)).await()
+                } catch (_: Exception) {}
+            }
+
+            syncLinkedTicketAcrossAllPaths(
+                ticketId = reqId,
+                userId = uid,
+                status = "RESOLVED",
+                adminReply = "Deposit of ₹${req.amount.toInt()} VT approved & credited to your wallet (UTR: ${req.utrNumber.ifBlank { reqId }}).",
+                deliveredRedeemCode = "",
+                adminEmail = adminEmail,
+                now = now
+            )
+            sendTargetedUserNotification(
+                userId = uid,
+                title = "✅ Deposit Credited: +₹${req.amount.toInt()} VT",
+                message = "Your UPI deposit (UTR: ${req.utrNumber.ifBlank { reqId }}) has been approved!",
+                type = "WALLET"
+            )
+            publishGlobalAppStateEvent(
+                eventType = "WALLET_UPDATED",
+                affectedUserId = uid,
+                payload = mapOf("depositId" to reqId, "amount" to req.amount, "status" to "APPROVED")
+            )
+            writeAuditLog("DEPOSIT_APPROVED", "Approved deposit ₹${req.amount.toInt()} for $uid (UTR: ${req.utrNumber})", adminEmail, reqId)
+            GlobalErrorManager.emitSuccess("Deposit ₹${req.amount.toInt()} VT approved & credited!")
+            true
+        } catch (e: Exception) {
+            GlobalErrorManager.emitError("Deposit approval failed: ${e.message}")
+            false
+        }
+    }
+
+    suspend fun rejectDepositRequestFull(req: DepositRequest, reason: String, adminEmail: String): Boolean {
+        val reqId = req.id.ifBlank { req.requestId }.trim()
+        val uid = req.effectiveUserId.trim()
+        if (reqId.isBlank()) return false
+        return try {
+            val now = System.currentTimeMillis()
+            val cleanReason = reason.ifBlank { "Invalid or unverifiable UTR reference" }
+            val statusMap = mapOf<String, Any>(
+                "status" to "REJECTED",
+                "adminNote" to cleanReason,
+                "rejectionReason" to cleanReason,
+                "processedAt" to now,
+                "processedBy" to adminEmail,
+                "updatedAt" to now
+            )
+            try { database.child("deposit_requests").child(reqId).updateChildren(statusMap).await() } catch (_: Exception) {}
+            try { database.child("admin_channels").child("deposit_requests").child(reqId).updateChildren(statusMap).await() } catch (_: Exception) {}
+            try { firestore.collection("deposit_requests").document(reqId).set(statusMap, SetOptions.merge()).await() } catch (_: Exception) {}
+            if (req.orderId.isNotBlank()) {
+                try { database.child("upi_payment_orders").child(req.orderId).updateChildren(mapOf("status" to "FAILED", "updatedAt" to now)).await() } catch (_: Exception) {}
+            }
+            if (req.transactionId.isNotBlank()) {
+                try { database.child("transactions").child(req.transactionId).updateChildren(mapOf("status" to "FAILED", "updatedAt" to now)).await() } catch (_: Exception) {}
+            }
+            syncLinkedTicketAcrossAllPaths(
+                ticketId = reqId,
+                userId = uid,
+                status = "REJECTED",
+                adminReply = "Deposit rejected: $cleanReason",
+                deliveredRedeemCode = "",
+                adminEmail = adminEmail,
+                now = now
+            )
+            if (uid.isNotBlank()) {
+                sendTargetedUserNotification(uid, "Deposit Rejected", "Your deposit of ₹${req.amount.toInt()} was rejected: $cleanReason", "WALLET")
+            }
+            writeAuditLog("DEPOSIT_REJECTED", "Rejected deposit $reqId: $cleanReason", adminEmail, reqId)
+            GlobalErrorManager.emitSuccess("Deposit rejected.")
+            true
+        } catch (e: Exception) {
+            GlobalErrorManager.emitError("Deposit reject failed: ${e.message}")
+            false
+        }
+    }
+
+    fun getUnifiedWithdrawalsStream(): Flow<List<PayoutRequest>> = callbackFlow {
+        val map = mutableMapOf<String, PayoutRequest>()
+        fun emit() { trySend(map.values.sortedByDescending { it.requestedAt }) }
+
+        fun parseSnap(snap: DataSnapshot): PayoutRequest? {
+            if (!snap.exists()) return null
+            val id = snap.child("id").value?.toString()
+                ?: snap.child("requestId").value?.toString()
+                ?: snap.key ?: return null
+            if (id.isBlank()) return null
+            val amt = safeDouble(snap.child("amount").value ?: snap.child("vtAmount").value)
+            val tds = safeDouble(snap.child("tdsAmount").value, amt * 0.30)
+            val net = safeDouble(snap.child("netAmount").value, (amt - tds).coerceAtLeast(0.0))
+            val method = snap.child("paymentMethod").value?.toString()
+                ?: snap.child("method").value?.toString() ?: "UPI"
+            val voucherSpec = snap.child("voucherSpec").value?.toString()
+                ?: snap.child("voucherType").value?.toString() ?: ""
+            val payId = snap.child("upiId").value?.toString()
+                ?: snap.child("paymentId").value?.toString()
+                ?: voucherSpec
+            return PayoutRequest(
+                id = id,
+                uid = snap.child("userId").value?.toString() ?: snap.child("uid").value?.toString() ?: "",
+                username = snap.child("username").value?.toString() ?: snap.child("userName").value?.toString() ?: "Player",
+                inGameName = snap.child("inGameName").value?.toString() ?: snap.child("ign").value?.toString() ?: "",
+                email = snap.child("email").value?.toString() ?: snap.child("userEmail").value?.toString() ?: "",
+                paymentMethod = method,
+                paymentId = payId,
+                voucherSpec = voucherSpec,
+                deliveredRedeemCode = snap.child("deliveredRedeemCode").value?.toString() ?: "",
+                transactionId = snap.child("transactionId").value?.toString() ?: snap.child("txId").value?.toString() ?: "",
+                vtAmount = amt,
+                tdsAmount = tds,
+                netAmount = net,
+                status = snap.child("status").value?.toString()?.uppercase() ?: "PENDING",
+                rejectionReason = snap.child("rejectionReason").value?.toString() ?: snap.child("adminReply").value?.toString() ?: "",
+                requestedAt = safeLong(snap.child("timestamp").value ?: snap.child("requestedAt").value ?: snap.child("createdAt").value, System.currentTimeMillis()),
+                processedAt = safeLong(snap.child("processedAt").value, 0L),
+                processedBy = snap.child("processedBy").value?.toString() ?: "",
+                isDeposit = safeBool(snap.child("isDeposit").value, false)
+            )
+        }
+
+        val rtdbRefs = listOf(
+            database.child("withdraw_requests"),
+            database.child("wallet_requests"),
+            database.child("payout_requests")
+        )
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                snapshot.children.forEach { c ->
+                    parseSnap(c)?.let { req ->
+                        if (!req.isDeposit) map[req.id] = req
+                    }
+                }
+                emit()
+            }
+            override fun onCancelled(error: DatabaseError) { emit() }
+        }
+        rtdbRefs.forEach { it.addValueEventListener(listener) }
+
+        val fsRegs = mutableListOf<ListenerRegistration>()
+        listOf(
+            firestore.collection("withdraw_requests"),
+            firestore.collection("payout_requests")
+        ).forEach { col ->
+            try {
+                fsRegs.add(col.addSnapshotListener { snap, err ->
+                    if (err == null && snap != null) {
+                        snap.documents.forEach { d ->
+                            val isDep = d.getBoolean("isDeposit") ?: false
+                            if (!isDep) {
+                                val id = d.getString("id") ?: d.getString("requestId") ?: d.id
+                                val amt = safeDouble(d.get("amount") ?: d.get("vtAmount"))
+                                val tds = safeDouble(d.get("tdsAmount"), amt * 0.30)
+                                val net = safeDouble(d.get("netAmount"), (amt - tds).coerceAtLeast(0.0))
+                                val voucherSpec = d.getString("voucherSpec") ?: d.getString("voucherType") ?: ""
+                                map[id] = PayoutRequest(
+                                    id = id,
+                                    uid = d.getString("userId") ?: d.getString("uid") ?: "",
+                                    username = d.getString("username") ?: d.getString("userName") ?: "Player",
+                                    inGameName = d.getString("inGameName") ?: d.getString("ign") ?: "",
+                                    email = d.getString("email") ?: d.getString("userEmail") ?: "",
+                                    paymentMethod = d.getString("paymentMethod") ?: d.getString("method") ?: "UPI",
+                                    paymentId = d.getString("upiId") ?: d.getString("paymentId") ?: voucherSpec,
+                                    voucherSpec = voucherSpec,
+                                    deliveredRedeemCode = d.getString("deliveredRedeemCode") ?: "",
+                                    transactionId = d.getString("transactionId") ?: "",
+                                    vtAmount = amt,
+                                    tdsAmount = tds,
+                                    netAmount = net,
+                                    status = d.getString("status")?.uppercase() ?: "PENDING",
+                                    rejectionReason = d.getString("rejectionReason") ?: "",
+                                    requestedAt = safeLong(d.get("timestamp") ?: d.get("requestedAt") ?: d.get("createdAt"), System.currentTimeMillis()),
+                                    processedAt = safeLong(d.get("processedAt"), 0L),
+                                    processedBy = d.getString("processedBy") ?: ""
+                                )
+                            }
+                        }
+                        emit()
+                    }
+                })
+            } catch (_: Exception) {}
+        }
+
+        awaitClose {
+            rtdbRefs.forEach { it.removeEventListener(listener) }
+            fsRegs.forEach { it.remove() }
+        }
+    }
+
+    suspend fun approveUpiWithdrawalWithTicketSync(
+        req: PayoutRequest,
+        payoutUtrOrNote: String,
+        adminEmail: String
+    ): Boolean {
+        if (req.id.isBlank()) return false
+        return try {
+            val now = System.currentTimeMillis()
+            val netAmt = req.effectiveNetAmount.toInt()
+            val noteText = payoutUtrOrNote.trim().ifBlank { "Transferred to ${req.paymentId}" }
+            val replyText = "UPI Payout Approved! Net ₹$netAmt (after 30% TDS) transferred. Ref/Note: $noteText"
+            val updates = mapOf<String, Any>(
+                "status" to "APPROVED",
+                "adminReply" to replyText,
+                "payoutNote" to noteText,
+                "processedAt" to now,
+                "processedBy" to adminEmail,
+                "updatedAt" to now
+            )
+            try { database.child("withdraw_requests").child(req.id).updateChildren(updates).await() } catch (_: Exception) {}
+            try { database.child("wallet_requests").child(req.id).updateChildren(updates).await() } catch (_: Exception) {}
+            try { database.child("payout_requests").child(req.id).updateChildren(updates).await() } catch (_: Exception) {}
+            try { firestore.collection("withdraw_requests").document(req.id).set(updates, SetOptions.merge()).await() } catch (_: Exception) {}
+            try { firestore.collection("payout_requests").document(req.id).set(updates, SetOptions.merge()).await() } catch (_: Exception) {}
+
+            val txId = req.transactionId.ifBlank { "wdr_${req.id}" }
+            val txUpdates = mapOf<String, Any>("status" to "SUCCESS", "updatedAt" to now, "detail" to replyText)
+            try { database.child("transactions").child(txId).updateChildren(txUpdates).await() } catch (_: Exception) {}
+            if (req.uid.isNotBlank()) {
+                try { database.child("users").child(req.uid).child("transactions").child(txId).updateChildren(txUpdates).await() } catch (_: Exception) {}
+            }
+            try { firestore.collection("transactions").document(txId).set(txUpdates, SetOptions.merge()).await() } catch (_: Exception) {}
+
+            syncLinkedTicketAcrossAllPaths(
+                ticketId = req.id,
+                userId = req.uid,
+                status = "RESOLVED",
+                adminReply = replyText,
+                deliveredRedeemCode = "",
+                adminEmail = adminEmail,
+                now = now,
+                channelNode = "withdrawal_issue_requests"
+            )
+            publishGlobalAppStateEvent(
+                eventType = "WALLET_UPDATED",
+                affectedUserId = req.uid,
+                payload = mapOf("withdrawalId" to req.id, "method" to "UPI", "status" to "APPROVED", "netAmount" to req.effectiveNetAmount)
+            )
+            writeAuditLog("WITHDRAWAL_UPI_APPROVED", "Approved UPI withdrawal ${req.id} (Net ₹$netAmt) for ${req.username}", adminEmail, req.id)
+            GlobalErrorManager.emitSuccess("UPI Payout (Net ₹$netAmt) approved & synced to My Tickets!")
+            true
+        } catch (e: Exception) {
+            GlobalErrorManager.emitError("UPI payout failed: ${e.message}")
+            false
+        }
+    }
+
+    suspend fun approveRedeemVoucherWithdrawal(
+        req: PayoutRequest,
+        redeemCode: String,
+        adminEmail: String
+    ): Boolean {
+        val cleanCode = redeemCode.trim().uppercase()
+        if (req.id.isBlank() || cleanCode.length < 6) {
+            GlobalErrorManager.emitError("Please enter a valid 16-digit Redeem Voucher Code before delivering.")
+            return false
+        }
+        return try {
+            val now = System.currentTimeMillis()
+            val netAmt = req.effectiveNetAmount.toInt()
+            val spec = req.voucherSpec.ifBlank { req.paymentId.ifBlank { "Google Play" } }
+            val replyText = "Your $spec Redeem Code (Net ₹$netAmt): $cleanCode"
+
+            val updates = mapOf<String, Any>(
+                "status" to "APPROVED",
+                "deliveredRedeemCode" to cleanCode,
+                "adminReply" to replyText,
+                "processedAt" to now,
+                "processedBy" to adminEmail,
+                "updatedAt" to now
+            )
+            try { database.child("withdraw_requests").child(req.id).updateChildren(updates).await() } catch (_: Exception) {}
+            try { database.child("wallet_requests").child(req.id).updateChildren(updates).await() } catch (_: Exception) {}
+            try { database.child("payout_requests").child(req.id).updateChildren(updates).await() } catch (_: Exception) {}
+            try { firestore.collection("withdraw_requests").document(req.id).set(updates, SetOptions.merge()).await() } catch (_: Exception) {}
+            try { firestore.collection("payout_requests").document(req.id).set(updates, SetOptions.merge()).await() } catch (_: Exception) {}
+
+            val txId = req.transactionId.ifBlank { "wdr_${req.id}" }
+            val txUpdates = mapOf<String, Any>(
+                "status" to "SUCCESS",
+                "deliveredRedeemCode" to cleanCode,
+                "detail" to replyText,
+                "updatedAt" to now
+            )
+            try { database.child("transactions").child(txId).updateChildren(txUpdates).await() } catch (_: Exception) {}
+            if (req.uid.isNotBlank()) {
+                try { database.child("users").child(req.uid).child("transactions").child(txId).updateChildren(txUpdates).await() } catch (_: Exception) {}
+            }
+            try { firestore.collection("transactions").document(txId).set(txUpdates, SetOptions.merge()).await() } catch (_: Exception) {}
+
+            // Sync linked ticket (id == req.id) across all 8 RTDB + Firestore paths so My Tickets renders golden code card
+            syncLinkedTicketAcrossAllPaths(
+                ticketId = req.id,
+                userId = req.uid,
+                status = "RESOLVED",
+                adminReply = replyText,
+                deliveredRedeemCode = cleanCode,
+                adminEmail = adminEmail,
+                now = now,
+                channelNode = "redeem_code_requests"
+            )
+            publishGlobalAppStateEvent(
+                eventType = "WALLET_UPDATED",
+                affectedUserId = req.uid,
+                payload = mapOf(
+                    "withdrawalId" to req.id,
+                    "method" to "REDEEM_CODE",
+                    "status" to "APPROVED",
+                    "deliveredRedeemCode" to cleanCode
+                )
+            )
+            writeAuditLog("VOUCHER_REDEEM_DELIVERED", "Delivered $spec voucher code for ${req.username} (Net ₹$netAmt)", adminEmail, req.id)
+            GlobalErrorManager.emitSuccess("$spec Redeem Code delivered & synced to user's My Tickets!")
+            true
+        } catch (e: Exception) {
+            GlobalErrorManager.emitError("Voucher delivery failed: ${e.message}")
+            false
+        }
+    }
+
+    suspend fun rejectWithdrawalAndRefundWithTicketSync(
+        req: PayoutRequest,
+        reason: String,
+        adminEmail: String
+    ): Boolean {
+        if (req.id.isBlank()) return false
+        return try {
+            val now = System.currentTimeMillis()
+            val cleanReason = reason.ifBlank { "Invalid payout details — Amount refunded to wallet" }
+            val replyText = "Withdrawal Rejected & Refunded ₹${req.vtAmount.toInt()} VT: $cleanReason"
+
+            val updates = mapOf<String, Any>(
+                "status" to "REJECTED",
+                "rejectionReason" to cleanReason,
+                "adminReply" to replyText,
+                "processedAt" to now,
+                "processedBy" to adminEmail,
+                "updatedAt" to now
+            )
+            try { database.child("withdraw_requests").child(req.id).updateChildren(updates).await() } catch (_: Exception) {}
+            try { database.child("wallet_requests").child(req.id).updateChildren(updates).await() } catch (_: Exception) {}
+            try { database.child("payout_requests").child(req.id).updateChildren(updates).await() } catch (_: Exception) {}
+            try { firestore.collection("withdraw_requests").document(req.id).set(updates, SetOptions.merge()).await() } catch (_: Exception) {}
+            try { firestore.collection("payout_requests").document(req.id).set(updates, SetOptions.merge()).await() } catch (_: Exception) {}
+
+            // Refund +amount VT back to user's winningsBalance & balance
+            if (req.uid.isNotBlank() && req.vtAmount > 0.0) {
+                val userSnap = try { database.child("users").child(req.uid).get().await() } catch (_: Exception) { null }
+                val curDep = safeDouble(userSnap?.child("depositBalance")?.value ?: userSnap?.child("depositFunds")?.value)
+                val curWin = safeDouble(userSnap?.child("winningsBalance")?.value ?: userSnap?.child("winningFunds")?.value)
+                val curBon = safeDouble(userSnap?.child("bonusBalance")?.value ?: userSnap?.child("bonusFunds")?.value)
+                val curBal = safeDouble(userSnap?.child("balance")?.value ?: userSnap?.child("funds")?.value, curDep + curWin + curBon)
+                val curVer = safeInt(userSnap?.child("version")?.value, 1)
+
+                val newWin = curWin + req.vtAmount
+                val newBal = (curBal + req.vtAmount).coerceAtLeast(curDep + newWin + curBon)
+                val userUpdates = mapOf<String, Any>(
+                    "winningsBalance" to newWin,
+                    "winningFunds" to newWin,
+                    "withdrawableBalance" to newWin,
+                    "balance" to newBal,
+                    "funds" to newBal,
+                    "walletBalance" to newBal,
+                    "version" to (curVer + 1),
+                    "updatedAt" to now
+                )
+                try { database.child("users").child(req.uid).updateChildren(userUpdates).await() } catch (_: Exception) {}
+                try { database.child("userProfiles").child(req.uid).updateChildren(userUpdates).await() } catch (_: Exception) {}
+                try { firestore.collection("users").document(req.uid).set(userUpdates, SetOptions.merge()).await() } catch (_: Exception) {}
+
+                val refundTxId = "ref_wdr_${req.id}"
+                val refundTx = mapOf<String, Any>(
+                    "id" to refundTxId,
+                    "userId" to req.uid,
+                    "uid" to req.uid,
+                    "type" to "REFUND",
+                    "amount" to req.vtAmount,
+                    "status" to "SUCCESS",
+                    "detail" to replyText,
+                    "description" to replyText,
+                    "isPositive" to true,
+                    "timestamp" to now
+                )
+                try { database.child("transactions").child(refundTxId).setValue(refundTx).await() } catch (_: Exception) {}
+                try { database.child("users").child(req.uid).child("transactions").child(refundTxId).setValue(refundTx).await() } catch (_: Exception) {}
+                try { firestore.collection("transactions").document(refundTxId).set(refundTx).await() } catch (_: Exception) {}
+            }
+
+            if (req.transactionId.isNotBlank()) {
+                try { database.child("transactions").child(req.transactionId).updateChildren(mapOf("status" to "FAILED", "updatedAt" to now)).await() } catch (_: Exception) {}
+            }
+
+            syncLinkedTicketAcrossAllPaths(
+                ticketId = req.id,
+                userId = req.uid,
+                status = "REJECTED",
+                adminReply = replyText,
+                deliveredRedeemCode = "",
+                adminEmail = adminEmail,
+                now = now
+            )
+            publishGlobalAppStateEvent(
+                eventType = "WALLET_UPDATED",
+                affectedUserId = req.uid,
+                payload = mapOf("withdrawalId" to req.id, "status" to "REJECTED", "refundedAmount" to req.vtAmount)
+            )
+            writeAuditLog("WITHDRAWAL_REJECTED_REFUNDED", "Rejected ${req.id} & refunded ₹${req.vtAmount.toInt()} to ${req.username}", adminEmail, req.id)
+            GlobalErrorManager.emitSuccess("Withdrawal rejected & ₹${req.vtAmount.toInt()} VT refunded to wallet!")
+            true
+        } catch (e: Exception) {
+            GlobalErrorManager.emitError("Withdrawal reject failed: ${e.message}")
+            false
+        }
+    }
+
+    // =========================================================================
+    // MODULE 3: REDEEM CODE VAULT (/redeem_codes & /redeem_claims)
+    // =========================================================================
+
+    fun getRedeemCodesStream(): Flow<List<RedeemCodeItem>> = callbackFlow {
+        val map = mutableMapOf<String, RedeemCodeItem>()
+        fun emit() { trySend(map.values.sortedByDescending { it.updatedAt }) }
+
+        val ref = database.child("redeem_codes")
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                map.clear()
+                snapshot.children.forEach { c ->
+                    val code = (c.child("code").value?.toString() ?: c.key ?: "").trim().uppercase()
+                    if (code.isNotBlank()) {
+                        val isActive = safeBool(c.child("active").value, c.child("status").value?.toString()?.equals("ACTIVE", true) != false)
+                        map[code] = RedeemCodeItem(
+                            code = code,
+                            title = c.child("title").value?.toString() ?: code,
+                            active = isActive,
+                            status = c.child("status").value?.toString()?.uppercase() ?: if (isActive) "ACTIVE" else "DISABLED",
+                            rewardVt = safeDouble(c.child("rewardVt").value),
+                            rewardTokens = safeInt(c.child("rewardTokens").value),
+                            maxUses = safeInt(c.child("maxUses").value, 0),
+                            usedCount = safeInt(c.child("usedCount").value, 0),
+                            expiresAt = safeLong(c.child("expiresAt").value, 0L),
+                            targetUserId = c.child("targetUserId").value?.toString() ?: "",
+                            createdAt = safeLong(c.child("createdAt").value, System.currentTimeMillis()),
+                            updatedAt = safeLong(c.child("updatedAt").value, System.currentTimeMillis())
+                        )
+                    }
+                }
+                emit()
+            }
+            override fun onCancelled(error: DatabaseError) { emit() }
+        }
+        ref.addValueEventListener(listener)
+
+        val fsReg = try {
+            firestore.collection("redeem_codes").addSnapshotListener { snap, err ->
+                if (err == null && snap != null) {
+                    snap.documents.forEach { d ->
+                        val code = (d.getString("code") ?: d.id).trim().uppercase()
+                        val isActive = d.getBoolean("active") ?: (d.getString("status")?.equals("ACTIVE", true) != false)
+                        map[code] = RedeemCodeItem(
+                            code = code,
+                            title = d.getString("title") ?: code,
+                            active = isActive,
+                            status = d.getString("status")?.uppercase() ?: if (isActive) "ACTIVE" else "DISABLED",
+                            rewardVt = safeDouble(d.get("rewardVt")),
+                            rewardTokens = safeInt(d.get("rewardTokens")),
+                            maxUses = safeInt(d.get("maxUses"), 0),
+                            usedCount = safeInt(d.get("usedCount"), 0),
+                            expiresAt = safeLong(d.get("expiresAt"), 0L),
+                            targetUserId = d.getString("targetUserId") ?: "",
+                            createdAt = safeLong(d.get("createdAt"), System.currentTimeMillis()),
+                            updatedAt = safeLong(d.get("updatedAt"), System.currentTimeMillis())
+                        )
+                    }
+                    emit()
+                }
+            }
+        } catch (_: Exception) { null }
+
+        awaitClose {
+            ref.removeEventListener(listener)
+            fsReg?.remove()
+        }
+    }
+
+    suspend fun saveRedeemCode(item: RedeemCodeItem, adminEmail: String): Boolean {
+        val codeKey = item.code.trim().uppercase().replace(Regex("[^A-Z0-9_-]"), "")
+        if (codeKey.length < 3) {
+            GlobalErrorManager.emitError("Redeem code must be at least 3 alphanumeric characters.")
+            return false
+        }
+        return try {
+            val now = System.currentTimeMillis()
+            val payload = mapOf<String, Any>(
+                "code" to codeKey,
+                "title" to item.title.trim().ifBlank { codeKey },
+                "active" to item.active,
+                "status" to if (item.active) "ACTIVE" else "DISABLED",
+                "rewardVt" to item.rewardVt.coerceAtLeast(0.0),
+                "rewardTokens" to item.rewardTokens.coerceAtLeast(0),
+                "maxUses" to item.maxUses.coerceAtLeast(0),
+                "usedCount" to item.usedCount.coerceAtLeast(0),
+                "expiresAt" to item.expiresAt.coerceAtLeast(0L),
+                "targetUserId" to item.targetUserId.trim(),
+                "createdAt" to (if (item.createdAt > 0L) item.createdAt else now),
+                "updatedAt" to now
+            )
+            try { database.child("redeem_codes").child(codeKey).setValue(payload).await() } catch (_: Exception) {}
+            try { firestore.collection("redeem_codes").document(codeKey).set(payload, SetOptions.merge()).await() } catch (_: Exception) {}
+            writeAuditLog("REDEEM_CODE_SAVED", "Saved promo code $codeKey (VT=${item.rewardVt}, Tokens=${item.rewardTokens}, MaxUses=${item.maxUses})", adminEmail, codeKey)
+            GlobalErrorManager.emitSuccess("Redeem code '$codeKey' synced to RTDB & Firestore!")
+            true
+        } catch (e: Exception) {
+            GlobalErrorManager.emitError("Failed to save redeem code: ${e.message}")
+            false
+        }
+    }
+
+    suspend fun toggleRedeemCodeActive(code: String, active: Boolean, adminEmail: String) {
+        val codeKey = code.trim().uppercase()
+        if (codeKey.isBlank()) return
+        val updates = mapOf<String, Any>(
+            "active" to active,
+            "status" to if (active) "ACTIVE" else "DISABLED",
+            "updatedAt" to System.currentTimeMillis()
+        )
+        try { database.child("redeem_codes").child(codeKey).updateChildren(updates).await() } catch (_: Exception) {}
+        try { firestore.collection("redeem_codes").document(codeKey).set(updates, SetOptions.merge()).await() } catch (_: Exception) {}
+        writeAuditLog("REDEEM_CODE_TOGGLED", "Set $codeKey to ${if (active) "ACTIVE" else "DISABLED"}", adminEmail, codeKey)
+        GlobalErrorManager.emitSuccess("Code '$codeKey' is now ${if (active) "ACTIVE" else "DISABLED"}.")
+    }
+
+    suspend fun deleteRedeemCode(code: String, adminEmail: String) {
+        val codeKey = code.trim().uppercase()
+        if (codeKey.isBlank()) return
+        try { database.child("redeem_codes").child(codeKey).removeValue().await() } catch (_: Exception) {}
+        try { firestore.collection("redeem_codes").document(codeKey).delete().await() } catch (_: Exception) {}
+        writeAuditLog("REDEEM_CODE_DELETED", "Deleted promo code $codeKey", adminEmail, codeKey)
+        GlobalErrorManager.emitSuccess("Redeem code '$codeKey' deleted.")
+    }
+
+    fun getRedeemClaimsStream(): Flow<List<RedeemClaimRecord>> = callbackFlow {
+        val map = mutableMapOf<String, RedeemClaimRecord>()
+        fun emit() { trySend(map.values.sortedByDescending { it.claimedAt }) }
+
+        val ref = database.child("redeem_claims")
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                snapshot.children.forEach { c ->
+                    val id = c.child("id").value?.toString() ?: c.key ?: ""
+                    if (id.isNotBlank()) {
+                        map[id] = RedeemClaimRecord(
+                            id = id,
+                            code = c.child("code").value?.toString() ?: "",
+                            userId = c.child("userId").value?.toString() ?: c.child("uid").value?.toString() ?: "",
+                            username = c.child("username").value?.toString() ?: c.child("userName").value?.toString() ?: "Player",
+                            rewardVt = safeDouble(c.child("rewardVt").value),
+                            rewardTokens = safeInt(c.child("rewardTokens").value),
+                            claimedAt = safeLong(c.child("claimedAt").value ?: c.child("timestamp").value, System.currentTimeMillis())
+                        )
+                    }
+                }
+                emit()
+            }
+            override fun onCancelled(error: DatabaseError) { emit() }
+        }
+        ref.addValueEventListener(listener)
+
+        val fsReg = try {
+            firestore.collection("redeem_claims").addSnapshotListener { snap, err ->
+                if (err == null && snap != null) {
+                    snap.documents.forEach { d ->
+                        map[d.id] = RedeemClaimRecord(
+                            id = d.id,
+                            code = d.getString("code") ?: "",
+                            userId = d.getString("userId") ?: d.getString("uid") ?: "",
+                            username = d.getString("username") ?: d.getString("userName") ?: "Player",
+                            rewardVt = safeDouble(d.get("rewardVt")),
+                            rewardTokens = safeInt(d.get("rewardTokens")),
+                            claimedAt = safeLong(d.get("claimedAt") ?: d.get("timestamp"), System.currentTimeMillis())
+                        )
+                    }
+                    emit()
+                }
+            }
+        } catch (_: Exception) { null }
+
+        awaitClose {
+            ref.removeEventListener(listener)
+            fsReg?.remove()
+        }
+    }
+
+    // =========================================================================
+    // MODULE 4: UNIFIED 12-CHANNEL REQUEST HUB & "MY TICKETS" DESK
+    // =========================================================================
+
+    fun getUnifiedAdminRequestsStream(): Flow<List<UnifiedAdminRequest>> = callbackFlow {
+        val map = mutableMapOf<String, UnifiedAdminRequest>()
+        fun emit() { trySend(map.values.sortedByDescending { it.updatedAt.coerceAtLeast(it.createdAt) }) }
+
+        fun parseSnap(snap: DataSnapshot, source: String): UnifiedAdminRequest? {
+            if (!snap.exists()) return null
+            val id = snap.child("id").value?.toString()
+                ?: snap.child("requestId").value?.toString()
+                ?: snap.child("ticketId").value?.toString()
+                ?: snap.key ?: return null
+            if (id.isBlank()) return null
+            val cat = snap.child("category").value?.toString()
+                ?: snap.child("issueCategory").value?.toString()
+                ?: snap.child("channelType").value?.toString() ?: ""
+            val ch = snap.child("channel").value?.toString()
+                ?: snap.child("channelLabel").value?.toString() ?: ""
+            val matched = UnifiedRequestChannel.matchFromRaw(cat, ch, source)
+            val created = safeLong(snap.child("createdAt").value ?: snap.child("timestamp").value ?: snap.child("requestedAt").value, System.currentTimeMillis())
+            return UnifiedAdminRequest(
+                id = id,
+                userId = snap.child("userId").value?.toString() ?: snap.child("uid").value?.toString() ?: "",
+                username = snap.child("username").value?.toString() ?: snap.child("userName").value?.toString() ?: snap.child("name").value?.toString() ?: "Player",
+                userEmail = snap.child("userEmail").value?.toString() ?: snap.child("email").value?.toString() ?: "",
+                inGameName = snap.child("inGameName").value?.toString() ?: snap.child("ign").value?.toString() ?: "",
+                freeFireId = snap.child("freeFireId").value?.toString() ?: snap.child("gameId").value?.toString() ?: "",
+                category = cat.ifBlank { matched.categoryKey },
+                channel = ch.ifBlank { matched.channelTag },
+                subject = snap.child("subject").value?.toString()
+                    ?: snap.child("title").value?.toString()
+                    ?: snap.child("reason").value?.toString()
+                    ?: matched.label,
+                description = snap.child("description").value?.toString()
+                    ?: snap.child("details").value?.toString()
+                    ?: snap.child("message").value?.toString() ?: "",
+                amount = safeDouble(snap.child("amount").value ?: snap.child("vtAmount").value),
+                utrNumber = snap.child("utrNumber").value?.toString() ?: "",
+                paymentMethod = snap.child("paymentMethod").value?.toString() ?: "",
+                voucherSpec = snap.child("voucherSpec").value?.toString() ?: "",
+                status = snap.child("status").value?.toString()?.uppercase() ?: "PENDING",
+                adminReply = snap.child("adminReply").value?.toString() ?: snap.child("adminNote").value?.toString() ?: "",
+                deliveredRedeemCode = snap.child("deliveredRedeemCode").value?.toString() ?: "",
+                sourceNode = source,
+                createdAt = created,
+                updatedAt = safeLong(snap.child("updatedAt").value, created)
+            )
+        }
+
+        val rtdbSources = listOf(
+            "admin_requests/all" to database.child("admin_requests").child("all"),
+            "support_tickets" to database.child("support_tickets"),
+            "reports" to database.child("reports"),
+            "banner_feedback" to database.child("banner_feedback")
+        )
+        val rtdbListeners = mutableListOf<Pair<DatabaseReference, ValueEventListener>>()
+        rtdbSources.forEach { (srcName, ref) ->
+            val l = object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    snapshot.children.forEach { c ->
+                        parseSnap(c, srcName)?.let { item ->
+                            val existing = map[item.id]
+                            if (existing == null || item.updatedAt >= existing.updatedAt) {
+                                map[item.id] = item
+                            }
+                        }
+                    }
+                    emit()
+                }
+                override fun onCancelled(error: DatabaseError) { emit() }
+            }
+            ref.addValueEventListener(l)
+            rtdbListeners.add(ref to l)
+        }
+
+        val fsRegs = mutableListOf<ListenerRegistration>()
+        listOf(
+            "admin_requests" to firestore.collection("admin_requests"),
+            "support_tickets" to firestore.collection("support_tickets"),
+            "reports" to firestore.collection("reports")
+        ).forEach { (srcName, col) ->
+            try {
+                fsRegs.add(col.addSnapshotListener { snap, err ->
+                    if (err == null && snap != null) {
+                        snap.documents.forEach { d ->
+                            val id = d.getString("id") ?: d.getString("requestId") ?: d.id
+                            val cat = d.getString("category") ?: d.getString("issueCategory") ?: ""
+                            val ch = d.getString("channel") ?: d.getString("channelLabel") ?: ""
+                            val matched = UnifiedRequestChannel.matchFromRaw(cat, ch, srcName)
+                            val created = safeLong(d.get("createdAt") ?: d.get("timestamp"), System.currentTimeMillis())
+                            val item = UnifiedAdminRequest(
+                                id = id,
+                                userId = d.getString("userId") ?: d.getString("uid") ?: "",
+                                username = d.getString("username") ?: d.getString("userName") ?: "Player",
+                                userEmail = d.getString("userEmail") ?: d.getString("email") ?: "",
+                                inGameName = d.getString("inGameName") ?: d.getString("ign") ?: "",
+                                freeFireId = d.getString("freeFireId") ?: d.getString("gameId") ?: "",
+                                category = cat.ifBlank { matched.categoryKey },
+                                channel = ch.ifBlank { matched.channelTag },
+                                subject = d.getString("subject") ?: d.getString("title") ?: d.getString("reason") ?: matched.label,
+                                description = d.getString("description") ?: d.getString("details") ?: d.getString("message") ?: "",
+                                amount = safeDouble(d.get("amount") ?: d.get("vtAmount")),
+                                utrNumber = d.getString("utrNumber") ?: "",
+                                paymentMethod = d.getString("paymentMethod") ?: "",
+                                voucherSpec = d.getString("voucherSpec") ?: "",
+                                status = d.getString("status")?.uppercase() ?: "PENDING",
+                                adminReply = d.getString("adminReply") ?: d.getString("adminNote") ?: "",
+                                deliveredRedeemCode = d.getString("deliveredRedeemCode") ?: "",
+                                sourceNode = srcName,
+                                createdAt = created,
+                                updatedAt = safeLong(d.get("updatedAt"), created)
+                            )
+                            val existing = map[item.id]
+                            if (existing == null || item.updatedAt >= existing.updatedAt) {
+                                map[item.id] = item
+                            }
+                        }
+                        emit()
+                    }
+                })
+            } catch (_: Exception) {}
+        }
+
+        awaitClose {
+            rtdbListeners.forEach { (r, l) -> r.removeEventListener(l) }
+            fsRegs.forEach { it.remove() }
+        }
+    }
+
+    suspend fun replyAndUpdateUnifiedTicket(
+        req: UnifiedAdminRequest,
+        newStatus: String,
+        adminReply: String,
+        deliveredRedeemCode: String,
+        adminEmail: String
+    ): Boolean {
+        if (req.id.isBlank()) return false
+        return try {
+            val now = System.currentTimeMillis()
+            val cleanStatus = newStatus.trim().uppercase().ifBlank { "RESOLVED" }
+            val cleanReply = adminReply.trim().ifBlank { "Ticket updated to $cleanStatus by Admin." }
+            val cleanCode = deliveredRedeemCode.trim().uppercase()
+
+            syncLinkedTicketAcrossAllPaths(
+                ticketId = req.id,
+                userId = req.userId,
+                status = cleanStatus,
+                adminReply = cleanReply,
+                deliveredRedeemCode = cleanCode,
+                adminEmail = adminEmail,
+                now = now,
+                channelNode = req.resolvedChannel.rtdbNode
+            )
+            publishGlobalAppStateEvent(
+                eventType = "SUPPORT_TICKET_UPDATED",
+                affectedUserId = req.userId,
+                payload = mapOf(
+                    "ticketId" to req.id,
+                    "status" to cleanStatus,
+                    "channel" to req.resolvedChannel.channelTag
+                )
+            )
+            writeAuditLog("TICKET_UPDATED", "Updated ticket ${req.id} (${req.resolvedChannel.channelTag}) -> $cleanStatus", adminEmail, req.id)
+            GlobalErrorManager.emitSuccess("Ticket #${req.id.takeLast(8)} synced ($cleanStatus) to user's My Tickets!")
+            true
+        } catch (e: Exception) {
+            GlobalErrorManager.emitError("Ticket reply failed: ${e.message}")
+            false
+        }
+    }
+
+    // =========================================================================
+    // MODULE 5B: CHAT REPORTS QUEUE (/chat_reports)
+    // =========================================================================
+
+    fun getChatReportsStream(): Flow<List<ChatReportItem>> = callbackFlow {
+        val map = mutableMapOf<String, ChatReportItem>()
+        fun emit() { trySend(map.values.sortedByDescending { it.timestamp }) }
+
+        val ref = database.child("chat_reports")
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                snapshot.children.forEach { c ->
+                    val id = c.child("id").value?.toString() ?: c.key ?: ""
+                    if (id.isNotBlank()) {
+                        map[id] = ChatReportItem(
+                            id = id,
+                            tournamentId = c.child("tournamentId").value?.toString() ?: "",
+                            messageId = c.child("messageId").value?.toString() ?: "",
+                            reportedUserId = c.child("reportedUserId").value?.toString() ?: c.child("senderId").value?.toString() ?: "",
+                            reportedUserName = c.child("reportedUserName").value?.toString() ?: c.child("senderName").value?.toString() ?: "Player",
+                            reporterUserId = c.child("reporterUserId").value?.toString() ?: c.child("reporterId").value?.toString() ?: "",
+                            reporterName = c.child("reporterName").value?.toString() ?: "Player",
+                            messageText = c.child("messageText").value?.toString() ?: c.child("text").value?.toString() ?: c.child("message").value?.toString() ?: "",
+                            reason = c.child("reason").value?.toString() ?: "Abusive / Toxic chat",
+                            status = c.child("status").value?.toString()?.uppercase() ?: "PENDING",
+                            timestamp = safeLong(c.child("timestamp").value ?: c.child("createdAt").value, System.currentTimeMillis())
+                        )
+                    }
+                }
+                emit()
+            }
+            override fun onCancelled(error: DatabaseError) { emit() }
+        }
+        ref.addValueEventListener(listener)
+
+        val fsReg = try {
+            firestore.collection("chat_reports").addSnapshotListener { snap, err ->
+                if (err == null && snap != null) {
+                    snap.documents.forEach { d ->
+                        map[d.id] = ChatReportItem(
+                            id = d.id,
+                            tournamentId = d.getString("tournamentId") ?: "",
+                            messageId = d.getString("messageId") ?: "",
+                            reportedUserId = d.getString("reportedUserId") ?: d.getString("senderId") ?: "",
+                            reportedUserName = d.getString("reportedUserName") ?: d.getString("senderName") ?: "Player",
+                            reporterUserId = d.getString("reporterUserId") ?: d.getString("reporterId") ?: "",
+                            reporterName = d.getString("reporterName") ?: "Player",
+                            messageText = d.getString("messageText") ?: d.getString("text") ?: d.getString("message") ?: "",
+                            reason = d.getString("reason") ?: "Abusive / Toxic chat",
+                            status = d.getString("status")?.uppercase() ?: "PENDING",
+                            timestamp = safeLong(d.get("timestamp") ?: d.get("createdAt"), System.currentTimeMillis())
+                        )
+                    }
+                    emit()
+                }
+            }
+        } catch (_: Exception) { null }
+
+        awaitClose {
+            ref.removeEventListener(listener)
+            fsReg?.remove()
+        }
+    }
+
+    suspend fun resolveChatReport(report: ChatReportItem, actionTaken: String, adminEmail: String) {
+        if (report.id.isBlank()) return
+        val now = System.currentTimeMillis()
+        val updates = mapOf<String, Any>(
+            "status" to "RESOLVED",
+            "actionTaken" to actionTaken,
+            "processedBy" to adminEmail,
+            "updatedAt" to now
+        )
+        try { database.child("chat_reports").child(report.id).updateChildren(updates).await() } catch (_: Exception) {}
+        try { firestore.collection("chat_reports").document(report.id).set(updates, SetOptions.merge()).await() } catch (_: Exception) {}
+        writeAuditLog("CHAT_REPORT_RESOLVED", "Resolved chat report ${report.id} ($actionTaken)", adminEmail, report.id)
+    }
 }
+
 

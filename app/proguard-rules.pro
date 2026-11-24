@@ -1,33 +1,63 @@
-# Add project specific ProGuard rules here.
-# You can control the set of applied configuration files using the
-# proguardFiles setting in build.gradle.
-#
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
+# ============================================================================
+# Velorix Admin Panel — R8 Full-Mode Shrinking & DEX Optimization Rules
+# ============================================================================
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# Preserve generic signatures, annotations, and Crashlytics line numbers
+-keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod,SourceFile,LineNumberTable
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+# Keep all Velorix domain models for Firebase RTDB, Firestore, and Serialization
+-keep class com.example.domain.model.** { *; }
+-keepclassmembers class com.example.domain.model.** { *; }
 
-# Keep Firebase and Google Play Services
--keep class com.google.firebase.** { *; }
--keep class com.google.android.gms.** { *; }
--dontwarn com.google.firebase.**
--dontwarn com.google.android.gms.**
+# Keep Firebase PropertyName / IgnoreExtraProperties / Exclude annotated members
+-keepclassmembers class * {
+    @com.google.firebase.database.PropertyName <fields>;
+    @com.google.firebase.database.PropertyName <methods>;
+    @com.google.firebase.firestore.PropertyName <fields>;
+    @com.google.firebase.firestore.PropertyName <methods>;
+    @com.google.firebase.database.Exclude <fields>;
+    @com.google.firebase.database.Exclude <methods>;
+    @com.google.firebase.firestore.Exclude <fields>;
+    @com.google.firebase.firestore.Exclude <methods>;
+}
+-keep @com.google.firebase.database.IgnoreExtraProperties class * { *; }
+-keep @com.google.firebase.firestore.IgnoreExtraProperties class * { *; }
 
-# Keep Credential Manager & Google ID
+# Keep Kotlinx Serialization classes, companions, and generated serializers
+-keepattributes RuntimeVisibleAnnotations,AnnotationDefault
+-keep,includedescriptorclasses class com.example.**$$serializer { *; }
+-keepclassmembers class com.example.** {
+    *** Companion;
+}
+-keepclasseswithmembers class com.example.** {
+    kotlinx.serialization.KSerializer serializer(...);
+}
+-keep @kotlinx.serialization.Serializable class * { *; }
+
+# Keep Credential Manager & Google Identity Services
 -keep class androidx.credentials.** { *; }
 -keep class com.google.android.libraries.identity.googleid.** { *; }
 
-# Keep data models and serialization
--keepclassmembers class * {
-    @com.google.firebase.database.PropertyName <fields>;
-    @com.google.firebase.firestore.PropertyName <fields>;
+# Keep Retrofit & OkHttp & Moshi reflection entry points
+-keepattributes Exceptions
+-keepclasseswithmembers,allowshrinking interface * {
+    @retrofit2.http.* <methods>;
 }
+-dontwarn retrofit2.**
+-dontwarn okhttp3.**
+-dontwarn okio.**
+-dontwarn com.squareup.moshi.**
+-dontwarn org.codehaus.mojo.animal_sniffer.IgnoreJRERequirement
+-dontwarn javax.annotation.**
+-dontwarn java.lang.invoke.StringConcatFactory
+
+# Keep Liquid Glass Backdrop SDK shaders/effects if invoked reflectively
+-keep class com.kashif_e.backdrop.** { *; }
+-dontwarn com.kashif_e.backdrop.**
+
+# Suppress harmless R8 warnings from Firebase / GMS / Coroutines / Kotlin reflection
+-dontwarn com.google.firebase.**
+-dontwarn com.google.android.gms.**
+-dontwarn kotlinx.coroutines.**
+-dontwarn kotlin.reflect.**
+-dontwarn sun.misc.Unsafe

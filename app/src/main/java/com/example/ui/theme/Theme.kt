@@ -14,18 +14,18 @@ import androidx.compose.ui.platform.LocalContext
 
 private val DarkColorScheme = darkColorScheme(
     primary = VelorixAccent,
-    onPrimary = Color(0xFF000000),
-    primaryContainer = Color(0xFF121216),
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFF1A0A0F),
     onPrimaryContainer = VelorixTextPrimary,
     secondary = VelorixAccentViolet,
-    onSecondary = Color(0xFF000000),
-    secondaryContainer = Color(0xFF121216),
+    onSecondary = Color(0xFFFFFFFF),
+    secondaryContainer = Color(0xFF14141A),
     onSecondaryContainer = VelorixTextPrimary,
     tertiary = VelorixEmerald,
     onTertiary = Color(0xFF000000),
     background = Color(0xFF000000),
     surface = Color(0xFF000000),
-    surfaceVariant = Color(0xFF0A0A0D),
+    surfaceVariant = Color(0xFF0C0C10),
     onBackground = VelorixTextPrimary,
     onSurface = VelorixTextPrimary,
     onSurfaceVariant = VelorixTextSecondary,
@@ -35,9 +35,9 @@ private val DarkColorScheme = darkColorScheme(
 )
 
 private val LightColorScheme = lightColorScheme(
-    primary = Color(0xFF0284C7),
+    primary = Color(0xFFFF0033),
     onPrimary = Color(0xFFFFFFFF),
-    secondary = Color(0xFF4F46E5),
+    secondary = Color(0xFFE11D48),
     tertiary = Color(0xFF059669),
     background = Color(0xFFF4F6F9),
     surface = Color(0xFFFFFFFF),

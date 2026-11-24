@@ -653,7 +653,7 @@ fun FloatingGlassNavBar(
                                     },
                                 contentAlignment = Alignment.Center
                             ) {
-                                // Pure Untinted Frosted Pill with Bouncy Scale & Two-Sided White Specular Edge Glow
+                                // Sleek Active Pill with Subtle YouTube Pink-Red Tint & Bouncy Scale
                                 if (pillAlpha > 0.01f) {
                                     Box(
                                         modifier = Modifier
@@ -665,21 +665,18 @@ fun FloatingGlassNavBar(
                                             }
                                             .clip(RoundedCornerShape(23.dp))
                                             .background(
-                                                Brush.verticalGradient(
+                                                Brush.horizontalGradient(
                                                     colors = listOf(
-                                                        Color.White.copy(alpha = 0.14f),
-                                                        Color.White.copy(alpha = 0.08f),
-                                                        Color.White.copy(alpha = 0.03f)
+                                                        accentColor.copy(alpha = 0.26f),
+                                                        accentColor.copy(alpha = 0.14f)
                                                     )
                                                 )
                                             )
-                                            .drawBehind {
-                                                drawPillTwoSidedEdgeGlow(
-                                                    cornerRadius = size.height / 2f,
-                                                    intensity = optics.vibrancy.coerceIn(0.45f, 0.75f),
-                                                    accentColor = Color.White
-                                                )
-                                            }
+                                            .border(
+                                                width = 0.75.dp,
+                                                color = accentColor.copy(alpha = 0.55f),
+                                                shape = RoundedCornerShape(23.dp)
+                                            )
                                     )
                                 }
 

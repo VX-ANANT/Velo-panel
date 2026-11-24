@@ -25,6 +25,11 @@ import com.example.domain.model.TournamentChatMessage
 import com.example.domain.model.SystemConfig
 import com.example.domain.model.TournamentStandingEntry
 import com.example.domain.model.AdminAuditLogItem
+import com.example.domain.model.RedeemCodeItem
+import com.example.domain.model.RedeemClaimRecord
+import com.example.domain.model.UnifiedAdminRequest
+import com.example.domain.model.ChatReportItem
+import com.example.domain.model.VerifiedBankDeposit
 import com.example.data.repository.AdminIntegrationSyncManager
 import com.example.data.validation.UserRateLimiter
 import com.example.ui.common.GlobalErrorManager
@@ -289,6 +294,24 @@ class TournamentDashboardViewModel(
 
     private val _auditLogs = MutableStateFlow<List<AdminAuditLogItem>>(emptyList())
     val auditLogs: StateFlow<List<AdminAuditLogItem>> = _auditLogs.asStateFlow()
+
+    private val _redeemCodes = MutableStateFlow<List<RedeemCodeItem>>(emptyList())
+    val redeemCodes: StateFlow<List<RedeemCodeItem>> = _redeemCodes.asStateFlow()
+
+    private val _redeemClaims = MutableStateFlow<List<RedeemClaimRecord>>(emptyList())
+    val redeemClaims: StateFlow<List<RedeemClaimRecord>> = _redeemClaims.asStateFlow()
+
+    private val _unifiedRequests = MutableStateFlow<List<UnifiedAdminRequest>>(emptyList())
+    val unifiedRequests: StateFlow<List<UnifiedAdminRequest>> = _unifiedRequests.asStateFlow()
+
+    private val _chatReports = MutableStateFlow<List<ChatReportItem>>(emptyList())
+    val chatReports: StateFlow<List<ChatReportItem>> = _chatReports.asStateFlow()
+
+    private val _unifiedWithdrawals = MutableStateFlow<List<PayoutRequest>>(emptyList())
+    val unifiedWithdrawals: StateFlow<List<PayoutRequest>> = _unifiedWithdrawals.asStateFlow()
+
+    private val _verifiedBankDeposits = MutableStateFlow<List<VerifiedBankDeposit>>(emptyList())
+    val verifiedBankDeposits: StateFlow<List<VerifiedBankDeposit>> = _verifiedBankDeposits.asStateFlow()
 
     private var activeChannelStreamJob: Job? = null
 
@@ -820,6 +843,77 @@ class TournamentDashboardViewModel(
             }
         }
 
+        // 20. Stream Redeem Code Vault (/redeem_codes & /redeem_claims)
+        val redeemCodesJob = viewModelScope.launch(Dispatchers.Default) {
+            try {
+                integrationSyncManager.getRedeemCodesStream()
+                    .distinctUntilChanged()
+                    .flowOn(Dispatchers.Default)
+                    .collect { list -> _redeemCodes.value = list }
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) e.printStackTrace()
+            }
+        }
+
+        val redeemClaimsJob = viewModelScope.launch(Dispatchers.Default) {
+            try {
+                integrationSyncManager.getRedeemClaimsStream()
+                    .distinctUntilChanged()
+                    .flowOn(Dispatchers.Default)
+                    .collect { list -> _redeemClaims.value = list }
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) e.printStackTrace()
+            }
+        }
+
+        // 21. Stream Unified 12-Channel Request Hub (/admin_requests/all, /support_tickets, /reports)
+        val unifiedRequestsJob = viewModelScope.launch(Dispatchers.Default) {
+            try {
+                integrationSyncManager.getUnifiedAdminRequestsStream()
+                    .distinctUntilChanged()
+                    .flowOn(Dispatchers.Default)
+                    .collect { list -> _unifiedRequests.value = list }
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) e.printStackTrace()
+            }
+        }
+
+        // 22. Stream Chat Reports Queue (/chat_reports)
+        val chatReportsJob = viewModelScope.launch(Dispatchers.Default) {
+            try {
+                integrationSyncManager.getChatReportsStream()
+                    .distinctUntilChanged()
+                    .flowOn(Dispatchers.Default)
+                    .collect { list -> _chatReports.value = list }
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) e.printStackTrace()
+            }
+        }
+
+        // 23. Stream Unified Dual Withdrawals (/withdraw_requests, /wallet_requests, /payout_requests)
+        val unifiedWithdrawalsJob = viewModelScope.launch(Dispatchers.Default) {
+            try {
+                integrationSyncManager.getUnifiedWithdrawalsStream()
+                    .distinctUntilChanged()
+                    .flowOn(Dispatchers.Default)
+                    .collect { list -> _unifiedWithdrawals.value = list }
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) e.printStackTrace()
+            }
+        }
+
+        // 24. Stream Pre-Verified Bank Deposits (/verified_bank_deposits)
+        val verifiedBankDepositsJob = viewModelScope.launch(Dispatchers.Default) {
+            try {
+                integrationSyncManager.getVerifiedBankDepositsStream()
+                    .distinctUntilChanged()
+                    .flowOn(Dispatchers.Default)
+                    .collect { list -> _verifiedBankDeposits.value = list }
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) e.printStackTrace()
+            }
+        }
+
         startSelectedChannelStream(_selectedAdminChannel.value)
 
         synchronized(activeStreamJobs) {
@@ -827,7 +921,8 @@ class TournamentDashboardViewModel(
                 listOf(
                     userJob, ticketsJob, payoutsJob, adminsJob, bannedJob, tournamentsJob,
                     tokensJob, bannersJob, annJob, proofsJob, notifsJob, categoriesJob,
-                    deletionRequestsJob, dataExportsJob, depositsJob, tokenConvJob, missionsJob, sysConfigJob, auditLogsJob
+                    deletionRequestsJob, dataExportsJob, depositsJob, tokenConvJob, missionsJob, sysConfigJob, auditLogsJob,
+                    redeemCodesJob, redeemClaimsJob, unifiedRequestsJob, chatReportsJob, unifiedWithdrawalsJob, verifiedBankDepositsJob
                 )
             )
         }
@@ -1855,37 +1950,106 @@ class TournamentDashboardViewModel(
     fun approveDepositRequest(request: DepositRequest) {
         viewModelScope.launch(Dispatchers.IO) {
             val adminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
-            val payoutReq = PayoutRequest(
-                id = request.id.ifBlank { request.requestId },
-                uid = request.effectiveUserId,
-                username = request.username.ifBlank { request.userName },
-                email = request.userEmail,
-                paymentMethod = request.paymentMethod,
-                paymentId = request.utrNumber,
-                vtAmount = request.amount,
-                status = request.status,
-                requestedAt = request.createdAt
-            )
-            repository.approveDeposit(payoutReq, adminEmail)
+            integrationSyncManager.approveDepositRequestFull(request, adminEmail)
         }
     }
 
     fun rejectDepositRequest(request: DepositRequest, reason: String) {
         viewModelScope.launch(Dispatchers.IO) {
             val adminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
-            val payoutReq = PayoutRequest(
-                id = request.id.ifBlank { request.requestId },
-                uid = request.effectiveUserId,
-                username = request.username.ifBlank { request.userName },
-                email = request.userEmail,
-                paymentMethod = request.paymentMethod,
-                paymentId = request.utrNumber,
-                vtAmount = request.amount,
-                status = request.status,
-                requestedAt = request.createdAt
-            )
-            repository.rejectDeposit(payoutReq, reason, adminEmail)
+            integrationSyncManager.rejectDepositRequestFull(request, reason, adminEmail)
         }
+    }
+
+    fun preVerifyBankUtr(utr: String, amount: Double) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val adminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
+            integrationSyncManager.preVerifyBankUtr(utr, amount, adminEmail)
+        }
+    }
+
+    fun approveUpiWithdrawal(request: PayoutRequest, payoutUtrOrNote: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val adminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
+            integrationSyncManager.approveUpiWithdrawalWithTicketSync(request, payoutUtrOrNote, adminEmail)
+        }
+    }
+
+    fun approveRedeemVoucherWithdrawal(request: PayoutRequest, redeemCode: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val adminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
+            integrationSyncManager.approveRedeemVoucherWithdrawal(request, redeemCode, adminEmail)
+        }
+    }
+
+    fun rejectWithdrawalAndRefund(request: PayoutRequest, reason: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val adminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
+            integrationSyncManager.rejectWithdrawalAndRefundWithTicketSync(request, reason, adminEmail)
+        }
+    }
+
+    fun saveRedeemCode(item: RedeemCodeItem) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val adminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
+            integrationSyncManager.saveRedeemCode(item, adminEmail)
+        }
+    }
+
+    fun toggleRedeemCodeActive(code: String, active: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val adminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
+            integrationSyncManager.toggleRedeemCodeActive(code, active, adminEmail)
+        }
+    }
+
+    fun deleteRedeemCode(code: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val adminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
+            integrationSyncManager.deleteRedeemCode(code, adminEmail)
+        }
+    }
+
+    fun replyAndUpdateUnifiedTicket(
+        req: UnifiedAdminRequest,
+        newStatus: String,
+        adminReply: String,
+        deliveredRedeemCode: String = ""
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val adminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
+            integrationSyncManager.replyAndUpdateUnifiedTicket(req, newStatus, adminReply, deliveredRedeemCode, adminEmail)
+        }
+    }
+
+    fun resolveChatReportAndDeleteMessage(report: ChatReportItem) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val adminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
+            if (report.tournamentId.isNotBlank() && report.messageId.isNotBlank()) {
+                integrationSyncManager.deleteTournamentChatMessage(report.tournamentId, report.messageId)
+            }
+            integrationSyncManager.resolveChatReport(report, "MESSAGE_SOFT_DELETED", adminEmail)
+        }
+    }
+
+    fun resolveChatReportAndBanSender(report: ChatReportItem, reason: String = "Abusive / Toxic Lobby Chat") {
+        viewModelScope.launch(Dispatchers.IO) {
+            val adminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
+            if (report.tournamentId.isNotBlank() && report.messageId.isNotBlank()) {
+                integrationSyncManager.deleteTournamentChatMessage(report.tournamentId, report.messageId)
+            }
+            if (report.reportedUserId.isNotBlank()) {
+                val matchedUser = (_uiState.value as? DashboardState.Success)?.users?.find { it.id == report.reportedUserId }
+                    ?: UserProfile(id = report.reportedUserId, username = report.reportedUserName.ifBlank { "Player" })
+                integrationSyncManager.setUserBanStatus(matchedUser, true, reason, adminEmail)
+            }
+            integrationSyncManager.resolveChatReport(report, "SENDER_BANNED_AND_DELETED", adminEmail)
+        }
+    }
+
+    fun toggleMasterShowBanners(enabled: Boolean) {
+        val current = _systemConfig.value
+        saveSystemConfig(current.copy(showBanners = enabled, updatedAt = System.currentTimeMillis()))
     }
 
     fun saveMission(mission: MissionItem) {
@@ -1940,13 +2104,11 @@ class TournamentDashboardViewModel(
     fun sendAdminTournamentChat(tournamentId: String, message: String, isPinned: Boolean = false) {
         if (message.isBlank()) return
         viewModelScope.launch(Dispatchers.IO) {
-            val adminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
-            val adminName = "ADMIN • ${adminEmail.substringBefore("@").uppercase()}"
             integrationSyncManager.sendAdminTournamentChatMessage(
                 tournamentId = tournamentId,
                 message = message,
                 isPinned = isPinned,
-                adminName = adminName
+                adminName = "VeloRix Admin"
             )
         }
     }

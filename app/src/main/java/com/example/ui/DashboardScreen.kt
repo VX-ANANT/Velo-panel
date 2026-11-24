@@ -206,7 +206,8 @@ fun DashboardScreen(
         }
     }
 
-    var currentHyperTheme by remember { mutableStateOf(HyperOSTheme.NEBULA_PURPLE) }
+    var currentHyperTheme by remember { mutableStateOf(HyperOSTheme.ELECTRIC_ROSE) }
+    var hubInitialSection by remember { mutableStateOf(IntegrationHubSection.TOURNAMENTS_RESULTS) }
     var showNotificationCenterDialog by remember { mutableStateOf(false) }
     var showBroadcastDialog by remember { mutableStateOf(false) }
     var showAdminProfileDialog by remember { mutableStateOf(false) }
@@ -240,14 +241,13 @@ fun DashboardScreen(
                         .padding(innerPadding)
                 ) {
                 if (selectedTab == "dashboard") {
-                    DashboardHeader(
-                        onProfileClick = { showAdminProfileDialog = true }, 
+                    V14DashboardHeader(
+                        onProfileClick = { showAdminProfileDialog = true },
                         onNavClick = onNavClick,
                         onNotificationsClick = { showNotificationCenterDialog = true },
                         onRefreshClick = { onRefreshClick?.invoke() },
                         unreadNotificationCount = (uiState as? DashboardState.Success)?.unreadNotificationCount ?: 0,
                         currentUserEmail = (uiState as? DashboardState.Success)?.currentUserEmail,
-                        accentColor = currentHyperTheme.primaryColor,
                         isSyncing = (uiState as? DashboardState.Success)?.isSyncing ?: false
                     )
                 }
@@ -295,7 +295,14 @@ fun DashboardScreen(
                                     onPublishCampaign = onPublishCampaign,
                                     onDeleteAnnouncement = { onDeleteAnnouncement?.invoke(it) },
                                     onRefreshClick = { onRefreshClick?.invoke() },
-                                    onOpenIntegrationHubClick = { selectedTab = "integration_hub" },
+                                    onOpenIntegrationHubClick = {
+                                        hubInitialSection = IntegrationHubSection.TOURNAMENTS_RESULTS
+                                        selectedTab = "integration_hub"
+                                    },
+                                    onOpenHubSectionClick = { section ->
+                                        hubInitialSection = section
+                                        selectedTab = "integration_hub"
+                                    },
                                     viewModel = viewModel
                                 )
                             }
@@ -303,6 +310,7 @@ fun DashboardScreen(
                                 if (viewModel != null) {
                                     AdminChannelsAndIntegrationHub(
                                         viewModel = viewModel,
+                                        initialSection = hubInitialSection,
                                         onCreateTournamentClick = onCreateTournamentClick,
                                         onTournamentClick = onTournamentClick,
                                         onSettingsClick = onSettingsClick
@@ -924,6 +932,7 @@ fun DashboardContent(
     onPublishCampaign: ((title: String, message: String, targetTopic: String, deepLink: String?) -> Unit)? = null,
     onRefreshClick: (() -> Unit)? = null,
     onOpenIntegrationHubClick: (() -> Unit)? = null,
+    onOpenHubSectionClick: ((IntegrationHubSection) -> Unit)? = null,
     viewModel: com.example.ui.viewmodel.TournamentDashboardViewModel? = null
 ) {
     var selectedTournamentId by remember(uiState.tournaments) {
@@ -954,17 +963,80 @@ fun DashboardContent(
         } catch (_: Exception) {}
     }
 
-    val totalPlatformDeposits = uiState.users.sumOf { maxOf(it.depositFunds, it.funds) }
-    val pendingQueueTotal = uiState.pendingCashoutsCount + uiState.openSupportComplaintsCount
+    // 100% REAL LIVE FIREBASE STREAMS (ZERO MOCK OR ASSUMED DATA)
+    val liveDeposits by (viewModel?.depositRequests?.collectAsState() ?: remember { mutableStateOf(emptyList()) })
+    val liveWithdrawals by (viewModel?.unifiedWithdrawals?.collectAsState() ?: remember { mutableStateOf(emptyList()) })
+    val liveUnifiedRequests by (viewModel?.unifiedRequests?.collectAsState() ?: remember { mutableStateOf(emptyList()) })
+    val liveChatReports by (viewModel?.chatReports?.collectAsState() ?: remember { mutableStateOf(emptyList()) })
+
+    val mergedWithdrawals = remember(liveWithdrawals, uiState.payoutRequests) {
+        val map = LinkedHashMap<String, com.example.domain.model.PayoutRequest>()
+        liveWithdrawals.forEach { if (it.id.isNotBlank()) map[it.id] = it }
+        uiState.payoutRequests.forEach { if (it.id.isNotBlank() && !map.containsKey(it.id)) map[it.id] = it }
+        map.values.toList()
+    }
+
+    val totalPlatformDeposits = remember(uiState.users) {
+        uiState.users.sumOf { maxOf(it.depositFunds, it.funds) }
+    }
+    val totalPaidOut = remember(mergedWithdrawals) {
+        mergedWithdrawals.filter {
+            !it.isDeposit && (it.status.equals("APPROVED", true) || it.status.equals("COMPLETED", true) || it.status.equals("PAID", true))
+        }.sumOf { it.vtAmount }
+    }
+    val totalPendingOut = remember(mergedWithdrawals) {
+        mergedWithdrawals.filter {
+            !it.isDeposit && it.status.equals("PENDING", true)
+        }.sumOf { it.vtAmount }
+    }
+    val pendingDepositsCount = remember(liveDeposits) {
+        liveDeposits.count { it.status.equals("PENDING", true) }
+    }
+    val pendingWithdrawalsCount = remember(mergedWithdrawals) {
+        mergedWithdrawals.count { !it.isDeposit && it.status.equals("PENDING", true) }
+    }
+    val openTicketsCount = remember(liveUnifiedRequests, uiState.openSupportComplaintsCount) {
+        if (liveUnifiedRequests.isNotEmpty()) {
+            liveUnifiedRequests.count { !it.status.equals("RESOLVED", true) && !it.status.equals("REJECTED", true) }
+        } else {
+            uiState.openSupportComplaintsCount
+        }
+    }
+    val pendingChatReportsCount = remember(liveChatReports) {
+        liveChatReports.count { !it.status.equals("RESOLVED", true) }
+    }
+    val activeMatchesCount = remember(uiState.tournaments) {
+        uiState.tournaments.count {
+            it.status.equals("LIVE", true) || it.status.equals("ONGOING", true) ||
+                it.status.equals("ACTIVE", true) || it.status.equals("UPCOMING", true)
+        }
+    }
+    val completedMatchesCount = remember(uiState.tournaments) {
+        uiState.tournaments.count { it.status.equals("COMPLETED", true) }
+    }
+    val occupiedSlots = remember(uiState.tournaments) {
+        uiState.tournaments.sumOf { it.registeredPlayers.coerceAtLeast(0) }
+    }
+    val totalSlots = remember(uiState.tournaments) {
+        uiState.tournaments.sumOf { it.maxPlayers.coerceAtLeast(0) }
+    }
+    val totalPrizePool = remember(uiState.tournaments) {
+        uiState.tournaments.sumOf { it.prizePool.toDouble().coerceAtLeast(0.0) }
+    }
+    val activePlayersCount = remember(uiState.users) {
+        uiState.users.count { !it.isBanned }
+    }
+    val totalActionQueue = pendingDepositsCount + pendingWithdrawalsCount + openTicketsCount + pendingChatReportsCount
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .background(Color.Black)
             .verticalScroll(scrollState)
-            .padding(horizontal = 16.dp, vertical = 10.dp)
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Active Global Announcements Banner (if any)
+        // Active Global Announcements Banner (if any live announcement exists)
         if (uiState.globalAnnouncements.isNotEmpty()) {
             GlobalAnnouncementsBanner(
                 announcements = uiState.globalAnnouncements,
@@ -972,574 +1044,494 @@ fun DashboardContent(
                 onPublishClick = { showPublishAnnouncementDialog = true },
                 onDeleteClick = { id -> onDeleteAnnouncement?.invoke(id) }
             )
-            Spacer(modifier = Modifier.height(12.dp))
         }
 
-        // 1. CLEAN 4-METRIC STRIP (Icon + Big Value + 1-Word Label)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            DashboardCompactStatCell(
-                modifier = Modifier.weight(1f),
-                icon = Icons.Default.Group,
-                iconTint = Color(0xFF38BDF8),
-                value = "${uiState.totalRegisteredUsersCount}",
-                label = "Players",
-                onClick = onProfilesClick
-            )
-            Box(modifier = Modifier.width(0.5.dp).height(40.dp).background(Color.White.copy(alpha = 0.08f)))
-            DashboardCompactStatCell(
-                modifier = Modifier.weight(1f),
-                icon = Icons.Default.EmojiEvents,
-                iconTint = Color(0xFF34D399),
-                value = "${uiState.tournaments.size}",
-                label = "Matches",
-                onClick = onTournamentsListClick
-            )
-            Box(modifier = Modifier.width(0.5.dp).height(40.dp).background(Color.White.copy(alpha = 0.08f)))
-            DashboardCompactStatCell(
-                modifier = Modifier.weight(1f),
-                icon = Icons.AutoMirrored.Filled.TrendingUp,
-                iconTint = Color(0xFFA855F7),
-                value = "₹${String.format(java.util.Locale.US, "%,.0f", totalPlatformDeposits)}",
-                label = "Deposits",
-                onClick = onFinancialAuditClick
-            )
-            Box(modifier = Modifier.width(0.5.dp).height(40.dp).background(Color.White.copy(alpha = 0.08f)))
-            DashboardCompactStatCell(
-                modifier = Modifier.weight(1f),
-                icon = Icons.Default.Payments,
-                iconTint = if (pendingQueueTotal > 0) Color(0xFFFF9F0A) else Color(0xFFA1A1AA),
-                value = "$pendingQueueTotal",
-                label = "Pending",
-                onClick = onPayoutsClick
+        // 1. V14 HORIZONTAL PILL HUB NAVIGATION STRIP
+        V14StaggeredEntrance(delayMillis = 20) {
+            V14QuickHubPillStrip(
+                pendingWalletCount = pendingDepositsCount + pendingWithdrawalsCount,
+                openTicketsCount = openTicketsCount,
+                pendingChatReportsCount = pendingChatReportsCount,
+                onOpenHubSection = { section ->
+                    if (onOpenHubSectionClick != null) onOpenHubSectionClick(section)
+                    else onOpenIntegrationHubClick?.invoke()
+                },
+                onBroadcastClick = { showPublishAnnouncementDialog = true }
             )
         }
 
-        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
-
-        // 2. 4 PRIMARY QUICK ACTIONS ROW (1-Tap Icon + Short Label)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            DashboardQuickActionButton(
-                modifier = Modifier.weight(1f),
-                icon = Icons.Default.Add,
-                iconTint = Color(0xFF38BDF8),
-                label = "New Match",
-                onClick = onCreateTournamentClick
-            )
-            Box(modifier = Modifier.width(0.5.dp).height(34.dp).background(Color.White.copy(alpha = 0.08f)))
-            DashboardQuickActionButton(
-                modifier = Modifier.weight(1f),
-                icon = Icons.Default.Payments,
-                iconTint = Color(0xFF34D399),
-                label = "Send Funds",
-                onClick = onPayoutsClick
-            )
-            Box(modifier = Modifier.width(0.5.dp).height(34.dp).background(Color.White.copy(alpha = 0.08f)))
-            DashboardQuickActionButton(
-                modifier = Modifier.weight(1f),
-                icon = Icons.Default.GridView,
-                iconTint = Color(0xFFFBBF24),
-                label = "10 Channels",
-                onClick = { onOpenIntegrationHubClick?.invoke() }
-            )
-            Box(modifier = Modifier.width(0.5.dp).height(34.dp).background(Color.White.copy(alpha = 0.08f)))
-            DashboardQuickActionButton(
-                modifier = Modifier.weight(1f),
-                icon = Icons.AutoMirrored.Filled.Send,
-                iconTint = Color(0xFFA855F7),
-                label = "Broadcast",
-                onClick = { showPublishAnnouncementDialog = true }
+        // 2. V14 HERO PLATFORM LEDGER CARD (TOTAL BALANCE + DUAL PILL CTAs + SLOT PROGRESS)
+        V14StaggeredEntrance(delayMillis = 70) {
+            V14PlatformLedgerCard(
+                totalPlatformBalance = totalPlatformDeposits,
+                totalPaidOut = totalPaidOut,
+                totalPendingOut = totalPendingOut,
+                occupiedSlots = occupiedSlots,
+                totalSlots = totalSlots,
+                onCreateMatchClick = onCreateTournamentClick,
+                onWalletClick = {
+                    if (onOpenHubSectionClick != null) onOpenHubSectionClick(IntegrationHubSection.WALLET_PAYOUTS)
+                    else onPayoutsClick()
+                },
+                onLedgerClick = onFinancialAuditClick
             )
         }
 
-        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
-
-        // 3. CLEAN 3-SECTION MODE SELECTOR (Matches | All Tools | Controls)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 6.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            val homeTabs = listOf(
-                Triple(0, Icons.Default.EmojiEvents, "Matches (${uiState.tournaments.size})"),
-                Triple(1, Icons.Default.Apps, "Tools"),
-                Triple(2, Icons.Default.Tune, "Controls")
+        // 3. V14 2x2 BENTO KPI GRID (YOUTUBE PINK-RED HERO CARD + 3 MINIMAL DARK TILES)
+        V14StaggeredEntrance(delayMillis = 120) {
+            V14BentoKpiGrid(
+                activeMatchesCount = activeMatchesCount,
+                totalMatchesCount = uiState.tournaments.size,
+                registeredPlayersCount = uiState.totalRegisteredUsersCount,
+                activePlayersCount = activePlayersCount,
+                actionQueueCount = totalActionQueue,
+                pendingPayoutsCount = pendingWithdrawalsCount,
+                openTicketsCount = openTicketsCount,
+                totalPrizePool = totalPrizePool,
+                completedMatchesCount = completedMatchesCount,
+                onMatchesClick = onTournamentsListClick,
+                onPlayersClick = onProfilesClick,
+                onActionQueueClick = {
+                    if (onOpenHubSectionClick != null) onOpenHubSectionClick(IntegrationHubSection.UNIFIED_REQUESTS)
+                    else onOpenIntegrationHubClick?.invoke()
+                },
+                onRevenueClick = onFinancialAuditClick
             )
-            homeTabs.forEach { (idx, iconVec, labelText) ->
-                val selected = homeTab == idx
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clickable { homeTab = idx }
-                        .padding(top = 8.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp)
-                    ) {
-                        Icon(
-                            imageVector = iconVec,
-                            contentDescription = labelText,
-                            tint = if (selected) Color(0xFF38BDF8) else Color(0xFF71717A),
-                            modifier = Modifier.size(17.dp)
-                        )
-                        Text(
-                            text = labelText,
-                            fontSize = 11.5.sp,
-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                            color = if (selected) Color.White else Color(0xFF71717A),
-                            maxLines = 1,
-                            softWrap = false
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Box(
-                        modifier = Modifier
-                            .height(2.dp)
-                            .width(48.dp)
-                            .background(if (selected) Color(0xFF38BDF8) else Color.Transparent)
-                    )
-                }
-            }
         }
 
-        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+        // 4. V14 LIVE ANALYTICS DUAL-BAR CHART (100% REAL FIREBASE DATA)
+        V14StaggeredEntrance(delayMillis = 170) {
+            V14LiveVolumeChartCard(
+                tournaments = uiState.tournaments,
+                deposits = liveDeposits,
+                withdrawals = mergedWithdrawals,
+                onInspectAnalyticsClick = onFinancialAuditClick
+            )
+        }
 
-        // 4. SELECTED TAB CONTENT
-        when (homeTab) {
-            0 -> {
-                // MATCHES VIEW
-                val statuses = listOf("ALL", "UPCOMING", "LIVE", "COMPLETED")
+        // 5. V14 RECENT MATCHES, HUB TOOLS & CONTROLS CARD
+        V14StaggeredEntrance(delayMillis = 220) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(V14CardSurface)
+                    .border(0.75.dp, V14Border, RoundedCornerShape(22.dp))
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // V14 Segmented Pill Mode Selector
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(18.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color(0xFF07070A))
+                        .border(0.5.dp, V14Border, RoundedCornerShape(16.dp))
+                        .padding(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    statuses.forEach { status ->
-                        val selected = statusFilter == status
-                        val count = if (status == "ALL") uiState.tournaments.size else uiState.tournaments.count {
-                            if (status == "LIVE") it.status.equals("LIVE", true) || it.status.equals("ONGOING", true) || it.status.equals("ACTIVE", true)
-                            else it.status.equals(status, true)
-                        }
-                        Text(
-                            text = "${status.lowercase().replaceFirstChar { it.uppercase() }} ($count)",
-                            fontSize = 11.5.sp,
-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                            color = if (selected) Color(0xFF38BDF8) else Color(0xFF71717A),
+                    val homeTabs = listOf(
+                        Triple(0, Icons.Default.EmojiEvents, "Matches (${uiState.tournaments.size})"),
+                        Triple(1, Icons.Default.Apps, "Tools"),
+                        Triple(2, Icons.Default.Tune, "Controls")
+                    )
+                    homeTabs.forEach { (idx, iconVec, labelText) ->
+                        val selected = homeTab == idx
+                        Row(
                             modifier = Modifier
-                                .clickable { statusFilter = status }
-                                .padding(vertical = 4.dp)
-                        )
-                    }
-                }
-
-                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
-
-                val filteredTournaments = remember(uiState.tournaments, statusFilter) {
-                    if (statusFilter == "ALL") uiState.tournaments
-                    else uiState.tournaments.filter {
-                        if (statusFilter == "LIVE") it.status.equals("LIVE", true) || it.status.equals("ONGOING", true) || it.status.equals("ACTIVE", true)
-                        else it.status.equals(statusFilter, true)
-                    }
-                }
-
-                if (filteredTournaments.isEmpty()) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 36.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.EmojiEvents,
-                            contentDescription = null,
-                            tint = Color(0xFF52525B),
-                            modifier = Modifier.size(28.dp)
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "No matches found",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color(0xFFA1A1AA)
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = "+ Create New Match",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF38BDF8),
-                            modifier = Modifier.clickable { onCreateTournamentClick() }
-                        )
-                    }
-                } else {
-                    filteredTournaments.take(8).forEach { tournament ->
-                        val statusDotColor = when (tournament.status.uppercase()) {
-                            "LIVE", "ONGOING", "ACTIVE" -> Color(0xFF34D399)
-                            "COMPLETED" -> Color(0xFFA1A1AA)
-                            "CANCELLED" -> Color(0xFFF87171)
-                            else -> Color(0xFF38BDF8)
-                        }
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    selectedTournamentId = tournament.id
-                                    onTournamentClick(tournament.id)
-                                }
-                                .padding(vertical = 12.dp)
+                                .weight(1f)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(
+                                    if (selected) V14AccentPrimary else Color.Transparent
+                                )
+                                .clickable { homeTab = idx }
+                                .padding(vertical = 9.dp, horizontal = 6.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
+                            Icon(
+                                imageVector = iconVec,
+                                contentDescription = labelText,
+                                tint = if (selected) Color.White else V14TextSecondary,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                text = labelText,
+                                fontSize = 11.sp,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (selected) Color.White else V14TextSecondary,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+
+                // Animated Section Crossfade
+                AnimatedContent(
+                    targetState = homeTab,
+                    transitionSpec = {
+                        fadeIn(tween(220)) togetherWith fadeOut(tween(150))
+                    },
+                    label = "v14HomeTabContent"
+                ) { currentMode ->
+                    when (currentMode) {
+                        0 -> {
+                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                // Status filter pills
+                                val statuses = listOf("ALL", "UPCOMING", "LIVE", "COMPLETED")
                                 Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    modifier = Modifier.weight(1f)
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(7.dp)
-                                            .background(statusDotColor, CircleShape)
-                                    )
-                                    Column {
-                                        Text(
-                                            text = tournament.title,
-                                            fontSize = 14.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color.White,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                        Text(
-                                            text = "${tournament.format} • ${tournament.map.ifBlank { "Bermuda" }} • ${tournament.registeredPlayers}/${tournament.maxPlayers} slots • ₹${tournament.prizePool.toInt()}",
-                                            fontSize = 11.sp,
-                                            color = Color(0xFF8E8E93),
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
+                                    statuses.forEach { status ->
+                                        val selected = statusFilter == status
+                                        val count = if (status == "ALL") uiState.tournaments.size else uiState.tournaments.count {
+                                            if (status == "LIVE") it.status.equals("LIVE", true) || it.status.equals("ONGOING", true) || it.status.equals("ACTIVE", true)
+                                            else it.status.equals(status, true)
+                                        }
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(14.dp))
+                                                .background(
+                                                    if (selected) V14AccentPrimary.copy(alpha = 0.18f) else V14CardElevated
+                                                )
+                                                .border(
+                                                    0.75.dp,
+                                                    if (selected) V14AccentBright else V14Border,
+                                                    RoundedCornerShape(14.dp)
+                                                )
+                                                .clickable { statusFilter = status }
+                                                .padding(horizontal = 11.dp, vertical = 6.dp)
+                                        ) {
+                                            Text(
+                                                text = "${status.lowercase().replaceFirstChar { it.uppercase() }} ($count)",
+                                                fontSize = 11.sp,
+                                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                                color = if (selected) V14AccentBright else V14TextSecondary,
+                                                maxLines = 1,
+                                                softWrap = false
+                                            )
+                                        }
                                     }
                                 }
 
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    IconButton(
-                                        onClick = {
-                                            if (viewModel != null) {
-                                                tournamentForStandingsModal = tournament
-                                            } else {
-                                                onSettingsClick(tournament.id)
-                                            }
-                                        },
+                                val filteredTournaments = remember(uiState.tournaments, statusFilter) {
+                                    if (statusFilter == "ALL") uiState.tournaments
+                                    else uiState.tournaments.filter {
+                                        if (statusFilter == "LIVE") it.status.equals("LIVE", true) || it.status.equals("ONGOING", true) || it.status.equals("ACTIVE", true)
+                                        else it.status.equals(statusFilter, true)
+                                    }
+                                }
+
+                                if (filteredTournaments.isEmpty()) {
+                                    Column(
                                         modifier = Modifier
-                                            .size(32.dp)
-                                            .background(Color(0xFFFBBF24).copy(alpha = 0.12f), CircleShape)
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .background(Color(0xFF07070A))
+                                            .border(0.5.dp, V14Border, RoundedCornerShape(16.dp))
+                                            .padding(vertical = 28.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.EmojiEvents,
-                                            contentDescription = "Declare Winners",
-                                            tint = Color(0xFFFBBF24),
-                                            modifier = Modifier.size(16.dp)
+                                            contentDescription = null,
+                                            tint = V14TextMuted,
+                                            modifier = Modifier.size(26.dp)
+                                        )
+                                        Text(
+                                            text = "No matches in $statusFilter",
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = V14TextSecondary
+                                        )
+                                        Text(
+                                            text = "+ Create New Match",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = V14AccentBright,
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .background(V14AccentPrimary.copy(alpha = 0.14f))
+                                                .clickable { onCreateTournamentClick() }
+                                                .padding(horizontal = 12.dp, vertical = 6.dp)
                                         )
                                     }
-                                    IconButton(
-                                        onClick = { onBracketClick(tournament.id) },
-                                        modifier = Modifier
-                                            .size(32.dp)
-                                            .background(Color.White.copy(alpha = 0.06f), CircleShape)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.AccountTree,
-                                            contentDescription = "Bracket",
-                                            tint = Color(0xFFA1A1AA),
-                                            modifier = Modifier.size(15.dp)
+                                } else {
+                                    filteredTournaments.take(8).forEach { tournament ->
+                                        V14MatchActivityRow(
+                                            tournament = tournament,
+                                            onOpenClick = {
+                                                selectedTournamentId = tournament.id
+                                                onTournamentClick(tournament.id)
+                                            },
+                                            onWinnersClick = {
+                                                if (viewModel != null) tournamentForStandingsModal = tournament
+                                                else onSettingsClick(tournament.id)
+                                            },
+                                            onBracketClick = { onBracketClick(tournament.id) },
+                                            onEditClick = { onSettingsClick(tournament.id) }
                                         )
                                     }
-                                    IconButton(
-                                        onClick = { onSettingsClick(tournament.id) },
+
+                                    Row(
                                         modifier = Modifier
-                                            .size(32.dp)
-                                            .background(Color(0xFF38BDF8).copy(alpha = 0.12f), CircleShape)
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(14.dp))
+                                            .background(V14CardElevated)
+                                            .clickable { onTournamentsListClick() }
+                                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
+                                        Text(
+                                            text = "View All Matches (${uiState.tournaments.size})",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = V14AccentBright
+                                        )
                                         Icon(
-                                            imageVector = Icons.Default.Edit,
-                                            contentDescription = "Edit Match",
-                                            tint = Color(0xFF38BDF8),
+                                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                            contentDescription = null,
+                                            tint = V14AccentBright,
                                             modifier = Modifier.size(15.dp)
                                         )
                                     }
                                 }
                             }
+                        }
 
-                            val roomIdVal = tournament.roomDetails?.roomId.orEmpty()
-                            val roomPassVal = tournament.roomDetails?.roomPassword.orEmpty()
-                            if (roomIdVal.isNotBlank()) {
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = "Room: $roomIdVal  •  Pass: ${roomPassVal.ifBlank { "None" }}",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = Color(0xFF34D399),
-                                    modifier = Modifier.padding(start = 15.dp)
+                        1 -> {
+                            // ALL TOOLS VIEW (Clean 2-Column Visual Grid)
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    DashboardVisualHubCell(
+                                        modifier = Modifier.weight(1f),
+                                        icon = Icons.Default.Group,
+                                        iconTint = V14AccentBright,
+                                        title = "Players",
+                                        badge = "${uiState.totalRegisteredUsersCount}",
+                                        onClick = onProfilesClick
+                                    )
+                                    Box(modifier = Modifier.width(0.5.dp).height(64.dp).background(V14Border))
+                                    DashboardVisualHubCell(
+                                        modifier = Modifier.weight(1f),
+                                        icon = Icons.Default.Payments,
+                                        iconTint = Color(0xFFFBBF24),
+                                        title = "Wallet & UPI",
+                                        badge = "${pendingWithdrawalsCount + pendingDepositsCount} pending",
+                                        onClick = {
+                                            if (onOpenHubSectionClick != null) onOpenHubSectionClick(IntegrationHubSection.WALLET_PAYOUTS)
+                                            else onPayoutsClick()
+                                        }
+                                    )
+                                }
+                                HorizontalDivider(thickness = 0.5.dp, color = V14Border)
+
+                                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    DashboardVisualHubCell(
+                                        modifier = Modifier.weight(1f),
+                                        icon = Icons.Default.ConfirmationNumber,
+                                        iconTint = Color(0xFF34D399),
+                                        title = "Redeem Vault",
+                                        badge = "Promo Codes",
+                                        onClick = {
+                                            if (onOpenHubSectionClick != null) onOpenHubSectionClick(IntegrationHubSection.REDEEM_VAULT)
+                                            else onOpenIntegrationHubClick?.invoke()
+                                        }
+                                    )
+                                    Box(modifier = Modifier.width(0.5.dp).height(64.dp).background(V14Border))
+                                    DashboardVisualHubCell(
+                                        modifier = Modifier.weight(1f),
+                                        icon = Icons.Default.SupportAgent,
+                                        iconTint = V14AccentBright,
+                                        title = "12-Ch Desk",
+                                        badge = "$openTicketsCount open",
+                                        onClick = {
+                                            if (onOpenHubSectionClick != null) onOpenHubSectionClick(IntegrationHubSection.UNIFIED_REQUESTS)
+                                            else onComplaintsClick()
+                                        }
+                                    )
+                                }
+                                HorizontalDivider(thickness = 0.5.dp, color = V14Border)
+
+                                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    DashboardVisualHubCell(
+                                        modifier = Modifier.weight(1f),
+                                        icon = Icons.Default.EmojiEvents,
+                                        iconTint = Color(0xFFFBBF24),
+                                        title = "Leaderboard",
+                                        badge = "Standings",
+                                        onClick = onLeaderboardClick
+                                    )
+                                    Box(modifier = Modifier.width(0.5.dp).height(64.dp).background(V14Border))
+                                    DashboardVisualHubCell(
+                                        modifier = Modifier.weight(1f),
+                                        icon = Icons.AutoMirrored.Filled.TrendingUp,
+                                        iconTint = Color(0xFF34D399),
+                                        title = "Revenue",
+                                        badge = "₹${String.format(java.util.Locale.US, "%,.0f", totalPlatformDeposits)}",
+                                        onClick = onFinancialAuditClick
+                                    )
+                                }
+                                HorizontalDivider(thickness = 0.5.dp, color = V14Border)
+
+                                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    DashboardVisualHubCell(
+                                        modifier = Modifier.weight(1f),
+                                        icon = Icons.Default.Campaign,
+                                        iconTint = V14AccentBright,
+                                        title = "Banners",
+                                        badge = "${uiState.banners.size} active",
+                                        onClick = {
+                                            if (onOpenHubSectionClick != null) onOpenHubSectionClick(IntegrationHubSection.BANNERS_BROADCASTS)
+                                            else onCheckInTokensClick()
+                                        }
+                                    )
+                                    Box(modifier = Modifier.width(0.5.dp).height(64.dp).background(V14Border))
+                                    DashboardVisualHubCell(
+                                        modifier = Modifier.weight(1f),
+                                        icon = Icons.Default.Shield,
+                                        iconTint = V14TextSecondary,
+                                        title = "Admin Team",
+                                        badge = "${uiState.totalActiveAdminsCount} staff",
+                                        onClick = onAdminsClick
+                                    )
+                                }
+                                HorizontalDivider(thickness = 0.5.dp, color = V14Border)
+
+                                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    DashboardVisualHubCell(
+                                        modifier = Modifier.weight(1f),
+                                        icon = Icons.Default.VerifiedUser,
+                                        iconTint = Color(0xFF34D399),
+                                        title = "Audit Ledger",
+                                        badge = "Inspect",
+                                        onClick = { showFinancialAuditDialog = true }
+                                    )
+                                    Box(modifier = Modifier.width(0.5.dp).height(64.dp).background(V14Border))
+                                    DashboardVisualHubCell(
+                                        modifier = Modifier.weight(1f),
+                                        icon = Icons.Default.Settings,
+                                        iconTint = V14TextSecondary,
+                                        title = "Cloud Status",
+                                        badge = "Online",
+                                        onClick = { showFirebaseOptimizationDialog = true }
+                                    )
+                                }
+                            }
+                        }
+
+                        else -> {
+                            // CONTROLS & PUSH NOTIFICATION VIEW
+                            val firebaseSuiteState by com.example.firebase.VelorixFirebaseSuite.suiteState.collectAsState()
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { showManualNotificationSection = !showManualNotificationSection }
+                                        .padding(vertical = 10.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.Send,
+                                            contentDescription = null,
+                                            tint = V14AccentBright,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Text(
+                                            text = "Send Push Alert",
+                                            fontSize = 13.5.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = V14TextPrimary
+                                        )
+                                    }
+                                    Icon(
+                                        imageVector = if (showManualNotificationSection) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                        contentDescription = null,
+                                        tint = V14TextSecondary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+
+                                AnimatedVisibility(visible = showManualNotificationSection) {
+                                    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+                                        ManualNotificationComposerSection(
+                                            tournaments = uiState.tournaments,
+                                            users = uiState.users,
+                                            onPublishAnnouncement = onPublishAnnouncement,
+                                            onPublishCampaign = onPublishCampaign
+                                        )
+                                    }
+                                }
+
+                                HorizontalDivider(thickness = 0.5.dp, color = V14Border)
+
+                                DashboardToggleRow(
+                                    title = "Auto-Verify Players",
+                                    subtitle = "Approve Free Fire UIDs automatically",
+                                    checked = autoApproveKyc,
+                                    onCheckedChange = {
+                                        autoApproveKyc = it
+                                        syncPlatformControl("auto_approve_kyc", it)
+                                    }
+                                )
+                                HorizontalDivider(thickness = 0.5.dp, color = V14Border)
+                                DashboardToggleRow(
+                                    title = "Auto-Send Room ID",
+                                    subtitle = "Send room credentials 15m before start",
+                                    checked = instantRoomDispatch,
+                                    onCheckedChange = {
+                                        instantRoomDispatch = it
+                                        syncPlatformControl("instant_room_dispatch", it)
+                                    }
+                                )
+                                HorizontalDivider(thickness = 0.5.dp, color = V14Border)
+                                DashboardToggleRow(
+                                    title = "Allow Late Join",
+                                    subtitle = "Open unclaimed slots 5m before start",
+                                    checked = allowLateCheckIn,
+                                    onCheckedChange = {
+                                        allowLateCheckIn = it
+                                        syncPlatformControl("allow_late_checkin", it)
+                                    }
+                                )
+                                HorizontalDivider(thickness = 0.5.dp, color = V14Border)
+                                DashboardToggleRow(
+                                    title = "Block Emulators",
+                                    subtitle = "Mobile-only tournament lobbies",
+                                    checked = antiCheatStrictMode,
+                                    onCheckedChange = {
+                                        antiCheatStrictMode = it
+                                        syncPlatformControl("anti_cheat_strict_mode", it)
+                                    }
+                                )
+                                HorizontalDivider(thickness = 0.5.dp, color = V14Border)
+                                DashboardToggleRow(
+                                    title = "Crash Reporting",
+                                    subtitle = "Real-time app diagnostics",
+                                    checked = firebaseSuiteState.crashlyticsEnabled,
+                                    onCheckedChange = { com.example.firebase.VelorixFirebaseSuite.setCrashlyticsEnabled(it) }
                                 )
                             }
                         }
-                        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
-                    }
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onTournamentsListClick() }
-                            .padding(vertical = 12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "View All Matches (${uiState.tournaments.size})",
-                            fontSize = 12.5.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color(0xFF38BDF8)
-                        )
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                            contentDescription = null,
-                            tint = Color(0xFF38BDF8),
-                            modifier = Modifier.size(14.dp)
-                        )
-                    }
-                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
-                }
-            }
-
-            1 -> {
-                // ALL TOOLS VIEW (Clean 2-Column Visual Grid with Short Labels)
-                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    DashboardVisualHubCell(
-                        modifier = Modifier.weight(1f),
-                        icon = Icons.Default.Group,
-                        iconTint = Color(0xFF38BDF8),
-                        title = "Players",
-                        badge = "${uiState.totalRegisteredUsersCount}",
-                        onClick = onProfilesClick
-                    )
-                    Box(modifier = Modifier.width(0.5.dp).height(64.dp).background(Color.White.copy(alpha = 0.08f)))
-                    DashboardVisualHubCell(
-                        modifier = Modifier.weight(1f),
-                        icon = Icons.Default.Payments,
-                        iconTint = Color(0xFFFF9F0A),
-                        title = "Payouts",
-                        badge = "${uiState.pendingCashoutsCount} pending",
-                        onClick = onPayoutsClick
-                    )
-                }
-                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
-
-                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    DashboardVisualHubCell(
-                        modifier = Modifier.weight(1f),
-                        icon = Icons.Default.GridView,
-                        iconTint = Color(0xFF34D399),
-                        title = "10-Channel Hub",
-                        badge = "Live Sync",
-                        onClick = { onOpenIntegrationHubClick?.invoke() }
-                    )
-                    Box(modifier = Modifier.width(0.5.dp).height(64.dp).background(Color.White.copy(alpha = 0.08f)))
-                    DashboardVisualHubCell(
-                        modifier = Modifier.weight(1f),
-                        icon = Icons.Default.SupportAgent,
-                        iconTint = Color(0xFFF87171),
-                        title = "Support Desk",
-                        badge = "${uiState.openSupportComplaintsCount} open",
-                        onClick = onComplaintsClick
-                    )
-                }
-                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
-
-                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    DashboardVisualHubCell(
-                        modifier = Modifier.weight(1f),
-                        icon = Icons.Default.EmojiEvents,
-                        iconTint = Color(0xFFFBBF24),
-                        title = "Leaderboard",
-                        badge = "Standings",
-                        onClick = onLeaderboardClick
-                    )
-                    Box(modifier = Modifier.width(0.5.dp).height(64.dp).background(Color.White.copy(alpha = 0.08f)))
-                    DashboardVisualHubCell(
-                        modifier = Modifier.weight(1f),
-                        icon = Icons.AutoMirrored.Filled.TrendingUp,
-                        iconTint = Color(0xFFA855F7),
-                        title = "Revenue",
-                        badge = "₹${String.format(java.util.Locale.US, "%,.0f", totalPlatformDeposits)}",
-                        onClick = onFinancialAuditClick
-                    )
-                }
-                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
-
-                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    DashboardVisualHubCell(
-                        modifier = Modifier.weight(1f),
-                        icon = Icons.Default.DashboardCustomize,
-                        iconTint = Color(0xFFEC4899),
-                        title = "Banners & PINs",
-                        badge = "${uiState.banners.size} active",
-                        onClick = onCheckInTokensClick
-                    )
-                    Box(modifier = Modifier.width(0.5.dp).height(64.dp).background(Color.White.copy(alpha = 0.08f)))
-                    DashboardVisualHubCell(
-                        modifier = Modifier.weight(1f),
-                        icon = Icons.Default.Shield,
-                        iconTint = Color(0xFF38BDF8),
-                        title = "Admin Team",
-                        badge = "${uiState.totalActiveAdminsCount} staff",
-                        onClick = onAdminsClick
-                    )
-                }
-                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
-
-                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    DashboardVisualHubCell(
-                        modifier = Modifier.weight(1f),
-                        icon = Icons.Default.VerifiedUser,
-                        iconTint = Color(0xFF34D399),
-                        title = "Audit Ledger",
-                        badge = "Inspect",
-                        onClick = { showFinancialAuditDialog = true }
-                    )
-                    Box(modifier = Modifier.width(0.5.dp).height(64.dp).background(Color.White.copy(alpha = 0.08f)))
-                    DashboardVisualHubCell(
-                        modifier = Modifier.weight(1f),
-                        icon = Icons.Default.Settings,
-                        iconTint = Color(0xFFA1A1AA),
-                        title = "Cloud Status",
-                        badge = "Online",
-                        onClick = { showFirebaseOptimizationDialog = true }
-                    )
-                }
-                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
-            }
-
-            2 -> {
-                // CONTROLS & PUSH NOTIFICATION VIEW
-                val firebaseSuiteState by com.example.firebase.VelorixFirebaseSuite.suiteState.collectAsState()
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { showManualNotificationSection = !showManualNotificationSection }
-                        .padding(vertical = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.Send,
-                            contentDescription = null,
-                            tint = Color(0xFF38BDF8),
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Text(
-                            text = "Send Push Alert",
-                            fontSize = 13.5.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color.White
-                        )
-                    }
-                    Icon(
-                        imageVector = if (showManualNotificationSection) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                        contentDescription = null,
-                        tint = Color(0xFF71717A),
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-
-                AnimatedVisibility(visible = showManualNotificationSection) {
-                    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
-                        ManualNotificationComposerSection(
-                            tournaments = uiState.tournaments,
-                            users = uiState.users,
-                            onPublishAnnouncement = onPublishAnnouncement,
-                            onPublishCampaign = onPublishCampaign
-                        )
                     }
                 }
-
-                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
-
-                DashboardToggleRow(
-                    title = "Auto-Verify Players",
-                    subtitle = "Approve Free Fire UIDs automatically",
-                    checked = autoApproveKyc,
-                    onCheckedChange = {
-                        autoApproveKyc = it
-                        syncPlatformControl("auto_approve_kyc", it)
-                    }
-                )
-                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
-                DashboardToggleRow(
-                    title = "Auto-Send Room ID",
-                    subtitle = "Send room credentials 15m before start",
-                    checked = instantRoomDispatch,
-                    onCheckedChange = {
-                        instantRoomDispatch = it
-                        syncPlatformControl("instant_room_dispatch", it)
-                    }
-                )
-                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
-                DashboardToggleRow(
-                    title = "Allow Late Join",
-                    subtitle = "Open unclaimed slots 5m before start",
-                    checked = allowLateCheckIn,
-                    onCheckedChange = {
-                        allowLateCheckIn = it
-                        syncPlatformControl("allow_late_checkin", it)
-                    }
-                )
-                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
-                DashboardToggleRow(
-                    title = "Block Emulators",
-                    subtitle = "Mobile-only tournament lobbies",
-                    checked = antiCheatStrictMode,
-                    onCheckedChange = {
-                        antiCheatStrictMode = it
-                        syncPlatformControl("anti_cheat_strict_mode", it)
-                    }
-                )
-                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
-                DashboardToggleRow(
-                    title = "Crash Reporting",
-                    subtitle = "Real-time app diagnostics",
-                    checked = firebaseSuiteState.crashlyticsEnabled,
-                    onCheckedChange = { com.example.firebase.VelorixFirebaseSuite.setCrashlyticsEnabled(it) }
-                )
-                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
             }
         }
 
-        Spacer(modifier = Modifier.height(110.dp))
+        Spacer(modifier = Modifier.height(106.dp))
 
         if (showPublishAnnouncementDialog) {
             PublishAnnouncementDialog(
@@ -2448,9 +2440,9 @@ fun SystemHubScreenContent(
     val systemItems = listOf(
         AppHubItem(
             id = "integration_hub",
-            title = "10 Channels, DPDP & System Config",
-            description = "Manage #account-deletions, #data-exports, UTR deposits, tokens, missions, remote config & lobby chat",
-            badge = "10 Channels",
+            title = "Admin Hub, 12-Channel Desk & Config",
+            description = "Matches, Wallet/UPI & Vouchers, Redeem Vault, 12-Channel Tickets, Players/Chat, Banners & 6-Flag Config",
+            badge = "7 Modules",
             icon = Icons.Default.GridView,
             iconGradient = listOf(Color(0xFF34D399), Color(0xFF38BDF8))
         ),
