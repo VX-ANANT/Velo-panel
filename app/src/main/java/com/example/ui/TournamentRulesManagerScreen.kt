@@ -238,48 +238,63 @@ fun TournamentRulesManagerScreen(
     var showTournamentDropdown by remember { mutableStateOf(false) }
     var activePresetName by remember { mutableStateOf<String?>(null) }
 
-    GlassBackgroundBox(accentColor = VelorixAccent) {
-        Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = {
-                        Column {
-                            Text(
-                                text = "Tournament Rules & Config",
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                            Text(
-                                text = "MANUAL ENTRY & FIRESTORE LIVE SYNC",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = VelorixAccentLight,
-                                letterSpacing = 1.2.sp
-                            )
-                        }
-                    },
-                    navigationIcon = {
-                        Box(
-                            modifier = Modifier
-                                .padding(8.dp)
-                                .size(38.dp)
-                                .background(Color(0x332A2045), CircleShape)
-                                .border(1.dp, Color.White.copy(alpha = 0.25f), CircleShape)
-                                .clickable { onNavigateBack() },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Back",
-                                tint = Color.White,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    },
-                    actions = {
-                        IconButton(
-                            onClick = {
+    Scaffold(
+        containerColor = V14Bg,
+        topBar = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(V14Bg)
+                    .statusBarsPadding()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(V14CardSurface)
+                            .border(1.dp, V14Border, CircleShape)
+                            .clickable { onNavigateBack() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = Color.White,
+                            modifier = Modifier.size(19.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Tournament Rules & Config",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            letterSpacing = (-0.3).sp,
+                            color = V14TextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "MANUAL ENTRY & FIRESTORE LIVE SYNC",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = V14TextMuted,
+                            letterSpacing = 1.1.sp
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(V14CardSurface)
+                            .border(1.dp, V14Border, CircleShape)
+                            .clickable {
                                 if (currentTournament != null) {
                                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                                     val formattedRules = buildString {
@@ -314,34 +329,37 @@ fun TournamentRulesManagerScreen(
                                     clipboard.setPrimaryClip(clip)
                                     GlobalErrorManager.emitSuccess("Tournament rules copied to clipboard!")
                                 }
-                            }
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.ContentCopy,
-                                contentDescription = "Copy Rules",
-                                tint = Color.White
-                            )
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
-                )
-            },
-            bottomBar = {
-                // Persistent Save Bar
-                if (currentTournament != null) {
-                    Column(
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.ContentCopy,
+                            contentDescription = "Copy Rules",
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+                HorizontalDivider(thickness = 0.5.dp, color = V14Border)
+            }
+        },
+        bottomBar = {
+            // Persistent Save Bar
+            if (currentTournament != null) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(V14Bg)
+                        .navigationBarsPadding()
+                ) {
+                    HorizontalDivider(thickness = 0.5.dp, color = V14Border)
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(Color.Black)
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.12f))
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = "Target: ${currentTournament.title}",
@@ -433,8 +451,7 @@ fun TournamentRulesManagerScreen(
                         }
                     }
                 }
-            },
-            containerColor = Color.Transparent
+            }
         ) { innerPadding ->
             if (tournaments.isEmpty()) {
                 Box(
@@ -638,23 +655,26 @@ fun TournamentRulesManagerScreen(
                                         onClick = { galleryLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
                                         modifier = Modifier.weight(1f).height(44.dp),
                                         shape = RoundedCornerShape(10.dp),
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6366F1))
+                                        colors = ButtonDefaults.buttonColors(containerColor = V14AccentPrimary)
                                     ) {
                                         Icon(Icons.Default.CloudUpload, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
                                         Spacer(modifier = Modifier.width(6.dp))
-                                        Text("UPLOAD PHOTO", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        Text("UPLOAD PHOTO", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                     }
 
                                     OutlinedButton(
                                         onClick = { cameraLauncher.launch(null) },
                                         modifier = Modifier.weight(1f).height(44.dp),
                                         shape = RoundedCornerShape(10.dp),
-                                        border = BorderStroke(1.dp, VelorixAccent),
-                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = VelorixAccentLight)
+                                        border = BorderStroke(1.dp, V14Border),
+                                        colors = ButtonDefaults.outlinedButtonColors(
+                                            containerColor = V14CardElevated,
+                                            contentColor = V14TextPrimary
+                                        )
                                     ) {
-                                        Icon(Icons.Default.PhotoCamera, contentDescription = null, tint = VelorixAccentLight, modifier = Modifier.size(16.dp))
+                                        Icon(Icons.Default.PhotoCamera, contentDescription = null, tint = V14AccentBright, modifier = Modifier.size(16.dp))
                                         Spacer(modifier = Modifier.width(6.dp))
-                                        Text("CAMERA", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        Text("CAMERA", color = V14TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                     }
                                 }
 
@@ -881,7 +901,7 @@ fun TournamentRulesManagerScreen(
                             checked = limitedAmmo,
                             onCheckedChange = { limitedAmmo = it },
                             badgeText = if (limitedAmmo) "LIMITED AMMO" else "UNLIMITED",
-                            badgeColor = if (limitedAmmo) VelorixAccent else Color(0xFF3B82F6)
+                            badgeColor = if (limitedAmmo) V14AccentBright else VelorixEmerald
                         )
                     }
 
@@ -890,7 +910,7 @@ fun TournamentRulesManagerScreen(
                         title = "Character & Ability Rules",
                         subtitle = "ACTIVE & PASSIVE SKILL CONTROLS",
                         icon = Icons.Default.Person,
-                        accentColor = Color(0xFF8B5CF6)
+                        accentColor = V14AccentBright
                     ) {
                         // Master Character Skills Switch
                         RuleToggleRow(
@@ -899,7 +919,7 @@ fun TournamentRulesManagerScreen(
                             checked = characterSkillsAllowed,
                             onCheckedChange = { characterSkillsAllowed = it },
                             badgeText = if (characterSkillsAllowed) "SKILLS ON" else "NO SKILLS",
-                            badgeColor = if (characterSkillsAllowed) Color(0xFF8B5CF6) else Color(0xFF6B7280)
+                            badgeColor = if (characterSkillsAllowed) VelorixEmerald else V14TextMuted
                         )
 
                         AnimatedVisibility(
@@ -995,7 +1015,7 @@ fun TournamentRulesManagerScreen(
                         title = "Match & Tactical Settings",
                         subtitle = "DEVICES, MAP MECHANICS & REVIVAL",
                         icon = Icons.Default.SettingsSuggest,
-                        accentColor = Color(0xFF3B82F6)
+                        accentColor = V14AccentBright
                     ) {
                         // Device / Emulator Policy
                         RuleToggleRow(
@@ -1004,7 +1024,7 @@ fun TournamentRulesManagerScreen(
                             checked = emulatorAllowed,
                             onCheckedChange = { emulatorAllowed = it },
                             badgeText = if (emulatorAllowed) "PC ALLOWED" else "MOBILE ONLY",
-                            badgeColor = if (emulatorAllowed) Color(0xFFF59E0B) else Color(0xFF10B981)
+                            badgeColor = if (emulatorAllowed) VelorixAmber else VelorixEmerald
                         )
 
                         // Roof Camping
@@ -1014,7 +1034,7 @@ fun TournamentRulesManagerScreen(
                             checked = roofCampingAllowed,
                             onCheckedChange = { roofCampingAllowed = it },
                             badgeText = if (roofCampingAllowed) "ROOF ON" else "NO ROOF CAMPING",
-                            badgeColor = if (roofCampingAllowed) Color(0xFFF59E0B) else Color(0xFFEF4444)
+                            badgeColor = if (roofCampingAllowed) VelorixAmber else V14AccentBright
                         )
 
                         // Airdrops
@@ -1024,7 +1044,7 @@ fun TournamentRulesManagerScreen(
                             checked = airdropAllowed,
                             onCheckedChange = { airdropAllowed = it },
                             badgeText = if (airdropAllowed) "AIRDROP ON" else "AIRDROP OFF",
-                            badgeColor = if (airdropAllowed) Color(0xFF3B82F6) else Color(0xFF6B7280)
+                            badgeColor = if (airdropAllowed) VelorixEmerald else V14TextMuted
                         )
 
                         // In-Game Revival
@@ -1034,7 +1054,7 @@ fun TournamentRulesManagerScreen(
                             checked = revivalAllowed,
                             onCheckedChange = { revivalAllowed = it },
                             badgeText = if (revivalAllowed) "REVIVAL ON" else "NO REVIVAL",
-                            badgeColor = if (revivalAllowed) Color(0xFF10B981) else Color(0xFF6366F1)
+                            badgeColor = if (revivalAllowed) VelorixEmerald else VelorixAmber
                         )
 
                         // Vehicles
@@ -1044,7 +1064,7 @@ fun TournamentRulesManagerScreen(
                             checked = vehiclesAllowed,
                             onCheckedChange = { vehiclesAllowed = it },
                             badgeText = if (vehiclesAllowed) "VEHICLES ON" else "NO VEHICLES",
-                            badgeColor = if (vehiclesAllowed) Color(0xFF10B981) else Color(0xFF6B7280)
+                            badgeColor = if (vehiclesAllowed) VelorixEmerald else V14TextMuted
                         )
 
                         // Loadout Items
@@ -1054,7 +1074,7 @@ fun TournamentRulesManagerScreen(
                             checked = loadoutAllowed,
                             onCheckedChange = { loadoutAllowed = it },
                             badgeText = if (loadoutAllowed) "LOADOUTS ON" else "NO LOADOUTS",
-                            badgeColor = if (loadoutAllowed) Color(0xFF10B981) else Color(0xFF6B7280)
+                            badgeColor = if (loadoutAllowed) VelorixEmerald else V14TextMuted
                         )
 
                         // Fall Damage
@@ -1064,7 +1084,7 @@ fun TournamentRulesManagerScreen(
                             checked = fallDamage,
                             onCheckedChange = { fallDamage = it },
                             badgeText = if (fallDamage) "FALL DAMAGE ON" else "NO FALL DMG",
-                            badgeColor = if (fallDamage) VelorixAccent else Color(0xFF3B82F6)
+                            badgeColor = if (fallDamage) V14AccentBright else VelorixEmerald
                         )
 
                         // Headshot Only Mode
@@ -1193,7 +1213,6 @@ fun TournamentRulesManagerScreen(
                 }
             }
         }
-    }
 }
 
 // ---------------------------------------------------------
@@ -1449,7 +1468,7 @@ val PRESET_TEMPLATES = listOf(
         name = "Pure Gunplay",
         description = "No Character Skills, Pure Weapon Aim & Recoil Mastery",
         icon = Icons.Default.Shield,
-        color = Color(0xFF8B5CF6),
+        color = V14AccentBright,
         allowedGuns = "All Standard Weapons (AR, SMG, Shotgun, Sniper)",
         bannedGuns = "M79 Grenade Launcher, Crossbow",
         gunAttributesAllowed = false,
@@ -1588,45 +1607,59 @@ fun RuleSectionCard(
     accentColor: Color,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Color.Black)
-            .padding(vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = V14CardSurface,
+        border = BorderStroke(1.dp, V14Border)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = accentColor,
-                modifier = Modifier.size(20.dp)
-            )
-            Spacer(modifier = Modifier.width(10.dp))
-            Column {
-                Text(
-                    text = title,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
-                Text(
-                    text = subtitle,
-                    fontSize = 9.5.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = VelorixTextSecondary,
-                    letterSpacing = 0.8.sp
-                )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(accentColor.copy(alpha = 0.14f))
+                        .border(1.dp, accentColor.copy(alpha = 0.30f), RoundedCornerShape(10.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = accentColor,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(10.dp))
+                Column {
+                    Text(
+                        text = title,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = V14TextPrimary
+                    )
+                    Text(
+                        text = subtitle,
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = V14TextMuted,
+                        letterSpacing = 0.8.sp
+                    )
+                }
             }
+
+            HorizontalDivider(thickness = 0.5.dp, color = V14Border)
+
+            content()
         }
-
-        content()
-
-        Spacer(modifier = Modifier.height(4.dp))
-        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
     }
 }
 
@@ -1654,7 +1687,7 @@ fun RuleToggleRow(
                         text = title,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        color = V14TextPrimary
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
@@ -1668,7 +1701,7 @@ fun RuleToggleRow(
                 Text(
                     text = subtitle,
                     fontSize = 10.5.sp,
-                    color = VelorixTextSecondary,
+                    color = V14TextSecondary,
                     lineHeight = 13.sp
                 )
             }
@@ -1680,20 +1713,21 @@ fun RuleToggleRow(
                 onCheckedChange = onCheckedChange,
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = Color.White,
-                    checkedTrackColor = VelorixAccent,
-                    uncheckedThumbColor = Color.LightGray,
-                    uncheckedTrackColor = Color(0xFF18181B)
+                    checkedTrackColor = V14AccentPrimary,
+                    uncheckedThumbColor = V14TextMuted,
+                    uncheckedTrackColor = Color(0xFF14141B),
+                    uncheckedBorderColor = V14Border
                 )
             )
         }
-        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.06f))
+        HorizontalDivider(thickness = 0.5.dp, color = V14Border.copy(alpha = 0.7f))
     }
 }
 
 @Composable
 fun RuleQuickChip(
     label: String,
-    chipColor: Color = VelorixAccent,
+    chipColor: Color = V14AccentBright,
     onClick: () -> Unit
 ) {
     Column(
@@ -1706,24 +1740,25 @@ fun RuleQuickChip(
             text = label,
             fontSize = 11.sp,
             fontWeight = FontWeight.SemiBold,
-            color = Color.White
+            color = V14TextPrimary
         )
         Spacer(modifier = Modifier.height(3.dp))
         Box(
             modifier = Modifier
                 .width(24.dp)
-                .height(1.dp)
-                .background(chipColor.copy(alpha = 0.7f))
+                .height(1.5.dp)
+                .background(chipColor.copy(alpha = 0.8f))
         )
     }
 }
 
 @Composable
 fun customFieldColors() = OutlinedTextFieldDefaults.colors(
-    focusedTextColor = Color.White,
-    unfocusedTextColor = Color.White,
-    focusedBorderColor = VelorixAccent,
-    unfocusedBorderColor = Color.White.copy(alpha = 0.14f),
-    focusedContainerColor = Color.Black,
-    unfocusedContainerColor = Color.Black
+    focusedTextColor = V14TextPrimary,
+    unfocusedTextColor = V14TextPrimary,
+    focusedBorderColor = V14AccentBright,
+    unfocusedBorderColor = V14Border,
+    focusedContainerColor = Color(0xFF08080B),
+    unfocusedContainerColor = Color(0xFF08080B),
+    cursorColor = V14AccentBright
 )

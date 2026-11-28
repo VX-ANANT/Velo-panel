@@ -58,16 +58,19 @@ fun DailyRevenueAnalyticsScreen(
     users: List<UserProfile>,
     payouts: List<PayoutRequest>,
     onBack: () -> Unit,
+    embeddedInTab: Boolean = false,
     onTournamentClick: (String) -> Unit = {},
     onBroadcastRoomCredentials: ((tournamentId: String, roomId: String, roomPass: String) -> Unit)? = null
 ) {
-    BackHandler { onBack() }
+    if (!embeddedInTab) {
+        BackHandler { onBack() }
+    }
 
     val context = LocalContext.current
-    var selectedTimeframe by remember { mutableStateOf(RevenueTimeframe.TODAY) }
+    var selectedTimeframe by remember { mutableStateOf(RevenueTimeframe.ALL_TIME) }
     var searchQuery by remember { mutableStateOf("") }
     var showRoomDispatchDialog by remember { mutableStateOf<Tournament?>(null) }
-    var filterGame by remember { mutableStateOf("ALL") }
+    var filterCategory by remember { mutableStateOf("ALL") }
 
     val now = System.currentTimeMillis()
     val cal = Calendar.getInstance()
@@ -80,8 +83,8 @@ fun DailyRevenueAnalyticsScreen(
     val sevenDaysAgo = now - (7 * 24 * 60 * 60 * 1000L)
     val thirtyDaysAgo = now - (30 * 24 * 60 * 60 * 1000L)
 
-    // Filter tournaments based on timeframe
-    val filteredTournaments = remember(tournaments, selectedTimeframe, searchQuery, filterGame) {
+    // Filter tournaments based on timeframe and Free Fire mode category
+    val filteredTournaments = remember(tournaments, selectedTimeframe, searchQuery, filterCategory) {
         tournaments.filter { t ->
             val matchTime = try {
                 t.parsedStartsAtMillis ?: 0L
@@ -98,11 +101,18 @@ fun DailyRevenueAnalyticsScreen(
             val matchesQuery = searchQuery.isBlank() ||
                 t.title.contains(searchQuery, ignoreCase = true) ||
                 t.id.contains(searchQuery, ignoreCase = true) ||
-                t.game.contains(searchQuery, ignoreCase = true)
+                t.category.contains(searchQuery, ignoreCase = true)
 
-            val matchesGame = filterGame == "ALL" || t.game.equals(filterGame, ignoreCase = true)
+            val modeCombined = "${t.category} ${t.format} ${t.title}".lowercase()
+            val matchesCategory = when (filterCategory) {
+                "ALL" -> true
+                "BR" -> modeCombined.contains("br") || modeCombined.contains("battle royale") || modeCombined.contains("solo") || modeCombined.contains("duo") || modeCombined.contains("squad")
+                "CS" -> modeCombined.contains("cs") || modeCombined.contains("clash")
+                "Lone Wolf" -> modeCombined.contains("lone") || modeCombined.contains("1v1")
+                else -> true
+            }
 
-            inTimeframe && matchesQuery && matchesGame
+            inTimeframe && matchesQuery && matchesCategory
         }
     }
 
@@ -137,11 +147,11 @@ fun DailyRevenueAnalyticsScreen(
     Scaffold(
         containerColor = Color.Black,
         topBar = {
-            Surface(
-                color = Color(0xFF09090D),
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .statusBarsPadding()
+                    .background(V14Bg)
+                    .then(if (embeddedInTab) Modifier else Modifier.statusBarsPadding())
             ) {
                 Row(
                     modifier = Modifier
@@ -151,67 +161,74 @@ fun DailyRevenueAnalyticsScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Color(0xFF14141B))
-                                .border(0.75.dp, Color(0xFF1E1E27), RoundedCornerShape(10.dp))
-                                .clickable(onClick = onBack),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Back",
-                                tint = Color.White,
-                                modifier = Modifier.size(18.dp)
-                            )
+                        if (!embeddedInTab) {
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(V14CardSurface)
+                                    .border(1.dp, V14Border, CircleShape)
+                                    .clickable(onClick = onBack),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "Back",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
                         }
-                        Spacer(modifier = Modifier.width(12.dp))
                         Column {
                             Text(
-                                text = "Earnings & Daily Revenue",
-                                color = Color.White,
-                                fontSize = 16.sp,
+                                text = "Earnings & Revenue",
+                                color = V14TextPrimary,
+                                fontSize = 17.sp,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "Tournament Financial Overview",
-                                color = VelorixTextSecondary,
-                                fontSize = 11.sp
+                                text = "FREE FIRE FINANCIAL LEDGER",
+                                color = V14TextMuted,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.sp
                             )
                         }
                     }
 
-                    IconButton(
-                        onClick = {
-                            val report = buildFinancialSummary(
-                                timeframe = selectedTimeframe.label,
-                                gross = totalGrossRevenue,
-                                netMargin = netAdminOperatingMargin,
-                                prizePool = totalPrizePoolAllocated,
-                                registrations = totalRegistrations,
-                                matches = filteredTournaments.size,
-                                approvedPayouts = approvedPayoutsSum,
-                                pendingPayouts = pendingPayoutsSum
-                            )
-                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            clipboard.setPrimaryClip(ClipData.newPlainText("Financial Audit", report))
-                            Toast.makeText(context, "Financial summary copied to clipboard!", Toast.LENGTH_SHORT).show()
-                        },
+                    Box(
                         modifier = Modifier
-                            .size(36.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0xFF141418))
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(V14CardSurface)
+                            .border(1.dp, V14Border, CircleShape)
+                            .clickable {
+                                val report = buildFinancialSummary(
+                                    timeframe = selectedTimeframe.label,
+                                    gross = totalGrossRevenue,
+                                    netMargin = netAdminOperatingMargin,
+                                    prizePool = totalPrizePoolAllocated,
+                                    registrations = totalRegistrations,
+                                    matches = filteredTournaments.size,
+                                    approvedPayouts = approvedPayoutsSum,
+                                    pendingPayouts = pendingPayoutsSum
+                                )
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                clipboard.setPrimaryClip(ClipData.newPlainText("Financial Audit", report))
+                                Toast.makeText(context, "Financial summary copied to clipboard!", Toast.LENGTH_SHORT).show()
+                            },
+                        contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             Icons.Default.Share,
                             contentDescription = "Share Report",
-                            tint = Color(0xFF10B981),
+                            tint = V14AccentBright,
                             modifier = Modifier.size(18.dp)
                         )
                     }
                 }
+                HorizontalDivider(thickness = 0.5.dp, color = V14Border)
             }
         }
     ) { padding ->
@@ -252,7 +269,7 @@ fun DailyRevenueAnalyticsScreen(
                                     modifier = Modifier
                                         .fillMaxWidth(0.7f)
                                         .height(if (isSelected) 1.5.dp else 0.5.dp)
-                                        .background(if (isSelected) Color(0xFF0A84FF) else Color.Transparent)
+                                        .background(if (isSelected) Color(0xFFFF2E5B) else Color.Transparent)
                                 )
                             }
                         }
@@ -311,7 +328,7 @@ fun DailyRevenueAnalyticsScreen(
                                 .padding(horizontal = 14.dp)
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.AutoMirrored.Filled.TrendingUp, contentDescription = null, tint = Color(0xFF0A84FF), modifier = Modifier.size(14.dp))
+                                Icon(Icons.AutoMirrored.Filled.TrendingUp, contentDescription = null, tint = Color(0xFFFF2E5B), modifier = Modifier.size(14.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text("NET ADMIN MARGIN", fontSize = 9.5.sp, fontWeight = FontWeight.Bold, color = Color(0xFF71717A), letterSpacing = 0.6.sp)
                             }
@@ -322,12 +339,12 @@ fun DailyRevenueAnalyticsScreen(
                                 fontSize = 21.sp,
                                 fontWeight = FontWeight.Bold,
                                 fontFamily = FontFamily.Monospace,
-                                color = if (isProfit) Color(0xFFF4F4F5) else Color(0xFFFF453A)
+                                color = if (isProfit) Color(0xFF34D399) else Color(0xFFFF4D6D)
                             )
                             Text(
                                 text = if (totalGrossRevenue > 0) "${"%.1f".format((netAdminOperatingMargin / totalGrossRevenue) * 100)}% Margin" else "0% Margin",
                                 fontSize = 11.sp,
-                                color = Color(0xFF0A84FF)
+                                color = if (isProfit) Color(0xFF34D399) else Color(0xFFFF4D6D)
                             )
                         }
                     }
@@ -374,16 +391,16 @@ fun DailyRevenueAnalyticsScreen(
                     )
 
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        listOf("ALL", "Free Fire", "BGMI").forEach { g ->
-                            val isSel = filterGame == g
+                        listOf("ALL", "BR", "CS", "Lone Wolf").forEach { cat ->
+                            val isSel = filterCategory == cat
                             Column(
                                 modifier = Modifier
-                                    .clickable { filterGame = g }
+                                    .clickable { filterCategory = cat }
                                     .padding(vertical = 4.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
                                 Text(
-                                    text = g,
+                                    text = cat,
                                     color = if (isSel) Color.White else Color(0xFF71717A),
                                     fontSize = 10.sp,
                                     fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium
@@ -393,7 +410,7 @@ fun DailyRevenueAnalyticsScreen(
                                     modifier = Modifier
                                         .width(18.dp)
                                         .height(if (isSel) 1.5.dp else 0.dp)
-                                        .background(if (isSel) Color(0xFF0A84FF) else Color.Transparent)
+                                        .background(if (isSel) Color(0xFFFF2E5B) else Color.Transparent)
                                 )
                             }
                         }
@@ -446,10 +463,10 @@ fun DailyRevenueAnalyticsScreen(
                                             .size(7.dp)
                                             .background(
                                                 when (tourney.status.uppercase()) {
-                                                    "LIVE" -> Color(0xFF10B981)
-                                                    "COMPLETED" -> Color(0xFF3B82F6)
-                                                    "CANCELLED" -> Color(0xFFEF4444)
-                                                    else -> Color(0xFFF59E0B)
+                                                    "LIVE" -> Color(0xFF34D399)
+                                                    "COMPLETED" -> V14TextSecondary
+                                                    "CANCELLED" -> V14AccentBright
+                                                    else -> Color(0xFFFBBF24)
                                                 },
                                                 CircleShape
                                             )
@@ -460,10 +477,10 @@ fun DailyRevenueAnalyticsScreen(
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = when (tourney.status.uppercase()) {
-                                            "LIVE" -> Color(0xFF10B981)
-                                            "COMPLETED" -> Color(0xFF3B82F6)
-                                            "CANCELLED" -> Color(0xFFEF4444)
-                                            else -> Color(0xFFF59E0B)
+                                            "LIVE" -> Color(0xFF34D399)
+                                            "COMPLETED" -> V14TextSecondary
+                                            "CANCELLED" -> V14AccentBright
+                                            else -> Color(0xFFFBBF24)
                                         }
                                     )
                                 }
@@ -570,7 +587,7 @@ fun DailyRevenueAnalyticsScreen(
                 }
             }
 
-            item { Spacer(modifier = Modifier.height(40.dp)) }
+            item { Spacer(modifier = Modifier.height(140.dp)) }
         }
     }
 
@@ -601,14 +618,18 @@ fun DailyRevenueAnalyticsScreen(
                     OutlinedTextField(
                         value = roomIdInput,
                         onValueChange = { roomIdInput = it },
-                        label = { Text("Custom Room ID", color = Color.Gray) },
-                        placeholder = { Text("e.g. 5829103") },
+                        label = { Text("Custom Room ID", color = V14TextMuted) },
+                        placeholder = { Text("e.g. 5829103", color = V14TextMuted) },
                         singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
-                            focusedBorderColor = Color(0xFF10B981),
-                            unfocusedBorderColor = Color(0xFF2E2E38)
+                            focusedTextColor = V14TextPrimary,
+                            unfocusedTextColor = V14TextPrimary,
+                            focusedContainerColor = Color(0xFF08080B),
+                            unfocusedContainerColor = Color(0xFF08080B),
+                            focusedBorderColor = V14AccentBright,
+                            unfocusedBorderColor = V14Border,
+                            cursorColor = V14AccentBright
                         ),
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -616,14 +637,18 @@ fun DailyRevenueAnalyticsScreen(
                     OutlinedTextField(
                         value = roomPassInput,
                         onValueChange = { roomPassInput = it },
-                        label = { Text("Room Password", color = Color.Gray) },
-                        placeholder = { Text("e.g. 1234") },
+                        label = { Text("Room Password", color = V14TextMuted) },
+                        placeholder = { Text("e.g. 1234", color = V14TextMuted) },
                         singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
-                            focusedBorderColor = Color(0xFF10B981),
-                            unfocusedBorderColor = Color(0xFF2E2E38)
+                            focusedTextColor = V14TextPrimary,
+                            unfocusedTextColor = V14TextPrimary,
+                            focusedContainerColor = Color(0xFF08080B),
+                            unfocusedContainerColor = Color(0xFF08080B),
+                            focusedBorderColor = V14AccentBright,
+                            unfocusedBorderColor = V14Border,
+                            cursorColor = V14AccentBright
                         ),
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -636,17 +661,19 @@ fun DailyRevenueAnalyticsScreen(
                         Toast.makeText(context, "Room credentials broadcasted to players!", Toast.LENGTH_SHORT).show()
                         showRoomDispatchDialog = null
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981))
+                    colors = ButtonDefaults.buttonColors(containerColor = V14AccentPrimary),
+                    shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text("Broadcast to Players", color = Color.Black, fontWeight = FontWeight.Bold)
+                    Text("Broadcast to Players", color = Color.White, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showRoomDispatchDialog = null }) {
-                    Text("Cancel", color = Color.Gray)
+                    Text("Cancel", color = V14TextSecondary)
                 }
             },
-            containerColor = Color(0xFF0F0F14)
+            containerColor = V14CardSurface,
+            shape = RoundedCornerShape(20.dp)
         )
     }
 }

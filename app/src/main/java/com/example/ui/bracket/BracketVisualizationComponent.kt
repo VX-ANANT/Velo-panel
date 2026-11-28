@@ -144,31 +144,30 @@ fun BracketVisualizationComponent(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 6.dp),
-                shape = RoundedCornerShape(12.dp),
-                color = Color(0xFF0D0D11).copy(alpha = 0.90f),
-                border = BorderStroke(1.dp, Color(0xFF27272A))
+                shape = RoundedCornerShape(14.dp),
+                color = Color(0xFF0C0C10),
+                border = BorderStroke(1.dp, Color(0xFF1E1E27))
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                        .padding(horizontal = 12.dp, vertical = 9.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        // Pulsing Green Live Firestore Indicator
                         Box(
                             modifier = Modifier
                                 .size(8.dp)
                                 .clip(CircleShape)
-                                .background(Color(0xFF22C55E).copy(alpha = pulseAlpha))
+                                .background(Color(0xFF34D399).copy(alpha = pulseAlpha))
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = "LIVE FIRESTORE REALTIME SYNC",
-                            fontSize = 10.5.sp,
+                            fontSize = 10.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            color = Color(0xFF4ADE80),
+                            color = Color(0xFF34D399),
                             letterSpacing = 0.6.sp
                         )
                     }
@@ -179,16 +178,16 @@ fun BracketVisualizationComponent(
                     ) {
                         Surface(
                             shape = RoundedCornerShape(6.dp),
-                            color = Color.White.copy(alpha = 0.08f),
-                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f))
+                            color = Color(0xFF14141B),
+                            border = BorderStroke(0.5.dp, Color(0xFF1E1E27))
                         ) {
                             val completedCount = matches.count { it.status.equals("completed", true) }
                             Text(
                                 text = "$completedCount/${matches.size} Completed",
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFFE2E8F0),
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                color = Color(0xFFF5F5F7),
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
                             )
                         }
 
@@ -197,42 +196,42 @@ fun BracketVisualizationComponent(
                                 onClick = onGenerateBracket,
                                 colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent),
                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                shape = RoundedCornerShape(8.dp)
+                                shape = RoundedCornerShape(10.dp)
                             ) {
-                                Icon(Icons.Default.AutoFixHigh, contentDescription = null, tint = Color.Black, modifier = Modifier.size(13.dp))
+                                Icon(Icons.Default.AutoFixHigh, contentDescription = null, tint = Color.White, modifier = Modifier.size(13.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Auto-Generate", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                                Text("Auto-Generate", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
                 }
             }
 
-            // Drag & Drop Instruction Banner
+            // Drag & Drop Instruction Strip (V14 Crimson Minimal)
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 4.dp),
-                shape = RoundedCornerShape(8.dp),
-                color = Color(0x3300E5FF),
-                border = BorderStroke(1.dp, Color(0x6600E5FF))
+                shape = RoundedCornerShape(12.dp),
+                color = Color(0xFFFF0033).copy(alpha = 0.10f),
+                border = BorderStroke(1.dp, Color(0xFFFF2E5B).copy(alpha = 0.30f))
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
                         imageVector = Icons.Default.Swipe,
                         contentDescription = null,
-                        tint = Color(0xFF00E5FF),
+                        tint = Color(0xFFFF2E5B),
                         modifier = Modifier.size(14.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "DRAG & DROP: Press & drag any player onto a next round slot to advance them instantly in Firestore!",
+                        text = "DRAG & DROP: Press & drag any player onto a next round slot to advance them instantly in Firestore.",
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Medium,
-                        color = Color(0xFFE0F7FA),
+                        color = Color(0xFFF5F5F7),
                         lineHeight = 14.sp
                     )
                 }
@@ -263,17 +262,17 @@ fun BracketVisualizationComponent(
                                     .border(1.dp, VelorixAccent.copy(alpha = 0.4f), CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(Icons.Default.AccountTree, contentDescription = null, tint = VelorixAccent, modifier = Modifier.size(28.dp))
+                                Icon(Icons.Default.AccountTree, contentDescription = null, tint = Color(0xFFFF2E5B), modifier = Modifier.size(28.dp))
                             }
                             Text(
                                 "No Bracket Matches Found",
-                                color = Color.White,
+                                color = Color(0xFFF5F5F7),
                                 fontSize = 17.sp,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
                                 "Generate a single-elimination tournament tree from registered players to observe and advance matches in real-time.",
-                                color = Color(0xFFA1A1AA),
+                                color = Color(0xFF9A9AA6),
                                 fontSize = 12.5.sp,
                                 textAlign = TextAlign.Center
                             )
@@ -281,11 +280,11 @@ fun BracketVisualizationComponent(
                                 Button(
                                     onClick = onGenerateBracket,
                                     colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent),
-                                    shape = RoundedCornerShape(10.dp)
+                                    shape = RoundedCornerShape(12.dp)
                                 ) {
-                                    Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                                    Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Generate Elimination Bracket", color = Color.Black, fontWeight = FontWeight.Bold)
+                                    Text("Generate Elimination Bracket", color = Color.White, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -406,9 +405,9 @@ fun BracketVisualizationComponent(
                             scaleY = 1.08f
                             rotationZ = 3f
                         },
-                    shape = RoundedCornerShape(12.dp),
-                    color = Color(0xFF1E1B4B),
-                    border = BorderStroke(2.dp, Color(0xFF00E5FF))
+                    shape = RoundedCornerShape(14.dp),
+                    color = Color(0xFF14141B),
+                    border = BorderStroke(1.5.dp, Color(0xFFFF2E5B))
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -418,10 +417,10 @@ fun BracketVisualizationComponent(
                             modifier = Modifier
                                 .size(24.dp)
                                 .clip(CircleShape)
-                                .background(Color(0xFF00E5FF)),
+                                .background(Color(0xFFFF0033)),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Default.Person, contentDescription = null, tint = Color.Black, modifier = Modifier.size(15.dp))
+                            Icon(Icons.Default.Person, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                         Column {
@@ -434,7 +433,7 @@ fun BracketVisualizationComponent(
                             Text(
                                 text = if (dragDropState.activeDropTarget != null) "Ready to Drop!" else "Drop on Next Round Slot",
                                 fontSize = 9.sp,
-                                color = if (dragDropState.activeDropTarget != null) Color(0xFF4ADE80) else Color(0xFF93C5FD)
+                                color = if (dragDropState.activeDropTarget != null) Color(0xFF34D399) else Color(0xFFFF5C7C)
                             )
                         }
                     }
@@ -470,17 +469,17 @@ fun BracketMatchNode(
 ) {
     val isCompleted = match.status.equals("completed", true)
     val statusColor = when {
-        isCompleted -> Color(0xFF22C55E)
-        match.status.equals("live", true) -> Color(0xFFEF4444)
-        match.status.equals("ready", true) -> Color(0xFF00E5FF)
-        else -> Color(0xFF94A3B8)
+        isCompleted -> Color(0xFF34D399)
+        match.status.equals("live", true) -> Color(0xFFFF2E5B)
+        match.status.equals("ready", true) -> Color(0xFFFBBF24)
+        else -> Color(0xFF9A9AA6)
     }
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
-        color = Color(0xFF0E0E12),
-        border = BorderStroke(1.dp, if (isCompleted) Color(0xFF22C55E).copy(alpha = 0.4f) else Color(0xFF27272A))
+        color = Color(0xFF0C0C10),
+        border = BorderStroke(1.dp, if (isCompleted) Color(0xFF34D399).copy(alpha = 0.4f) else Color(0xFF1E1E27))
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             // Match Header
@@ -683,18 +682,18 @@ fun ParticipantSlotRow(
             ),
         shape = RoundedCornerShape(10.dp),
         color = when {
-            isTargeted -> Color(0xFF00E5FF).copy(alpha = 0.25f)
+            isTargeted -> Color(0xFFFF0033).copy(alpha = 0.22f)
             isWinner -> Color(0xFF14532D).copy(alpha = 0.35f)
-            hasPlayer -> Color(0xFF18181C)
-            else -> Color(0xFF121215)
+            hasPlayer -> Color(0xFF14141B)
+            else -> Color(0xFF08080B)
         },
         border = BorderStroke(
-            width = if (isTargeted) 2.dp else 1.dp,
+            width = if (isTargeted) 1.5.dp else 1.dp,
             color = when {
-                isTargeted -> Color(0xFF00E5FF)
-                isWinner -> Color(0xFF22C55E)
-                hasPlayer -> Color(0xFF27272A)
-                else -> Color(0xFF27272A).copy(alpha = 0.5f)
+                isTargeted -> Color(0xFFFF2E5B)
+                isWinner -> Color(0xFF34D399)
+                hasPlayer -> Color(0xFF1E1E27)
+                else -> Color(0xFF1E1E27).copy(alpha = 0.6f)
             }
         )
     ) {
@@ -710,11 +709,10 @@ fun ParticipantSlotRow(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (hasPlayer) {
-                    // Drag grip handle
                     Icon(
                         imageVector = Icons.Default.DragIndicator,
                         contentDescription = "Drag to advance",
-                        tint = if (isWinner) Color(0xFF4ADE80) else Color(0xFF71717A),
+                        tint = if (isWinner) Color(0xFF34D399) else Color(0xFF6B6B76),
                         modifier = Modifier.size(14.dp)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
@@ -724,7 +722,7 @@ fun ParticipantSlotRow(
                     Icon(
                         imageVector = Icons.Default.EmojiEvents,
                         contentDescription = "Winner",
-                        tint = Color(0xFF4ADE80),
+                        tint = Color(0xFF34D399),
                         modifier = Modifier.size(14.dp)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
@@ -735,10 +733,10 @@ fun ParticipantSlotRow(
                     fontSize = 11.5.sp,
                     fontWeight = if (hasPlayer) FontWeight.Bold else FontWeight.Normal,
                     color = when {
-                        isTargeted -> Color(0xFF00E5FF)
-                        isWinner -> Color(0xFF4ADE80)
-                        hasPlayer -> Color.White
-                        else -> Color(0xFF71717A)
+                        isTargeted -> Color(0xFFFF2E5B)
+                        isWinner -> Color(0xFF34D399)
+                        hasPlayer -> Color(0xFFF5F5F7)
+                        else -> Color(0xFF6B6B76)
                     },
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -882,17 +880,18 @@ fun ScoreRecordDialog(
                     val s2 = score2Text.toIntOrNull() ?: 0
                     onSave(selectedWinnerId, s1, s2)
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent)
+                colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent),
+                shape = RoundedCornerShape(12.dp)
             ) {
-                Text("Save to Firestore", color = Color.Black, fontWeight = FontWeight.Bold)
+                Text("Save to Firestore", color = Color.White, fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel", color = Color(0xFFA1A1AA))
+                Text("Cancel", color = Color(0xFF9A9AA6))
             }
         },
-        containerColor = Color(0xFF141418),
-        shape = RoundedCornerShape(16.dp)
+        containerColor = Color(0xFF0C0C10),
+        shape = RoundedCornerShape(20.dp)
     )
 }

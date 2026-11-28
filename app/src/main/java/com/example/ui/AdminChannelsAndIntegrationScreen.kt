@@ -22,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -132,8 +133,8 @@ enum class IntegrationHubSection(
     REDEEM_VAULT("Redeem", Icons.Default.ConfirmationNumber),
     UNIFIED_REQUESTS("Requests", Icons.Default.SupportAgent),
     USERS_AND_CHAT("Players & Chat", Icons.Default.Group),
-    BANNERS_BROADCASTS("Banners", Icons.Default.Campaign),
-    SYSTEM_CONFIG_DPDP("Config & DPDP", Icons.Default.Tune)
+    BANNERS_BROADCASTS("Notify & Banners", Icons.Default.Campaign),
+    SYSTEM_CONFIG_DPDP("Config & Logs", Icons.Default.Tune)
 }
 
 @Composable
@@ -147,15 +148,14 @@ fun AdminChannelsAndIntegrationHub(
 ) {
     var activeSection by remember(initialSection) { mutableStateOf(initialSection) }
     var usersChatSubTab by remember { mutableStateOf("USERS") } // USERS | CHAT
-    var configDpdpSubTab by remember { mutableStateOf("CONFIG") } // CONFIG | DPDP | MISSIONS
+    var configDpdpSubTab by remember { mutableStateOf("CONFIG") } // CONFIG | LOGS | MISSIONS
     var tournamentForChat by remember(initialTournamentIdForChat) { mutableStateOf(initialTournamentIdForChat) }
     var tournamentForStandingsModal by remember { mutableStateOf<Tournament?>(null) }
+    var prefillNotifyUserId by remember { mutableStateOf<String?>(null) }
 
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val successState = uiState as? DashboardState.Success
 
-    val deletionRequests by viewModel.accountDeletionRequests.collectAsStateWithLifecycle()
-    val exportRequests by viewModel.dataExportRequests.collectAsStateWithLifecycle()
     val depositRequests by viewModel.depositRequests.collectAsStateWithLifecycle()
     val unifiedWithdrawals by viewModel.unifiedWithdrawals.collectAsStateWithLifecycle()
     val verifiedBankDeposits by viewModel.verifiedBankDeposits.collectAsStateWithLifecycle()
@@ -167,6 +167,10 @@ fun AdminChannelsAndIntegrationHub(
     val missions by viewModel.missions.collectAsStateWithLifecycle()
     val systemConfig by viewModel.systemConfig.collectAsStateWithLifecycle()
     val auditLogs by viewModel.auditLogs.collectAsStateWithLifecycle()
+    val securityAuditLogs by viewModel.securityAuditLogs.collectAsStateWithLifecycle()
+    val manualNotifications by viewModel.manualNotifications.collectAsStateWithLifecycle()
+    val reconciliationSummaryJson by viewModel.reconciliationSummaryJson.collectAsStateWithLifecycle()
+    val isReconcilingBackend by viewModel.isReconcilingBackend.collectAsStateWithLifecycle()
 
     val mergedWithdrawals = remember(unifiedWithdrawals, successState?.payoutRequests) {
         val byId = LinkedHashMap<String, PayoutRequest>()
@@ -177,9 +181,6 @@ fun AdminChannelsAndIntegrationHub(
         byId.values.sortedByDescending { it.requestedAt }
     }
 
-    val pendingDeletionsCount = remember(deletionRequests) {
-        deletionRequests.count { it.status.equals("PENDING", ignoreCase = true) }
-    }
     val pendingWalletCount = remember(depositRequests, mergedWithdrawals) {
         val dep = depositRequests.count { it.status.equals("PENDING", ignoreCase = true) }
         val wdr = mergedWithdrawals.count { !it.isDeposit && it.status.equals("PENDING", ignoreCase = true) }
@@ -248,7 +249,6 @@ fun AdminChannelsAndIntegrationHub(
                     IntegrationHubSection.WALLET_PAYOUTS -> pendingWalletCount
                     IntegrationHubSection.UNIFIED_REQUESTS -> openRequestsCount
                     IntegrationHubSection.USERS_AND_CHAT -> pendingChatReportsCount
-                    IntegrationHubSection.SYSTEM_CONFIG_DPDP -> pendingDeletionsCount
                     else -> 0
                 }
                 Row(
@@ -362,7 +362,11 @@ fun AdminChannelsAndIntegrationHub(
                     if (usersChatSubTab == "USERS") {
                         UsersAndModerationModuleSection(
                             viewModel = viewModel,
-                            users = successState?.users ?: emptyList()
+                            users = successState?.users ?: emptyList(),
+                            onQuickNotifyUser = { uid ->
+                                prefillNotifyUserId = uid
+                                activeSection = IntegrationHubSection.BANNERS_BROADCASTS
+                            }
                         )
                     } else {
                         TournamentLobbyChatModeratorSection(
@@ -377,7 +381,12 @@ fun AdminChannelsAndIntegrationHub(
             IntegrationHubSection.BANNERS_BROADCASTS -> BannersAndBroadcastsModuleSection(
                 viewModel = viewModel,
                 systemConfig = systemConfig,
-                banners = successState?.banners ?: emptyList()
+                banners = successState?.banners ?: emptyList(),
+                users = successState?.users ?: emptyList(),
+                tournaments = successState?.tournaments ?: emptyList(),
+                manualNotifications = manualNotifications,
+                prefillUserId = prefillNotifyUserId,
+                onClearPrefillUser = { prefillNotifyUserId = null }
             )
             IntegrationHubSection.SYSTEM_CONFIG_DPDP -> {
                 Column(modifier = Modifier.fillMaxSize()) {
@@ -389,8 +398,8 @@ fun AdminChannelsAndIntegrationHub(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         listOf(
-                            "CONFIG" to "Live Config (6 Flags)",
-                            "DPDP" to if (pendingDeletionsCount > 0) "DPDP Deletions ($pendingDeletionsCount)" else "DPDP Deletions",
+                            "CONFIG" to "Live Config (5 Flags)",
+                            "LOGS" to "Audit & Security Logs (${auditLogs.size + securityAuditLogs.size})",
                             "MISSIONS" to "Tokens & Missions"
                         ).forEach { (key, title) ->
                             val sel = configDpdpSubTab == key
@@ -416,14 +425,13 @@ fun AdminChannelsAndIntegrationHub(
                     when (configDpdpSubTab) {
                         "CONFIG" -> SystemConfigCleanSection(
                             viewModel = viewModel,
-                            systemConfig = systemConfig
+                            systemConfig = systemConfig,
+                            reconciliationSummaryJson = reconciliationSummaryJson,
+                            isReconcilingBackend = isReconcilingBackend
                         )
-                        "DPDP" -> DpdpAccountDeletionAndExportSection(
-                            viewModel = viewModel,
-                            deletionRequests = deletionRequests,
-                            exportRequests = exportRequests,
+                        "LOGS" -> AuditAndSecurityLogsViewerSection(
                             auditLogs = auditLogs,
-                            users = successState?.users ?: emptyList()
+                            securityAuditLogs = securityAuditLogs
                         )
                         else -> TokensAndMissionsManagerSection(
                             viewModel = viewModel,
@@ -1035,20 +1043,58 @@ fun DeclareStandingsAndPrizesDialog(
     var standingsList by remember { mutableStateOf<List<TournamentStandingEntry>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var isPublishing by remember { mutableStateOf(false) }
+    var tiePrizeMode by remember { mutableStateOf("SPLIT_TIED_POOL") } // SPLIT_TIED_POOL | FULL_PRIZE_EACH
+    var customRankEditorIdx by remember { mutableStateOf<Int?>(null) }
+    var customRankDraft by remember { mutableStateOf("") }
 
-    val perKillRate = remember(tournament.perKillReward) {
-        if (tournament.perKillReward > 0f) tournament.perKillReward.toDouble() else 0.0
+    val perKillRate = remember(tournament.perKillReward, tournament.perKillPrize) {
+        when {
+            tournament.perKillReward > 0f -> tournament.perKillReward.toDouble()
+            tournament.perKillPrize > 0f -> tournament.perKillPrize.toDouble()
+            else -> 0.0
+        }
     }
     val prizePoolTotal = remember(tournament.prizePool) { tournament.prizePool.toDouble() }
+
+    fun baseRankPrize(rank: Int): Double = when (rank) {
+        1 -> if (tournament.firstPlacePrize > 0f) tournament.firstPlacePrize.toDouble() else kotlin.math.round(prizePoolTotal * 0.50)
+        2 -> if (tournament.secondPlacePrize > 0f) tournament.secondPlacePrize.toDouble() else kotlin.math.round(prizePoolTotal * 0.30)
+        3 -> if (tournament.thirdPlacePrize > 0f) tournament.thirdPlacePrize.toDouble() else kotlin.math.round(prizePoolTotal * 0.20)
+        else -> 0.0
+    }
+
+    fun recalculateEstimatedPrizes(list: List<TournamentStandingEntry>, mode: String): List<TournamentStandingEntry> {
+        val rankCounts = list.filter { it.rank > 0 }.groupingBy { it.rank }.eachCount()
+        return list.map { row ->
+            val r = row.rank
+            val rp = if (r <= 0) {
+                0.0
+            } else {
+                val tiedCount = (rankCounts[r] ?: 1).coerceAtLeast(1)
+                if (tiedCount > 1 && mode == "SPLIT_TIED_POOL") {
+                    val summed = (r until (r + tiedCount)).sumOf { baseRankPrize(it) }
+                    kotlin.math.round((summed / tiedCount) * 100.0) / 100.0
+                } else {
+                    baseRankPrize(r)
+                }
+            }
+            val kp = row.kills * perKillRate
+            val tot = rp + kp
+            row.copy(rankPrize = rp, killPrize = kp, prizeWon = tot, wonAnything = tot > 0.0)
+        }
+    }
 
     LaunchedEffect(tournament.id) {
         isLoading = true
         viewModel.loadTournamentStandings(tournament) { loaded ->
-            standingsList = loaded
+            standingsList = recalculateEstimatedPrizes(loaded, tiePrizeMode)
             isLoading = false
         }
     }
 
+    val rankCounts = remember(standingsList) {
+        standingsList.filter { it.rank > 0 }.groupingBy { it.rank }.eachCount()
+    }
     val totalCalculatedPayout = remember(standingsList) {
         standingsList.sumOf { (it.rankPrize + it.killPrize).coerceAtLeast(0.0) }
     }
@@ -1061,8 +1107,8 @@ fun DeclareStandingsAndPrizesDialog(
             modifier = Modifier
                 .fillMaxWidth(0.97f)
                 .fillMaxHeight(0.92f)
-                .background(Color(0xFF0B0E14), RoundedCornerShape(8.dp))
-                .border(0.5.dp, HairlineBorder, RoundedCornerShape(8.dp))
+                .background(Color(0xFF0B0E14), RoundedCornerShape(14.dp))
+                .border(0.75.dp, HairlineBorder, RoundedCornerShape(14.dp))
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
@@ -1074,15 +1120,15 @@ fun DeclareStandingsAndPrizesDialog(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "DECLARE STANDINGS & DISTRIBUTE PRIZES",
+                        text = "AUTO-SYNCED ROSTER & POSITION SELECTOR",
                         color = TextPrimaryWhite,
-                        fontSize = 14.sp,
+                        fontSize = 13.5.sp,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
                         text = "${tournament.title} (${tournament.id}) • Pool: ₹${prizePoolTotal.toInt()} • Per Kill: ₹${perKillRate.toInt()}",
                         color = TextSecondaryZinc,
-                        fontSize = 11.sp,
+                        fontSize = 10.5.sp,
                         fontFamily = FontFamily.Monospace
                     )
                 }
@@ -1091,7 +1137,7 @@ fun DeclareStandingsAndPrizesDialog(
                 }
             }
 
-            // Quick Actions Strip
+            // Tie Prize Mode Toggle + Summary Strip
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1099,44 +1145,31 @@ fun DeclareStandingsAndPrizesDialog(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                AdminActionChip(
-                    label = "Auto-Fill 50/30/20%",
-                    color = AccentAmber,
-                    onClick = {
-                        standingsList = standingsList.map { row ->
-                            val rp = when (row.rank) {
-                                1 -> kotlin.math.round(prizePoolTotal * 0.50)
-                                2 -> kotlin.math.round(prizePoolTotal * 0.30)
-                                3 -> kotlin.math.round(prizePoolTotal * 0.20)
-                                else -> 0.0
+                listOf(
+                    "SPLIT_TIED_POOL" to "Split Tied Pool",
+                    "FULL_PRIZE_EACH" to "Full Prize Each"
+                ).forEach { (mode, label) ->
+                    val sel = tiePrizeMode == mode
+                    Box(
+                        modifier = Modifier
+                            .background(if (sel) AccentAmber.copy(alpha = 0.2f) else Color(0xFF0A0A0D), RoundedCornerShape(8.dp))
+                            .border(0.7.dp, if (sel) AccentAmber else HairlineBorder, RoundedCornerShape(8.dp))
+                            .clickable {
+                                tiePrizeMode = mode
+                                standingsList = recalculateEstimatedPrizes(standingsList, mode)
                             }
-                            val kp = row.kills * perKillRate
-                            val tot = rp + kp
-                            row.copy(rankPrize = rp, killPrize = kp, prizeWon = tot, wonAnything = tot > 0.0)
-                        }
-                    }
-                )
-                AdminActionChip(
-                    label = "+ Add Player Row",
-                    color = AccentBlue,
-                    onClick = {
-                        val nextRank = standingsList.size + 1
-                        standingsList = standingsList + TournamentStandingEntry(
-                            rank = nextRank,
-                            userId = "",
-                            username = "Player $nextRank",
-                            inGameName = "Player $nextRank",
-                            characterId = "",
-                            slotNumber = nextRank,
-                            kills = 0,
-                            rankPrize = 0.0,
-                            killPrize = 0.0,
-                            prizeWon = 0.0
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = label,
+                            color = if (sel) AccentAmber else TextSecondaryZinc,
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.Bold
                         )
                     }
-                )
+                }
                 Text(
-                    text = "Players: ${standingsList.size} • Total: ₹${"%.0f".format(totalCalculatedPayout)}",
+                    text = "Players: ${standingsList.size} • Est. Payout: ₹${"%.0f".format(totalCalculatedPayout)}",
                     color = AccentGreen,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
@@ -1156,7 +1189,7 @@ fun DeclareStandingsAndPrizesDialog(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "Loading joined players from /tournaments/${tournament.id}/participants...",
+                        text = "Syncing live roster from admin_match_rosters/${tournament.id}/players...",
                         color = TextSecondaryZinc,
                         fontSize = 12.sp
                     )
@@ -1169,7 +1202,7 @@ fun DeclareStandingsAndPrizesDialog(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "No registered participants found. Tap [+ ADD PARTICIPANT ROW] above to add players manually.",
+                        text = "No joined players found in admin_match_rosters/${tournament.id}/players.",
                         color = TextSecondaryZinc,
                         fontSize = 12.sp
                     )
@@ -1183,151 +1216,237 @@ fun DeclareStandingsAndPrizesDialog(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     standingsList.forEachIndexed { idx, entry ->
+                        val isTied = entry.rank > 0 && (rankCounts[entry.rank] ?: 0) >= 2
                         val totalWon = (entry.rankPrize + entry.killPrize).coerceAtLeast(0.0)
                         val isWinner = totalWon > 0.0
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(Color(0xFF0A0A0D), RoundedCornerShape(6.dp))
-                                .border(0.5.dp, HairlineBorder, RoundedCornerShape(6.dp))
+                                .background(Color(0xFF0E1014), RoundedCornerShape(10.dp))
+                                .border(
+                                    0.7.dp,
+                                    when {
+                                        isTied -> AccentAmber.copy(alpha = 0.6f)
+                                        entry.rank in 1..3 -> AccentGreen.copy(alpha = 0.45f)
+                                        else -> HairlineBorder
+                                    },
+                                    RoundedCornerShape(10.dp)
+                                )
                                 .padding(10.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
+                            // Top Identity Row: SLOT #N Badge + IGN + @username + FF UID + Ticket + TIED badge
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    modifier = Modifier.weight(1f),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .background(AccentBlue.copy(alpha = 0.16f), RoundedCornerShape(6.dp))
+                                            .border(0.6.dp, AccentBlue.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = "SLOT #${entry.slotNumber}",
+                                            color = AccentBlue,
+                                            fontSize = 9.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                    }
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = entry.inGameName.ifBlank { entry.username.ifBlank { "Player" } },
+                                            color = TextPrimaryWhite,
+                                            fontSize = 12.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = buildString {
+                                                append("@${entry.username.ifBlank { "player" }}")
+                                                if (entry.characterId.isNotBlank()) append(" • UID: ${entry.characterId}")
+                                                if (entry.ticketCode.isNotBlank()) append(" • ${entry.ticketCode}")
+                                            },
+                                            color = TextSecondaryZinc,
+                                            fontSize = 9.5.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    if (isTied) {
+                                        Box(
+                                            modifier = Modifier
+                                                .background(AccentAmber.copy(alpha = 0.2f), RoundedCornerShape(6.dp))
+                                                .border(0.6.dp, AccentAmber, RoundedCornerShape(6.dp))
+                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        ) {
+                                            Text("TIED #${entry.rank}", color = AccentAmber, fontSize = 9.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                        }
+                                    }
+                                    Text(
+                                        text = if (isWinner) "₹${"%.0f".format(totalWon)}" else "₹0",
+                                        color = if (isWinner) AccentGreen else TextSecondaryZinc,
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                            }
+
+                            // 1-Tap Position Chips: [1st] [2nd] [3rd] [4th] [5th] [#N] [Part.]
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                val quickRanks = listOf(1 to "1st", 2 to "2nd", 3 to "3rd", 4 to "4th", 5 to "5th", 0 to "Part.")
+                                quickRanks.forEach { (rankVal, label) ->
+                                    val selected = entry.rank == rankVal
+                                    val chipColor = when (rankVal) {
+                                        1 -> AccentAmber
+                                        2 -> AccentBlue
+                                        3 -> AccentGreen
+                                        0 -> TextSecondaryZinc
+                                        else -> TextPrimaryWhite
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .background(if (selected) chipColor.copy(alpha = 0.22f) else Color(0xFF0A0A0D), RoundedCornerShape(7.dp))
+                                            .border(0.7.dp, if (selected) chipColor else HairlineBorder, RoundedCornerShape(7.dp))
+                                            .clickable {
+                                                val updated = standingsList.toMutableList().also {
+                                                    it[idx] = entry.copy(rank = rankVal)
+                                                }
+                                                standingsList = recalculateEstimatedPrizes(updated, tiePrizeMode)
+                                                if (customRankEditorIdx == idx) customRankEditorIdx = null
+                                            }
+                                            .padding(horizontal = 9.dp, vertical = 5.dp)
+                                    ) {
+                                        Text(
+                                            text = label,
+                                            color = if (selected) chipColor else TextSecondaryZinc,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+
+                                // Custom #N chip
+                                val isCustomRank = entry.rank > 5
+                                Box(
+                                    modifier = Modifier
+                                        .background(if (isCustomRank || customRankEditorIdx == idx) AccentBlue.copy(alpha = 0.2f) else Color(0xFF0A0A0D), RoundedCornerShape(7.dp))
+                                        .border(0.7.dp, if (isCustomRank || customRankEditorIdx == idx) AccentBlue else HairlineBorder, RoundedCornerShape(7.dp))
+                                        .clickable {
+                                            customRankEditorIdx = if (customRankEditorIdx == idx) null else idx
+                                            customRankDraft = if (entry.rank > 5) entry.rank.toString() else "6"
+                                        }
+                                        .padding(horizontal = 9.dp, vertical = 5.dp)
+                                ) {
+                                    Text(
+                                        text = if (isCustomRank) "#${entry.rank}" else "#N",
+                                        color = if (isCustomRank || customRankEditorIdx == idx) AccentBlue else TextSecondaryZinc,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+
+                            if (customRankEditorIdx == idx) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    OutlinedTextField(
+                                        value = customRankDraft,
+                                        onValueChange = { customRankDraft = it.filter { ch -> ch.isDigit() } },
+                                        label = { Text("Custom Rank #", fontSize = 9.5.sp) },
+                                        singleLine = true,
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    AdminActionChip(
+                                        label = "Set Rank",
+                                        color = AccentBlue,
+                                        onClick = {
+                                            val r = (customRankDraft.toIntOrNull() ?: 6).coerceAtLeast(1)
+                                            val updated = standingsList.toMutableList().also {
+                                                it[idx] = entry.copy(rank = r)
+                                            }
+                                            standingsList = recalculateEstimatedPrizes(updated, tiePrizeMode)
+                                            customRankEditorIdx = null
+                                        }
+                                    )
+                                }
+                            }
+
+                            // Kills Stepper (- / +) Row
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = "Slot #${entry.slotNumber} • ${entry.inGameName.ifBlank { entry.username.ifBlank { "Player" } }}",
-                                    color = TextPrimaryWhite,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = if (isWinner) "WINNER (₹${"%.0f".format(totalWon)})" else "PARTICIPATED (₹0)",
-                                    color = if (isWinner) AccentGreen else TextSecondaryZinc,
+                                    text = "Rank ₹${entry.rankPrize.toInt()} + Kill ₹${entry.killPrize.toInt()}",
+                                    color = TextSecondaryZinc,
                                     fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
                                     fontFamily = FontFamily.Monospace
                                 )
-                            }
-
-                            // Editable Identity Row (if manually added or verifying UID/IGN/FF UID)
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                OutlinedTextField(
-                                    value = entry.inGameName,
-                                    onValueChange = { v ->
-                                        standingsList = standingsList.toMutableList().also {
-                                            it[idx] = entry.copy(inGameName = v, username = v)
-                                        }
-                                    },
-                                    label = { Text("In-Game Name", fontSize = 9.sp) },
-                                    singleLine = true,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                OutlinedTextField(
-                                    value = entry.characterId,
-                                    onValueChange = { v ->
-                                        standingsList = standingsList.toMutableList().also {
-                                            it[idx] = entry.copy(characterId = v)
-                                        }
-                                    },
-                                    label = { Text("Character ID", fontSize = 9.sp) },
-                                    singleLine = true,
-                                    modifier = Modifier.weight(0.9f)
-                                )
-                                OutlinedTextField(
-                                    value = entry.userId,
-                                    onValueChange = { v ->
-                                        standingsList = standingsList.toMutableList().also {
-                                            it[idx] = entry.copy(userId = v)
-                                        }
-                                    },
-                                    label = { Text("User UID", fontSize = 9.sp) },
-                                    singleLine = true,
-                                    modifier = Modifier.weight(1.1f)
-                                )
-                            }
-
-                            // Editable Rank, Kills, Rank Prize, Kill Prize Row
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                OutlinedTextField(
-                                    value = entry.rank.toString(),
-                                    onValueChange = { v ->
-                                        val r = v.toIntOrNull() ?: entry.rank
-                                        standingsList = standingsList.toMutableList().also {
-                                            it[idx] = entry.copy(rank = r)
-                                        }
-                                    },
-                                    label = { Text("Rank #", fontSize = 9.sp) },
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                    modifier = Modifier.weight(0.7f)
-                                )
-                                OutlinedTextField(
-                                    value = entry.kills.toString(),
-                                    onValueChange = { v ->
-                                        val k = (v.toIntOrNull() ?: 0).coerceAtLeast(0)
-                                        val autoKillPrize = k * perKillRate
-                                        val newTotal = entry.rankPrize + autoKillPrize
-                                        standingsList = standingsList.toMutableList().also {
-                                            it[idx] = entry.copy(
-                                                kills = k,
-                                                killPrize = autoKillPrize,
-                                                prizeWon = newTotal,
-                                                wonAnything = newTotal > 0.0
-                                            )
-                                        }
-                                    },
-                                    label = { Text("Kills", fontSize = 9.sp) },
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                    modifier = Modifier.weight(0.7f)
-                                )
-                                OutlinedTextField(
-                                    value = entry.rankPrize.toInt().toString(),
-                                    onValueChange = { v ->
-                                        val rp = (v.toDoubleOrNull() ?: 0.0).coerceAtLeast(0.0)
-                                        val newTotal = rp + entry.killPrize
-                                        standingsList = standingsList.toMutableList().also {
-                                            it[idx] = entry.copy(
-                                                rankPrize = rp,
-                                                prizeWon = newTotal,
-                                                wonAnything = newTotal > 0.0
-                                            )
-                                        }
-                                    },
-                                    label = { Text("Rank ₹", fontSize = 9.sp) },
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                    modifier = Modifier.weight(0.9f)
-                                )
-                                OutlinedTextField(
-                                    value = entry.killPrize.toInt().toString(),
-                                    onValueChange = { v ->
-                                        val kp = (v.toDoubleOrNull() ?: 0.0).coerceAtLeast(0.0)
-                                        val newTotal = entry.rankPrize + kp
-                                        standingsList = standingsList.toMutableList().also {
-                                            it[idx] = entry.copy(
-                                                killPrize = kp,
-                                                prizeWon = newTotal,
-                                                wonAnything = newTotal > 0.0
-                                            )
-                                        }
-                                    },
-                                    label = { Text("Kill ₹", fontSize = 9.sp) },
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                    modifier = Modifier.weight(0.9f)
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text("KILLS", color = TextSecondaryZinc, fontSize = 9.5.sp, fontWeight = FontWeight.Bold)
+                                    Box(
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .background(Color(0xFF141821), RoundedCornerShape(7.dp))
+                                            .border(0.6.dp, HairlineBorder, RoundedCornerShape(7.dp))
+                                            .clickable {
+                                                val nextK = (entry.kills - 1).coerceAtLeast(0)
+                                                val updated = standingsList.toMutableList().also { it[idx] = entry.copy(kills = nextK) }
+                                                standingsList = recalculateEstimatedPrizes(updated, tiePrizeMode)
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text("-", color = TextPrimaryWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                    Text(
+                                        text = entry.kills.toString(),
+                                        color = TextPrimaryWhite,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .background(AccentGreen.copy(alpha = 0.16f), RoundedCornerShape(7.dp))
+                                            .border(0.6.dp, AccentGreen.copy(alpha = 0.5f), RoundedCornerShape(7.dp))
+                                            .clickable {
+                                                val nextK = entry.kills + 1
+                                                val updated = standingsList.toMutableList().also { it[idx] = entry.copy(kills = nextK) }
+                                                standingsList = recalculateEstimatedPrizes(updated, tiePrizeMode)
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text("+", color = AccentGreen, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
                             }
                         }
                     }
@@ -1336,7 +1455,7 @@ fun DeclareStandingsAndPrizesDialog(
 
             HorizontalDivider(thickness = 0.5.dp, color = HairlineBorder)
 
-            // Publish Action Footer
+            // Publish Action Footer (calls Cloud Function finalizeTournamentPayouts)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1349,17 +1468,22 @@ fun DeclareStandingsAndPrizesDialog(
                     onClick = {
                         if (!isPublishing && standingsList.isNotEmpty()) {
                             isPublishing = true
-                            viewModel.publishTournamentStandings(tournament, standingsList) { ok ->
+                            viewModel.publishTournamentStandings(
+                                tournament = tournament,
+                                standings = standingsList,
+                                tiePrizeMode = tiePrizeMode
+                            ) { ok ->
                                 isPublishing = false
                                 if (ok) onDismiss()
                             }
                         }
                     },
                     enabled = !isPublishing && standingsList.isNotEmpty(),
-                    colors = ButtonDefaults.buttonColors(containerColor = AccentGreen)
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentGreen),
+                    modifier = Modifier.testTag("finalize_tournament_payouts_btn")
                 ) {
                     Text(
-                        text = if (isPublishing) "PUBLISHING & CREDITING..." else "PUBLISH FINAL STANDINGS & CREDIT WINNERS",
+                        text = if (isPublishing) "SETTLING ON SERVER..." else "PUBLISH & DISTRIBUTE WINNINGS",
                         color = Color.Black,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold
@@ -1371,12 +1495,13 @@ fun DeclareStandingsAndPrizesDialog(
 }
 
 // ============================================================================
-// MODULE 3: USERS, BAN / SUSPEND (/banned_users & /suspended_users) & WALLET
+// MODULE 5: USERS, SANCTIONS (users/{uid}) & QUICK NOTIFY
 // ============================================================================
 @Composable
 private fun UsersAndModerationModuleSection(
     viewModel: TournamentDashboardViewModel,
-    users: List<UserProfile>
+    users: List<UserProfile>,
+    onQuickNotifyUser: (String) -> Unit = {}
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var moderationReason by remember { mutableStateOf("Violation of Velorix Fair Play Policy") }
@@ -1449,6 +1574,7 @@ private fun UsersAndModerationModuleSection(
                 u.isSuspended -> AccentAmber
                 else -> AccentGreen
             }
+            val pushReady = u.fcmToken.isNotBlank()
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1465,24 +1591,45 @@ private fun UsersAndModerationModuleSection(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         modifier = Modifier.weight(1f)
                     ) {
+                        if (u.isOnline) {
+                            Box(modifier = Modifier.size(7.dp).background(AccentGreen, CircleShape))
+                        }
                         Text(
                             text = "${u.username.ifBlank { "Player" }} (${u.id.take(12)})",
                             color = TextPrimaryWhite,
                             fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
-                    Text(
-                        text = when {
-                            u.isBanned -> "BANNED (PERMANENT)"
-                            u.isSuspended -> "SUSPENDED"
-                            else -> "ACTIVE"
-                        },
-                        color = statusColor,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace
-                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .background(if (pushReady) AccentGreen.copy(alpha = 0.14f) else Color(0xFF141821), RoundedCornerShape(6.dp))
+                                .border(0.5.dp, if (pushReady) AccentGreen.copy(alpha = 0.5f) else HairlineBorder, RoundedCornerShape(6.dp))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = if (pushReady) "PUSH READY" else "NO FCM",
+                                color = if (pushReady) AccentGreen else TextSecondaryZinc,
+                                fontSize = 8.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                        Text(
+                            text = when {
+                                u.isBanned -> "BANNED"
+                                u.isSuspended -> "SUSPENDED"
+                                else -> "ACTIVE"
+                            },
+                            color = statusColor,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
                 }
                 Text(
                     text = "Email: ${u.email.ifBlank { "N/A" }} • FF UID: ${u.gameId.ifBlank { "N/A" }}",
@@ -1503,6 +1650,12 @@ private fun UsersAndModerationModuleSection(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    AdminActionChip(
+                        label = "Notify User",
+                        color = AccentBlue,
+                        icon = Icons.Default.NotificationsActive,
+                        onClick = { onQuickNotifyUser(u.id) }
+                    )
                     AdminActionChip(
                         label = if (u.isBanned) "Unban User" else "Permanent Ban",
                         color = if (u.isBanned) AccentGreen else AccentRed,
@@ -2260,19 +2413,20 @@ private fun TokensAndMissionsManagerSection(
 }
 
 // ============================================================================
-// MODULE 7A: LIVE SYSTEM CONFIG (/system_config) — CLEAN 6 CORE FEATURE FLAGS ONLY
+// MODULE 7A: LIVE SYSTEM CONFIG (5 ACTIVE FLAGS) + 1-CLICK RECONCILIATION DESK
 // ============================================================================
 @Composable
 private fun SystemConfigCleanSection(
     viewModel: TournamentDashboardViewModel,
-    systemConfig: SystemConfig
+    systemConfig: SystemConfig,
+    reconciliationSummaryJson: String? = null,
+    isReconcilingBackend: Boolean = false
 ) {
     var maintenanceMode by remember(systemConfig) { mutableStateOf(systemConfig.maintenanceMode) }
     var maintenanceTitle by remember(systemConfig) { mutableStateOf(systemConfig.maintenanceTitle) }
     var maintenanceMessage by remember(systemConfig) { mutableStateOf(systemConfig.maintenanceMessage) }
     var forceUpdateRequired by remember(systemConfig) { mutableStateOf(systemConfig.forceUpdateRequired) }
     var showBanners by remember(systemConfig) { mutableStateOf(systemConfig.showBanners) }
-    var showDeveloperModal by remember(systemConfig) { mutableStateOf(systemConfig.showDeveloperModal) }
     var latestVersionCode by remember(systemConfig) { mutableStateOf(systemConfig.latestVersionCode.toString()) }
     var latestVersionName by remember(systemConfig) { mutableStateOf(systemConfig.latestVersionName) }
     var updateDownloadUrl by remember(systemConfig) { mutableStateOf(systemConfig.updateDownloadUrl) }
@@ -2288,11 +2442,7 @@ private fun SystemConfigCleanSection(
     var discordUrl by remember(systemConfig) { mutableStateOf(systemConfig.discordUrl) }
     var vpnBlockEnabled by remember(systemConfig) { mutableStateOf(systemConfig.vpnBlockEnabled) }
 
-    var otaPatchVersion by remember(systemConfig) { mutableStateOf(systemConfig.otaPatchVersion.toString()) }
-    var otaReleaseNotes by remember(systemConfig) { mutableStateOf(systemConfig.otaReleaseNotes) }
-    var liveLobbyTicker by remember(systemConfig) { mutableStateOf(systemConfig.liveLobbyTicker) }
-
-    // Strictly the 6 Active Core Feature Flags
+    // Strictly the 5 Active Core Feature Flags
     var featureFlagsMap by remember(systemConfig) {
         val activeKeys = SystemConfig.ALL_FEATURE_FLAG_METADATA.map { it.first }.toSet()
         val defaults = SystemConfig.defaultFeatureFlags().toMutableMap()
@@ -2310,7 +2460,6 @@ private fun SystemConfigCleanSection(
                 maintenanceMessage = maintenanceMessage.trim(),
                 forceUpdateRequired = forceUpdateRequired,
                 showBanners = showBanners,
-                showDeveloperModal = showDeveloperModal,
                 latestVersionCode = latestVersionCode.toIntOrNull() ?: 2,
                 latestVersionName = latestVersionName.trim(),
                 updateDownloadUrl = updateDownloadUrl.trim(),
@@ -2325,9 +2474,6 @@ private fun SystemConfigCleanSection(
                 instagramUrl = instagramUrl.trim(),
                 discordUrl = discordUrl.trim(),
                 vpnBlockEnabled = vpnBlockEnabled,
-                otaPatchVersion = (otaPatchVersion.toIntOrNull() ?: 1).coerceAtLeast(1),
-                otaReleaseNotes = otaReleaseNotes.trim(),
-                liveLobbyTicker = liveLobbyTicker.trim(),
                 featureFlags = featureFlagsMap,
                 updatedAt = System.currentTimeMillis()
             )
@@ -2366,51 +2512,70 @@ private fun SystemConfigCleanSection(
             )
         }
 
-        HorizontalDivider(thickness = 0.5.dp, color = HairlineBorder)
-
-        // 1. Live Lobby Ticker & Config Version
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
+        // 1-Click Backend Reconciliation Desk
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF0E1014), RoundedCornerShape(10.dp))
+                .border(0.6.dp, AccentBlue.copy(alpha = 0.45f), RoundedCornerShape(10.dp))
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            OutlinedTextField(
-                value = otaPatchVersion,
-                onValueChange = { otaPatchVersion = it },
-                label = { Text("Config Rev #", fontSize = 10.sp) },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.width(105.dp)
-            )
-            AdminActionChip(
-                label = "+1 Rev",
-                color = AccentAmber,
-                icon = Icons.Default.Add,
-                onClick = {
-                    val nextVer = (otaPatchVersion.toIntOrNull() ?: 1) + 1
-                    otaPatchVersion = nextVer.toString()
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "1-Click Backend Reconciliation Desk",
+                        color = TextPrimaryWhite,
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Reconciles deposits, withdrawals, tournament slots & Firestore ↔ RTDB sync health.",
+                        color = TextSecondaryZinc,
+                        fontSize = 10.sp
+                    )
                 }
-            )
-            OutlinedTextField(
-                value = otaReleaseNotes,
-                onValueChange = { otaReleaseNotes = it },
-                label = { Text("Release Notes", fontSize = 10.sp) },
-                singleLine = true,
-                modifier = Modifier.weight(1f)
-            )
+            }
+            Button(
+                onClick = { viewModel.triggerBackendReconciliation() },
+                enabled = !isReconcilingBackend,
+                colors = ButtonDefaults.buttonColors(containerColor = AccentBlue),
+                modifier = Modifier.fillMaxWidth().testTag("trigger_backend_reconciliation_btn")
+            ) {
+                Icon(Icons.Default.Sync, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = if (isReconcilingBackend) "RUNNING RECONCILIATION..." else "RUN BACKEND RECONCILIATION NOW",
+                    color = Color.White,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            if (!reconciliationSummaryJson.isNullOrBlank()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFF05070A), RoundedCornerShape(8.dp))
+                        .border(0.5.dp, HairlineBorder, RoundedCornerShape(8.dp))
+                        .padding(10.dp)
+                ) {
+                    Text(
+                        text = reconciliationSummaryJson,
+                        color = AccentGreen,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            }
         }
 
-        OutlinedTextField(
-            value = liveLobbyTicker,
-            onValueChange = { liveLobbyTicker = it },
-            label = { Text("Live Lobby Ticker Banner Text", fontSize = 10.sp) },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-
         HorizontalDivider(thickness = 0.5.dp, color = HairlineBorder)
 
-        // 2. Strictly 6 Active Core Feature Flags
+        // 2. Strictly 5 Active Core Feature Flags
         val activeFlagsCount = SystemConfig.ALL_FEATURE_FLAG_METADATA.size
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -2499,8 +2664,7 @@ private fun SystemConfigCleanSection(
             Triple("Maintenance Mode", maintenanceMode, AccentAmber) to { v: Boolean -> maintenanceMode = v },
             Triple("Force APK Update", forceUpdateRequired, AccentRed) to { v: Boolean -> forceUpdateRequired = v },
             Triple("Block VPN / Proxy", vpnBlockEnabled, AccentGreen) to { v: Boolean -> vpnBlockEnabled = v },
-            Triple("Show Home Banners", showBanners, AccentGreen) to { v: Boolean -> showBanners = v },
-            Triple("Developer Modal", showDeveloperModal, AccentBlue) to { v: Boolean -> showDeveloperModal = v }
+            Triple("Show Home Banners", showBanners, AccentGreen) to { v: Boolean -> showBanners = v }
         )
         systemToggles.chunked(2).forEach { rowItems ->
             Row(
@@ -2994,6 +3158,177 @@ fun TournamentLobbyChatModeratorSection(
                 ) {
                     Icon(Icons.Default.Send, contentDescription = "Send Admin Message", tint = AccentGreen)
                 }
+            }
+        }
+    }
+}
+
+// ============================================================================
+// MODULE 7B: READ-ONLY AUDIT LOGS (audit_logs) & SECURITY LOGS (security_audit_logs)
+// ============================================================================
+@Composable
+private fun AuditAndSecurityLogsViewerSection(
+    auditLogs: List<AdminAuditLogItem>,
+    securityAuditLogs: List<AdminAuditLogItem>
+) {
+    var activeLogTab by remember { mutableStateOf("AUDIT") } // AUDIT | SECURITY
+    var searchQuery by remember { mutableStateOf("") }
+
+    val activeList = remember(activeLogTab, auditLogs, securityAuditLogs, searchQuery) {
+        val base = if (activeLogTab == "AUDIT") auditLogs else securityAuditLogs
+        if (searchQuery.isBlank()) base
+        else base.filter {
+            it.action.contains(searchQuery, ignoreCase = true) ||
+                it.detail.contains(searchQuery, ignoreCase = true) ||
+                it.adminEmail.contains(searchQuery, ignoreCase = true) ||
+                it.targetId.contains(searchQuery, ignoreCase = true)
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            listOf(
+                "AUDIT" to "Admin Audit (${auditLogs.size})",
+                "SECURITY" to "Security Logs (${securityAuditLogs.size})"
+            ).forEach { (key, label) ->
+                val selected = activeLogTab == key
+                val tint = if (key == "SECURITY") AccentRed else AccentBlue
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .background(
+                            if (selected) tint.copy(alpha = 0.16f) else Color(0xFF0A0A0D),
+                            RoundedCornerShape(10.dp)
+                        )
+                        .border(
+                            0.75.dp,
+                            if (selected) tint else HairlineBorder,
+                            RoundedCornerShape(10.dp)
+                        )
+                        .clickable { activeLogTab = key }
+                        .padding(horizontal = 12.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = if (key == "SECURITY") Icons.Default.Security else Icons.Default.History,
+                        contentDescription = label,
+                        tint = if (selected) tint else TextSecondaryZinc,
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = label,
+                        color = if (selected) TextPrimaryWhite else TextSecondaryZinc,
+                        fontSize = 11.5.sp,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
+            }
+        }
+
+        Text(
+            text = if (activeLogTab == "AUDIT") {
+                "Read-only live feed from Firestore audit_logs & RTDB /audit_logs."
+            } else {
+                "Read-only live feed from Firestore security_audit_logs (auth, wallet & payout security events)."
+            },
+            color = TextSecondaryZinc,
+            fontSize = 11.sp
+        )
+
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = { searchQuery = it },
+            label = { Text("Filter by action, detail, admin email, or target ID", fontSize = 11.sp) },
+            singleLine = true,
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("audit_logs_search_input"),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = AccentBlue,
+                unfocusedBorderColor = HairlineBorder,
+                focusedTextColor = TextPrimaryWhite,
+                unfocusedTextColor = TextPrimaryWhite
+            )
+        )
+
+        HorizontalDivider(thickness = 0.5.dp, color = HairlineBorder)
+
+        if (activeList.isEmpty()) {
+            Text(
+                text = if (activeLogTab == "AUDIT") {
+                    "No admin audit logs matched."
+                } else {
+                    "No security audit events recorded yet."
+                },
+                color = TextSecondaryZinc,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(vertical = 12.dp)
+            )
+        } else {
+            activeList.take(100).forEach { log ->
+                val accent = when {
+                    activeLogTab == "SECURITY" || log.action.contains("BAN", true) || log.action.contains("REJECT", true) || log.action.contains("DELETE", true) -> AccentRed
+                    log.action.contains("APPROVE", true) || log.action.contains("PAYOUT", true) || log.action.contains("RECONCIL", true) -> AccentGreen
+                    else -> AccentAmber
+                }
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 7.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = log.action.ifBlank { "EVENT" },
+                            color = accent,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = formatTimestampShort(log.timestamp),
+                            color = TextSecondaryZinc,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                    if (log.detail.isNotBlank()) {
+                        Text(
+                            text = log.detail,
+                            color = TextPrimaryWhite,
+                            fontSize = 11.5.sp
+                        )
+                    }
+                    Text(
+                        text = "Actor: ${log.adminEmail.ifBlank { "system" }} • Target: ${log.targetId.ifBlank { "global" }}",
+                        color = TextSecondaryZinc,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+                HorizontalDivider(thickness = 0.5.dp, color = HairlineBorder)
             }
         }
     }

@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.validation.UserRateLimiter
 import com.example.ui.common.GlobalErrorManager
+import com.example.ui.theme.VelorixEmerald
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -51,19 +52,19 @@ fun RateLimiterManagementDialog(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color(0xFF8B5CF6).copy(alpha = 0.15f),
-                        border = BorderStroke(1.dp, Color(0xFF8B5CF6).copy(alpha = 0.3f)),
+                        shape = RoundedCornerShape(10.dp),
+                        color = V14AccentPrimary.copy(alpha = 0.14f),
+                        border = BorderStroke(1.dp, V14AccentBright.copy(alpha = 0.35f)),
                         modifier = Modifier.size(36.dp)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
-                            Icon(Icons.Outlined.Speed, contentDescription = null, tint = Color(0xFFA78BFA), modifier = Modifier.size(20.dp))
+                            Icon(Icons.Outlined.Speed, contentDescription = null, tint = V14AccentBright, modifier = Modifier.size(20.dp))
                         }
                     }
                     Spacer(modifier = Modifier.width(10.dp))
                     Column {
-                        Text("Backend Rate Limiter", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                        Text("Sliding Window & Token Bucket Engine", color = Color(0xFF94A3B8), fontSize = 11.sp)
+                        Text("Backend Rate Limiter", color = V14TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        Text("Sliding Window & Token Bucket Engine", color = V14TextSecondary, fontSize = 11.sp)
                     }
                 }
 
@@ -72,7 +73,7 @@ fun RateLimiterManagementDialog(
                     snapshots = UserRateLimiter.getAllSnapshots(userIdentifier)
                     GlobalErrorManager.emitSuccess("All rate limits & token buckets flushed")
                 }) {
-                    Icon(Icons.Outlined.Refresh, contentDescription = "Reset All", tint = Color(0xFF38BDF8), modifier = Modifier.size(20.dp))
+                    Icon(Icons.Outlined.Refresh, contentDescription = "Reset All", tint = V14AccentBright, modifier = Modifier.size(20.dp))
                 }
             }
         },
@@ -83,9 +84,9 @@ fun RateLimiterManagementDialog(
                     .heightIn(max = 440.dp)
             ) {
                 Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = Color(0xFF090B12),
-                    border = BorderStroke(1.dp, Color(0xFF1E2638)),
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFF08080B),
+                    border = BorderStroke(1.dp, V14Border),
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(bottom = 12.dp)
@@ -98,12 +99,12 @@ fun RateLimiterManagementDialog(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column {
-                            Text("ACTIVE ENGINE", color = Color(0xFF64748B), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                            Text("Continuous Token Refill", color = Color(0xFF10B981), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text("ACTIVE ENGINE", color = V14TextMuted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            Text("Continuous Token Refill", color = VelorixEmerald, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                         }
                         Column(horizontalAlignment = Alignment.End) {
-                            Text("SERVER SYNC", color = Color(0xFF64748B), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                            Text("Dual RTDB + Firestore", color = Color(0xFF38BDF8), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text("SERVER SYNC", color = V14TextMuted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            Text("Dual RTDB + Firestore", color = V14AccentBright, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
@@ -132,13 +133,14 @@ fun RateLimiterManagementDialog(
         confirmButton = {
             Button(
                 onClick = onDismissRequest,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B)),
-                shape = RoundedCornerShape(8.dp)
+                colors = ButtonDefaults.buttonColors(containerColor = V14CardElevated),
+                border = BorderStroke(1.dp, V14Border),
+                shape = RoundedCornerShape(10.dp)
             ) {
                 Text("Close Monitor", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
         },
-        containerColor = Color(0xFF111420),
+        containerColor = V14CardSurface,
         shape = RoundedCornerShape(18.dp)
     )
 }
@@ -149,9 +151,9 @@ private fun RateSnapshotRow(
     onReset: () -> Unit
 ) {
     Surface(
-        shape = RoundedCornerShape(10.dp),
-        color = Color(0xFF0C0F1A),
-        border = BorderStroke(1.dp, if (snapshot.isLocked) Color(0xFFEF4444).copy(alpha = 0.5f) else Color(0xFF1E2638)),
+        shape = RoundedCornerShape(12.dp),
+        color = Color(0xFF08080B),
+        border = BorderStroke(1.dp, if (snapshot.isLocked) V14AccentBright.copy(alpha = 0.5f) else V14Border),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(10.dp)) {
@@ -164,18 +166,18 @@ private fun RateSnapshotRow(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             text = snapshot.actionName,
-                            color = Color.White,
+                            color = V14TextPrimary,
                             fontSize = 12.5.sp,
                             fontWeight = FontWeight.Bold
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Surface(
                             shape = RoundedCornerShape(4.dp),
-                            color = Color(0xFF1E293B)
+                            color = V14CardElevated
                         ) {
                             Text(
                                 text = snapshot.category,
-                                color = Color(0xFF94A3B8),
+                                color = V14TextSecondary,
                                 fontSize = 9.sp,
                                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
                             )
@@ -183,7 +185,7 @@ private fun RateSnapshotRow(
                     }
                     Text(
                         text = "Quota: ${snapshot.requestsPerMinute.toInt()} req/min • Burst: ${snapshot.burstCapacity}",
-                        color = Color(0xFF64748B),
+                        color = V14TextMuted,
                         fontSize = 10.sp
                     )
                 }
@@ -235,8 +237,8 @@ private fun RateSnapshotRow(
                     .fillMaxWidth()
                     .height(3.dp)
                     .clip(RoundedCornerShape(2.dp)),
-                color = if (snapshot.isLocked) Color(0xFFEF4444) else Color(0xFF10B981),
-                trackColor = Color(0xFF1E2638)
+                color = if (snapshot.isLocked) V14AccentBright else VelorixEmerald,
+                trackColor = V14Border
             )
         }
     }

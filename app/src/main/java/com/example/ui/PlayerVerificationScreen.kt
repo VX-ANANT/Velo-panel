@@ -2,11 +2,14 @@ package com.example.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -15,6 +18,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.font.FontWeight
@@ -42,7 +46,7 @@ fun PlayerVerificationScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color.Black)
+                    .background(V14Bg)
                     .statusBarsPadding()
                     .padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
@@ -50,59 +54,66 @@ fun PlayerVerificationScreen(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(
-                        onClick = onNavigateBack,
-                        modifier = Modifier.size(36.dp)
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(V14CardSurface)
+                            .border(1.dp, V14Border, CircleShape)
+                            .clickable(onClick = onNavigateBack),
+                        contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back",
                             tint = Color.White,
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(18.dp)
                         )
                     }
 
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(12.dp))
 
                     Column(modifier = Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = "PLAYER VERIFICATION",
+                                text = "Player Verification",
                                 fontSize = 17.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                letterSpacing = 1.sp
+                                color = V14TextPrimary
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = "GATEWAY",
-                                color = Color(0xFF34D399),
-                                fontSize = 9.sp,
+                                color = V14AccentBright,
+                                fontSize = 9.5.sp,
                                 fontWeight = FontWeight.ExtraBold,
-                                letterSpacing = 0.8.sp
+                                letterSpacing = 1.sp
                             )
                         }
                         Text(
                             text = "Review, authenticate and approve esports player registrations",
                             fontSize = 11.5.sp,
-                            color = Color(0xFFA1A1AA)
+                            color = V14TextSecondary
                         )
                     }
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Flat Search Row with bottom hairline divider
+                // Recessed V14 Search Field
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 8.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFF08080B))
+                        .border(1.dp, V14Border, RoundedCornerShape(12.dp))
+                        .padding(horizontal = 12.dp, vertical = 11.dp)
                 ) {
                     Icon(
                         Icons.Default.Search,
                         contentDescription = null,
-                        tint = Color(0xFF71717A),
+                        tint = V14TextMuted,
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
@@ -110,7 +121,7 @@ fun PlayerVerificationScreen(
                         if (searchQuery.isEmpty()) {
                             Text(
                                 "Search by player IGN, Game ID, UID or Region...",
-                                color = Color(0xFF71717A),
+                                color = V14TextMuted,
                                 fontSize = 12.5.sp
                             )
                         }
@@ -119,10 +130,10 @@ fun PlayerVerificationScreen(
                             onValueChange = { searchQuery = it },
                             singleLine = true,
                             textStyle = androidx.compose.ui.text.TextStyle(
-                                color = Color.White,
+                                color = V14TextPrimary,
                                 fontSize = 13.sp
                             ),
-                            cursorBrush = SolidColor(Color(0xFF10B981)),
+                            cursorBrush = SolidColor(V14AccentBright),
                             modifier = Modifier.fillMaxWidth()
                         )
                     }
@@ -130,14 +141,13 @@ fun PlayerVerificationScreen(
                         Icon(
                             Icons.Default.Close,
                             contentDescription = "Clear",
-                            tint = Color.Gray,
+                            tint = V14TextSecondary,
                             modifier = Modifier
                                 .size(16.dp)
                                 .clickable { searchQuery = "" }
                         )
                     }
                 }
-                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.12f))
 
                 Spacer(modifier = Modifier.height(8.dp))
 
@@ -195,8 +205,8 @@ fun PlayerVerificationScreen(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        CircularProgressIndicator(color = Color(0xFF10B981), strokeWidth = 2.5.dp)
-                        Text("Loading verification queue...", color = Color(0xFFA1A1AA), fontSize = 12.sp)
+                        CircularProgressIndicator(color = V14AccentBright, strokeWidth = 2.5.dp)
+                        Text("Loading verification queue...", color = V14TextSecondary, fontSize = 12.sp)
                     }
                 }
             }
@@ -304,7 +314,7 @@ fun VerificationFilterChip(
     count: Int,
     onClick: () -> Unit
 ) {
-    val textColor = if (isSelected) Color(0xFF34D399) else Color(0xFFA1A1AA)
+    val textColor = if (isSelected) V14TextPrimary else V14TextSecondary
 
     Column(
         modifier = Modifier
@@ -324,7 +334,7 @@ fun VerificationFilterChip(
             modifier = Modifier
                 .width(42.dp)
                 .height(2.dp)
-                .background(if (isSelected) Color(0xFF10B981) else Color.Transparent)
+                .background(if (isSelected) V14AccentPrimary else Color.Transparent)
         )
     }
 }
@@ -338,7 +348,7 @@ fun RegistrationCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color.Black)
+            .background(V14Bg)
             .padding(vertical = 14.dp)
     ) {
         Row(
@@ -351,12 +361,21 @@ fun RegistrationCard(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier.weight(1f)
             ) {
-                Icon(
-                    Icons.Default.SportsEsports,
-                    contentDescription = null,
-                    tint = Color(0xFF60A5FA),
-                    modifier = Modifier.size(20.dp)
-                )
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(V14CardSurface)
+                        .border(1.dp, V14Border, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Default.SportsEsports,
+                        contentDescription = null,
+                        tint = V14AccentBright,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
 
                 Column {
                     val displayName = registration.playerName.ifBlank {
@@ -368,7 +387,7 @@ fun RegistrationCard(
                         text = displayName,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White,
+                        color = V14TextPrimary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -376,7 +395,7 @@ fun RegistrationCard(
                     Text(
                         text = "UID: ${idToShow.take(14)}",
                         fontSize = 11.sp,
-                        color = Color(0xFFA1A1AA)
+                        color = V14TextSecondary
                     )
                 }
             }
@@ -385,7 +404,7 @@ fun RegistrationCard(
                 text = (registration.tournament?.game ?: "Free Fire").uppercase(),
                 fontSize = 10.sp,
                 fontWeight = FontWeight.ExtraBold,
-                color = Color(0xFF34D399),
+                color = V14AccentBright,
                 letterSpacing = 0.6.sp
             )
         }
@@ -398,23 +417,23 @@ fun RegistrationCard(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Column {
-                Text("REGION", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF71717A), letterSpacing = 0.5.sp)
+                Text("REGION", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = V14TextMuted, letterSpacing = 0.5.sp)
                 Spacer(modifier = Modifier.height(2.dp))
-                Text(registration.region ?: "India / Global", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+                Text(registration.region ?: "India / Global", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = V14TextPrimary)
             }
             Column {
-                Text("AGE", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF71717A), letterSpacing = 0.5.sp)
+                Text("AGE", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = V14TextMuted, letterSpacing = 0.5.sp)
                 Spacer(modifier = Modifier.height(2.dp))
                 val ageVal = registration.age ?: 18
                 Text(
                     text = if (ageVal < 18) "$ageVal (Minor)" else "$ageVal yrs",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = if (ageVal < 18) Color(0xFFFBBF24) else Color.White
+                    color = if (ageVal < 18) VelorixAmber else V14TextPrimary
                 )
             }
             Column(horizontalAlignment = Alignment.End) {
-                Text("GAME ACCOUNT", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF71717A), letterSpacing = 0.5.sp)
+                Text("GAME ACCOUNT", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = V14TextMuted, letterSpacing = 0.5.sp)
                 Spacer(modifier = Modifier.height(2.dp))
                 val accountId = registration.gameAccountId?.takeIf { it.isNotBlank() }
                     ?: registration.gameId.takeIf { it.isNotBlank() }
@@ -423,7 +442,7 @@ fun RegistrationCard(
                     text = accountId,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = if (accountId != "Not Linked") Color(0xFF60A5FA) else Color(0xFF71717A)
+                    color = if (accountId != "Not Linked") V14AccentBright else V14TextMuted
                 )
             }
         }
@@ -437,18 +456,18 @@ fun RegistrationCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             TextButton(onClick = { onReject(registration.id) }) {
-                Icon(Icons.Default.Close, contentDescription = "Reject", tint = Color(0xFFF87171), modifier = Modifier.size(15.dp))
+                Icon(Icons.Default.Close, contentDescription = "Reject", tint = V14AccentBright, modifier = Modifier.size(15.dp))
                 Spacer(modifier = Modifier.width(4.dp))
-                Text("REJECT", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = Color(0xFFF87171))
+                Text("REJECT", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = V14AccentBright)
             }
             Spacer(modifier = Modifier.width(12.dp))
             TextButton(onClick = { onApprove(registration.id) }) {
-                Icon(Icons.Default.Check, contentDescription = "Approve", tint = Color(0xFF34D399), modifier = Modifier.size(15.dp))
+                Icon(Icons.Default.Check, contentDescription = "Approve", tint = VelorixEmerald, modifier = Modifier.size(15.dp))
                 Spacer(modifier = Modifier.width(4.dp))
-                Text("APPROVE", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = Color(0xFF34D399))
+                Text("APPROVE", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = VelorixEmerald)
             }
         }
 
-        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+        HorizontalDivider(thickness = 0.5.dp, color = V14Border)
     }
 }

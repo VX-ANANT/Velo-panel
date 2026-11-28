@@ -45,9 +45,9 @@ fun GeminiApiKeyDialog(
         Surface(
             modifier = Modifier
                 .fillMaxWidth(0.92f)
-                .clip(RoundedCornerShape(16.dp))
-                .border(1.dp, Color(0xFF262C3D), RoundedCornerShape(16.dp)),
-            color = Color(0xFF10121A)
+                .clip(RoundedCornerShape(18.dp))
+                .border(1.dp, Color(0xFF1E1E27), RoundedCornerShape(18.dp)),
+            color = Color(0xFF0C0C10)
         ) {
             Column(
                 modifier = Modifier
@@ -64,28 +64,29 @@ fun GeminiApiKeyDialog(
                         Box(
                             modifier = Modifier
                                 .size(36.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0xFF3B82F6).copy(alpha = 0.15f)),
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color(0xFFFF0033).copy(alpha = 0.14f))
+                                .border(1.dp, Color(0xFFFF2E5B).copy(alpha = 0.35f), RoundedCornerShape(10.dp)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 Icons.Default.VpnKey,
                                 contentDescription = null,
-                                tint = Color(0xFF60A5FA),
+                                tint = Color(0xFFFF2E5B),
                                 modifier = Modifier.size(18.dp)
                             )
                         }
                         Spacer(modifier = Modifier.width(10.dp))
                         Column {
                             Text(
-                                text = "Gemini AI API Key",
-                                color = Color.White,
+                                text = "AI Assistant API Key",
+                                color = Color(0xFFF5F5F7),
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "Live Neural Network Intelligence",
-                                color = Color(0xFF94A3B8),
+                                text = "Live Admin Intelligence Key",
+                                color = Color(0xFF9A9AA6),
                                 fontSize = 11.sp
                             )
                         }
@@ -137,21 +138,22 @@ fun GeminiApiKeyDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Color(0xFF3B82F6),
-                        unfocusedBorderColor = Color(0xFF262C3D),
-                        focusedContainerColor = Color(0xFF171B26),
-                        unfocusedContainerColor = Color(0xFF171B26),
+                        focusedBorderColor = Color(0xFFFF2E5B),
+                        unfocusedBorderColor = Color(0xFF1E1E27),
+                        focusedContainerColor = Color(0xFF08080B),
+                        unfocusedContainerColor = Color(0xFF08080B),
                         focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White
+                        unfocusedTextColor = Color.White,
+                        cursorColor = Color(0xFFFF2E5B)
                     ),
-                    shape = RoundedCornerShape(10.dp)
+                    shape = RoundedCornerShape(12.dp)
                 )
 
                 if (saveSuccessMessage != null) {
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = saveSuccessMessage!!,
-                        color = Color(0xFF3B8A6E),
+                        color = Color(0xFF34D399),
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Medium
                     )
@@ -166,19 +168,21 @@ fun GeminiApiKeyDialog(
                         uriHandler.openUri("https://aistudio.google.com/app/apikey")
                     },
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(8.dp),
+                    shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = Color(0xFF60A5FA)
+                        containerColor = Color(0xFF14141B),
+                        contentColor = Color(0xFFF5F5F7)
                     ),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF262C3D))
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E1E27))
                 ) {
                     Icon(
                         Icons.AutoMirrored.Filled.OpenInNew,
                         contentDescription = null,
+                        tint = Color(0xFFFF2E5B),
                         modifier = Modifier.size(14.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Get Free Gemini Key (Google AI Studio)", fontSize = 12.sp)
+                    Text("Generate API Key", fontSize = 12.sp)
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
@@ -215,14 +219,15 @@ fun GeminiApiKeyDialog(
                             }
                         },
                         modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(8.dp),
+                        shape = RoundedCornerShape(10.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF2563EB)
+                            containerColor = Color(0xFFFF0033),
+                            contentColor = Color.White
                         )
                     ) {
-                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Default.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Save & Apply", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Save & Apply", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }

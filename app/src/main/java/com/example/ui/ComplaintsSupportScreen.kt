@@ -218,24 +218,32 @@ fun ComplaintsSupportScreen(
                     OutlinedTextField(
                         value = refundAmountInput,
                         onValueChange = { refundAmountInput = it },
-                        label = { Text("Amount in INR (₹) -> ${selectedCompensationBucket.shortLabel}", color = Color.Gray) },
+                        label = { Text("Amount in INR (₹) -> ${selectedCompensationBucket.shortLabel}", color = V14TextMuted) },
+                        shape = RoundedCornerShape(12.dp),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
-                            focusedBorderColor = VelorixAccent,
-                            unfocusedBorderColor = CardVerifyBorder
+                            focusedTextColor = V14TextPrimary,
+                            unfocusedTextColor = V14TextPrimary,
+                            focusedContainerColor = Color(0xFF08080B),
+                            unfocusedContainerColor = Color(0xFF08080B),
+                            focusedBorderColor = V14AccentBright,
+                            unfocusedBorderColor = V14Border,
+                            cursorColor = V14AccentBright
                         ),
                         modifier = Modifier.fillMaxWidth()
                     )
                     OutlinedTextField(
                         value = refundReasonInput,
                         onValueChange = { refundReasonInput = it },
-                        label = { Text("Compensation Reason", color = Color.Gray) },
+                        label = { Text("Compensation Reason", color = V14TextMuted) },
+                        shape = RoundedCornerShape(12.dp),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
-                            focusedBorderColor = VelorixAccent,
-                            unfocusedBorderColor = CardVerifyBorder
+                            focusedTextColor = V14TextPrimary,
+                            unfocusedTextColor = V14TextPrimary,
+                            focusedContainerColor = Color(0xFF08080B),
+                            unfocusedContainerColor = Color(0xFF08080B),
+                            focusedBorderColor = V14AccentBright,
+                            unfocusedBorderColor = V14Border,
+                            cursorColor = V14AccentBright
                         ),
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -272,17 +280,19 @@ fun ComplaintsSupportScreen(
                         }
                         showRefundDialog = null
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent)
+                    colors = ButtonDefaults.buttonColors(containerColor = V14AccentPrimary),
+                    shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text("Credit ${selectedCompensationBucket.shortLabel}", color = Color.Black, fontWeight = FontWeight.Bold)
+                    Text("Credit ${selectedCompensationBucket.shortLabel}", color = Color.White, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showRefundDialog = null }) {
-                    Text("Cancel", color = Color.Gray)
+                    Text("Cancel", color = V14TextSecondary)
                 }
             },
-            containerColor = CardLiveBg
+            containerColor = V14CardSurface,
+            shape = RoundedCornerShape(20.dp)
         )
     }
 
@@ -374,15 +384,23 @@ fun ComplaintsSupportScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (onNavigateBack != null) {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(V14CardSurface)
+                            .border(1.dp, V14Border, CircleShape)
+                            .clickable(onClick = onNavigateBack),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White, modifier = Modifier.size(18.dp))
                     }
-                    Spacer(modifier = Modifier.width(4.dp))
+                    Spacer(modifier = Modifier.width(12.dp))
                 }
                 Column {
                     Text(
                         text = "Support Complaints Desk",
-                        color = VelorixTextPrimary,
+                        color = V14TextPrimary,
                         fontWeight = FontWeight.Bold,
                         fontSize = 18.sp,
                         maxLines = 1,
@@ -390,7 +408,7 @@ fun ComplaintsSupportScreen(
                     )
                     Text(
                         text = "Real-time ticket resolution & live support chat",
-                        color = Color.Gray,
+                        color = V14TextSecondary,
                         fontSize = 11.5.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -401,14 +419,14 @@ fun ComplaintsSupportScreen(
             Spacer(modifier = Modifier.width(8.dp))
 
             Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = if (pendingCount > 0) Color(0xFFEF4444).copy(alpha = 0.16f) else VelorixAccent.copy(alpha = 0.16f),
-                border = BorderStroke(1.dp, if (pendingCount > 0) Color(0xFFEF4444).copy(alpha = 0.5f) else VelorixAccent.copy(alpha = 0.5f))
+                shape = RoundedCornerShape(10.dp),
+                color = V14AccentPrimary.copy(alpha = 0.14f),
+                border = BorderStroke(1.dp, V14AccentBright.copy(alpha = 0.4f))
             ) {
                 Text(
                     text = "$pendingCount Pending",
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                    color = if (pendingCount > 0) Color(0xFFEF4444) else VelorixAccent,
+                    color = V14AccentBright,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
@@ -424,9 +442,9 @@ fun ComplaintsSupportScreen(
                 .padding(bottom = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            StatBadge(modifier = Modifier.weight(1f), label = "Total Tickets", value = "${tickets.size}", icon = Icons.Default.ConfirmationNumber, color = Color(0xFF64B5F6))
-            StatBadge(modifier = Modifier.weight(1f), label = "Pending Action", value = "$pendingCount", icon = Icons.Default.Warning, color = Color(0xFFFFB74D))
-            StatBadge(modifier = Modifier.weight(1f), label = "Resolved", value = "${tickets.count { it.status == "RESOLVED" || it.status == "REFUNDED" }}", icon = Icons.Default.CheckCircle, color = Color(0xFF81C784))
+            StatBadge(modifier = Modifier.weight(1f), label = "Total Tickets", value = "${tickets.size}", icon = Icons.Default.ConfirmationNumber, color = V14AccentBright)
+            StatBadge(modifier = Modifier.weight(1f), label = "Pending Action", value = "$pendingCount", icon = Icons.Default.Warning, color = VelorixAmber)
+            StatBadge(modifier = Modifier.weight(1f), label = "Resolved", value = "${tickets.count { it.status == "RESOLVED" || it.status == "REFUNDED" }}", icon = Icons.Default.CheckCircle, color = VelorixEmerald)
         }
 
         // Filter tabs
@@ -631,7 +649,7 @@ fun ComplaintCard(
                 }
                 Text(
                     text = ticket.issueCategory.uppercase(),
-                    color = Color(0xFF60A5FA),
+                    color = V14TextSecondary,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 0.5.sp
@@ -641,7 +659,7 @@ fun ComplaintCard(
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = ticket.description,
-                color = Color(0xFFA1A1AA),
+                color = V14TextSecondary,
                 fontSize = 12.sp,
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis
@@ -660,9 +678,9 @@ fun ComplaintCard(
                         modifier = Modifier.clickable { onLiveChat() }.padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.Chat, contentDescription = null, tint = Color(0xFF60A5FA), modifier = Modifier.size(14.dp))
+                        Icon(Icons.Default.Chat, contentDescription = null, tint = V14TextPrimary, modifier = Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("LIVE CHAT", fontSize = 11.sp, color = Color(0xFF60A5FA), fontWeight = FontWeight.Bold)
+                        Text("LIVE CHAT", fontSize = 11.sp, color = V14TextPrimary, fontWeight = FontWeight.Bold)
                     }
 
                     Row(
@@ -772,13 +790,13 @@ fun TicketLiveChatDialog(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.weight(1f)
                     ) {
-                        Icon(Icons.Default.SupportAgent, contentDescription = null, tint = Color(0xFF60A5FA), modifier = Modifier.size(22.dp))
+                        Icon(Icons.Default.SupportAgent, contentDescription = null, tint = V14AccentBright, modifier = Modifier.size(22.dp))
                         Spacer(modifier = Modifier.width(10.dp))
                         Column {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
                                     text = ticket.username.ifEmpty { "Player" },
-                                    color = Color.White,
+                                    color = V14TextPrimary,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 15.sp,
                                     maxLines = 1,
@@ -787,9 +805,9 @@ fun TicketLiveChatDialog(
                                 Text(
                                     text = "  •  ${ticket.status}",
                                     color = when (ticket.status) {
-                                        "RESOLVED" -> Color(0xFF4ADE80)
-                                        "INVESTIGATING" -> Color(0xFFFFB74D)
-                                        else -> Color(0xFFF87171)
+                                        "RESOLVED" -> VelorixEmerald
+                                        "INVESTIGATING" -> VelorixAmber
+                                        else -> V14AccentBright
                                     },
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.ExtraBold
@@ -797,7 +815,7 @@ fun TicketLiveChatDialog(
                             }
                             Text(
                                 text = "Ticket #${ticket.id} • ${ticket.issueCategory}",
-                                color = Color.Gray,
+                                color = V14TextSecondary,
                                 fontSize = 11.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -807,15 +825,15 @@ fun TicketLiveChatDialog(
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         IconButton(onClick = onIssueRefund, modifier = Modifier.size(32.dp)) {
-                            Icon(Icons.Default.Payments, contentDescription = "Refund", tint = VelorixAccent, modifier = Modifier.size(20.dp))
+                            Icon(Icons.Default.Payments, contentDescription = "Refund", tint = V14AccentBright, modifier = Modifier.size(20.dp))
                         }
                         IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
-                            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.LightGray, modifier = Modifier.size(20.dp))
+                            Icon(Icons.Default.Close, contentDescription = "Close", tint = V14TextSecondary, modifier = Modifier.size(20.dp))
                         }
                     }
                 }
 
-                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+                HorizontalDivider(thickness = 0.5.dp, color = V14Border)
 
                 // Initial Complaint Context Section (flat with bottom hairline)
                 Column(
@@ -827,8 +845,8 @@ fun TicketLiveChatDialog(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("INITIAL REPORT", color = Color(0xFF60A5FA), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp)
-                        Text(ticket.userEmail, color = Color.Gray, fontSize = 10.5.sp)
+                        Text("INITIAL REPORT", color = V14AccentBright, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp)
+                        Text(ticket.userEmail, color = V14TextMuted, fontSize = 10.5.sp)
                     }
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
@@ -967,7 +985,7 @@ fun ChatMessageBubble(message: TicketMessage) {
         ) {
             Text(
                 text = if (isAdminOrSystem) message.senderName.ifEmpty { "Velorix Support" } else message.senderName.ifEmpty { "Player" },
-                color = if (isAdminOrSystem) VelorixAccent else Color(0xFF60A5FA),
+                color = if (isAdminOrSystem) V14AccentBright else V14TextPrimary,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold
             )
@@ -1124,30 +1142,34 @@ fun ComplaintTicketDetailDialog(
                 HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
 
                 // Tournament & Issue Description (flat, no nested box)
-                Text("ISSUE REPORT", color = Color(0xFF60A5FA), fontWeight = FontWeight.Bold, fontSize = 10.5.sp, letterSpacing = 0.8.sp)
+                Text("ISSUE REPORT", color = V14AccentBright, fontWeight = FontWeight.Bold, fontSize = 10.5.sp, letterSpacing = 0.8.sp)
                 Spacer(modifier = Modifier.height(6.dp))
-                Text("Category: ${ticket.issueCategory}", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 12.5.sp)
+                Text("Category: ${ticket.issueCategory}", color = V14TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 12.5.sp)
                 if (ticket.tournamentTitle.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(2.dp))
-                    Text("Tournament: ${ticket.tournamentTitle}", color = Color.Gray, fontSize = 12.sp)
+                    Text("Tournament: ${ticket.tournamentTitle}", color = V14TextSecondary, fontSize = 12.sp)
                 }
                 Spacer(modifier = Modifier.height(6.dp))
-                Text(ticket.description, color = Color(0xFFD4D4D8), fontSize = 12.5.sp, lineHeight = 18.sp)
+                Text(ticket.description, color = V14TextSecondary, fontSize = 12.5.sp, lineHeight = 18.sp)
 
-                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), thickness = 0.5.dp, color = V14Border)
 
                 // Admin Adjudication Note Input
                 OutlinedTextField(
                     value = adminNote,
                     onValueChange = { adminNote = it },
-                    label = { Text("Admin Adjudication Note / Remarks", color = Color.Gray, fontSize = 12.sp) },
-                    placeholder = { Text("Enter internal remarks or resolution justification...", color = Color.DarkGray, fontSize = 12.sp) },
+                    label = { Text("Admin Adjudication Note / Remarks", color = V14TextMuted, fontSize = 12.sp) },
+                    placeholder = { Text("Enter internal remarks or resolution justification...", color = V14TextMuted, fontSize = 12.sp) },
                     modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = VelorixAccent,
-                        unfocusedBorderColor = Color.White.copy(alpha = 0.12f)
+                        focusedTextColor = V14TextPrimary,
+                        unfocusedTextColor = V14TextPrimary,
+                        focusedContainerColor = Color(0xFF08080B),
+                        unfocusedContainerColor = Color(0xFF08080B),
+                        focusedBorderColor = V14AccentBright,
+                        unfocusedBorderColor = V14Border,
+                        cursorColor = V14AccentBright
                     ),
                     maxLines = 3
                 )
@@ -1157,9 +1179,9 @@ fun ComplaintTicketDetailDialog(
                 // Actions Section
                 Button(
                     onClick = onOpenLiveChat,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
-                    shape = RoundedCornerShape(8.dp)
+                    modifier = Modifier.fillMaxWidth().height(46.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = V14AccentPrimary),
+                    shape = RoundedCornerShape(12.dp)
                 ) {
                     Icon(Icons.Default.Chat, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
@@ -1173,18 +1195,18 @@ fun ComplaintTicketDetailDialog(
                         onClick = onDirectEmail,
                         modifier = Modifier.weight(1f)
                     ) {
-                        Icon(Icons.Default.Email, contentDescription = null, tint = Color(0xFF60A5FA), modifier = Modifier.size(14.dp))
+                        Icon(Icons.Default.Email, contentDescription = null, tint = V14TextPrimary, modifier = Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("SEND EMAIL", color = Color(0xFF60A5FA), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("SEND EMAIL", color = V14TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
 
                     TextButton(
                         onClick = onIssueRefund,
                         modifier = Modifier.weight(1f)
                     ) {
-                        Icon(Icons.Default.Payments, contentDescription = null, tint = VelorixAccent, modifier = Modifier.size(14.dp))
+                        Icon(Icons.Default.Payments, contentDescription = null, tint = V14AccentBright, modifier = Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("₹ COMPENSATION", color = VelorixAccent, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        Text("₹ COMPENSATION", color = V14AccentBright, fontWeight = FontWeight.Bold, fontSize = 11.sp)
                     }
                 }
 

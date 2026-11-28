@@ -5,18 +5,21 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
@@ -28,33 +31,34 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
-import com.example.util.TournamentImageUploader
 import com.example.domain.model.MatchProofSubmission
-import com.example.ui.common.FrostedGlassAlertDialog
-import com.example.ui.common.FrostedGlassDialog
 import com.example.domain.model.PlayerRegistration
 import com.example.domain.model.Tournament
 import com.example.domain.model.UserProfile
-import com.example.ui.common.GlassBackgroundBox
-import com.example.ui.common.GlassCard
-import com.example.ui.common.GlassTokens
+import com.example.ui.common.FrostedGlassAlertDialog
 import com.example.ui.common.PrizeDistributionPieChart
-import com.example.ui.common.bounceClick
 import com.example.ui.theme.*
+import com.example.util.TournamentImageUploader
+import java.util.Locale
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TournamentDetailsScreen(
     tournament: Tournament,
-    currentUserProfile: UserProfile? = null,
+    @Suppress("UNUSED_PARAMETER") currentUserProfile: UserProfile? = null,
     matchProofs: List<MatchProofSubmission> = emptyList(),
     onNavigateBack: () -> Unit,
     onEditTournament: (String) -> Unit = {},
@@ -70,9 +74,14 @@ fun TournamentDetailsScreen(
     viewModel: com.example.ui.viewmodel.TournamentDashboardViewModel? = null
 ) {
     val context = LocalContext.current
+
+    var selectedSection by remember { mutableIntStateOf(0) } // 0=Overview, 1=Roster, 2=Prizes, 3=Rules
+    var showOverflowMenu by remember { mutableStateOf(false) }
+
     var showCancelDialog by remember { mutableStateOf(false) }
     var cancelReasonInput by remember { mutableStateOf("Insufficient player registrations - Match cancelled manually.") }
     var showDeleteDialog by remember { mutableStateOf(false) }
+    var isDeleting by remember { mutableStateOf(false) }
     var showRoomBroadcastDialog by remember { mutableStateOf(false) }
     var showInspectProofsDialog by remember { mutableStateOf(false) }
     var showAddParticipantDialog by remember { mutableStateOf(false) }
@@ -99,129 +108,227 @@ fun TournamentDetailsScreen(
         mutableStateOf(defaultKill.toInt().toString())
     }
 
-    // Participant manual add states
+    // Participant manual add states (Admin VIP slot assignment)
     var manualPlayerIgn by remember { mutableStateOf("") }
     var manualPlayerUid by remember { mutableStateOf("") }
     var manualPlayerAge by remember { mutableStateOf("18") }
     var manualPlayerIsMinor by remember { mutableStateOf(false) }
-    var isJoiningMatch by remember { mutableStateOf(false) }
 
-    var roomIdInput by remember { mutableStateOf(tournament.roomDetails?.roomId ?: "") }
-    var roomPassInput by remember { mutableStateOf(tournament.roomDetails?.roomPassword ?: "") }
+    var roomIdInput by remember(tournament.roomDetails?.roomId) { mutableStateOf(tournament.roomDetails?.roomId ?: "") }
+    var roomPassInput by remember(tournament.roomDetails?.roomPassword) { mutableStateOf(tournament.roomDetails?.roomPassword ?: "") }
     var bypass5MinCheck by remember { mutableStateOf(false) }
 
-    val isCancelled = tournament.status.equals("CANCELLED", ignoreCase = true)
-    val isLive = tournament.status.equals("LIVE", ignoreCase = true)
-    val isCompleted = tournament.status.equals("COMPLETED", ignoreCase = true)
+    val statusUpper = tournament.status.trim().uppercase().ifBlank { "UPCOMING" }
+    val isCancelled = statusUpper == "CANCELLED"
+    val hasRoomCredentials = tournament.roomDetails?.roomId?.isNotBlank() == true
+    val pendingProofsCount = remember(matchProofs) { matchProofs.count { it.status.equals("pending", ignoreCase = true) } }
+    val isMoneyMatch = (tournament.entryFee > 0f) || (tournament.prizePool > 0.0)
 
-    BackHandler { onNavigateBack() }
-
-    // Calculate time diff to startsAt
-    val startsAtMillis = remember(tournament.startsAt) {
-        tournament.parsedStartsAtMillis ?: 0L
+    val statusColor = when (statusUpper) {
+        "LIVE", "ONGOING", "ACTIVE" -> VelorixEmerald
+        "COMPLETED", "ENDED" -> V14TextSecondary
+        "CANCELLED" -> Color(0xFFF87171)
+        else -> V14AccentBright
     }
+
+    val startsAtMillis = remember(tournament.startsAt) { tournament.parsedStartsAtMillis ?: 0L }
     val minutesUntilStart = remember(startsAtMillis) {
-        if (startsAtMillis > 0L) {
-            ((startsAtMillis - System.currentTimeMillis()) / 60000L).coerceAtLeast(0L)
-        } else {
-            0L
-        }
+        if (startsAtMillis > 0L) ((startsAtMillis - System.currentTimeMillis()) / 60000L).coerceAtLeast(0L) else 0L
     }
     val isWithin5Minutes = minutesUntilStart <= 5L
 
-    GlassBackgroundBox(accentColor = VelorixAccent) {
-        Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = {
-                        Column {
-                            Text(
-                                text = "TOURNAMENT ADMIN OVERSIGHT",
-                                color = Color.White,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 0.5.sp
-                            )
-                            Text(
-                                text = tournament.title,
-                                color = VelorixAccent,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    },
-                    navigationIcon = {
+    val slotProgress = if (tournament.maxPlayers > 0) {
+        (tournament.registeredPlayers.toFloat() / tournament.maxPlayers.toFloat()).coerceIn(0f, 1f)
+    } else 0f
+    val animSlotProgress by animateFloatAsState(
+        targetValue = slotProgress,
+        animationSpec = spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessLow),
+        label = "detailSlotFill"
+    )
+
+    BackHandler { onNavigateBack() }
+
+    Scaffold(
+        containerColor = V14Bg,
+        contentWindowInsets = WindowInsets.safeDrawing,
+        topBar = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(V14Bg)
+                    .statusBarsPadding()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(60.dp)
+                        .padding(horizontal = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f).padding(end = 10.dp)
+                    ) {
                         Box(
                             modifier = Modifier
-                                .padding(8.dp)
                                 .size(38.dp)
                                 .clip(CircleShape)
-                                .background(Color.White.copy(alpha = 0.08f))
-                                .border(1.dp, Color.White.copy(alpha = 0.22f), CircleShape)
-                                .bounceClick(scaleDown = 0.90f) { onNavigateBack() },
+                                .background(V14CardSurface)
+                                .border(0.75.dp, V14Border, CircleShape)
+                                .testTag("tournament_details_back_button")
+                                .v14PressScale(onClick = onNavigateBack),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                                 contentDescription = "Back",
-                                tint = Color.White,
+                                tint = V14TextPrimary,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
-                    },
-                    actions = {
-                        if (viewModel != null) {
-                            IconButton(onClick = { showDeclareStandingsModal = true }) {
-                                Icon(
-                                    imageVector = Icons.Default.EmojiEvents,
-                                    contentDescription = "Declare Standings & Credit Winners",
-                                    tint = Color(0xFFFFD60A)
-                                )
-                            }
-                            IconButton(onClick = { showLobbyChatModal = true }) {
-                                Icon(
-                                    imageVector = Icons.Default.Forum,
-                                    contentDescription = "Live Lobby Chat Moderation",
-                                    tint = Color(0xFF30D158)
-                                )
-                            }
-                        }
-                        IconButton(onClick = { onEditRules(tournament.id) }) {
-                            Icon(
-                                imageVector = Icons.Default.Gavel,
-                                contentDescription = "Rules Manager",
-                                tint = VelorixAccent
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Match Console",
+                                color = V14TextPrimary,
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = (-0.3).sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Box(modifier = Modifier.size(6.dp).background(statusColor, CircleShape))
+                                Text(
+                                    text = "$statusUpper · ${tournament.map.ifBlank { "Bermuda" }} · ${tournament.format.ifBlank { "SOLO" }}",
+                                    color = V14TextSecondary,
+                                    fontSize = 11.5.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                         }
-                        IconButton(onClick = { onEditTournament(tournament.id) }) {
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(V14CardSurface)
+                                .border(0.75.dp, V14Border, CircleShape)
+                                .testTag("tournament_details_edit_button")
+                                .v14PressScale { onEditTournament(tournament.id) },
+                            contentAlignment = Alignment.Center
+                        ) {
                             Icon(
                                 imageVector = Icons.Default.Edit,
                                 contentDescription = "Edit Tournament",
-                                tint = Color.White
+                                tint = V14TextPrimary,
+                                modifier = Modifier.size(17.dp)
                             )
                         }
-                        IconButton(onClick = { showDeleteDialog = true }) {
-                            Icon(
-                                imageVector = Icons.Default.DeleteForever,
-                                contentDescription = "Delete Tournament",
-                                tint = Color(0xFFFF5252)
-                            )
+
+                        Box {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(V14CardSurface)
+                                    .border(0.75.dp, V14Border, CircleShape)
+                                    .testTag("tournament_details_menu_button")
+                                    .v14PressScale { showOverflowMenu = true },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.MoreVert,
+                                    contentDescription = "Match Options",
+                                    tint = V14TextPrimary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = showOverflowMenu,
+                                onDismissRequest = { showOverflowMenu = false },
+                                containerColor = V14CardElevated,
+                                border = BorderStroke(0.75.dp, V14Border)
+                            ) {
+                                if (viewModel != null) {
+                                    DropdownMenuItem(
+                                        text = { Text("Lobby Chat Moderation", color = V14TextPrimary, fontSize = 13.sp) },
+                                        leadingIcon = { Icon(Icons.Default.Forum, contentDescription = null, tint = VelorixEmerald, modifier = Modifier.size(18.dp)) },
+                                        onClick = {
+                                            showOverflowMenu = false
+                                            showLobbyChatModal = true
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Declare Standings & Payouts", color = V14TextPrimary, fontSize = 13.sp) },
+                                        leadingIcon = { Icon(Icons.Default.EmojiEvents, contentDescription = null, tint = VelorixAmber, modifier = Modifier.size(18.dp)) },
+                                        onClick = {
+                                            showOverflowMenu = false
+                                            showDeclareStandingsModal = true
+                                        }
+                                    )
+                                }
+                                DropdownMenuItem(
+                                    text = { Text("Rules & Loadout Manager", color = V14TextPrimary, fontSize = 13.sp) },
+                                    leadingIcon = { Icon(Icons.Default.Gavel, contentDescription = null, tint = V14TextSecondary, modifier = Modifier.size(18.dp)) },
+                                    onClick = {
+                                        showOverflowMenu = false
+                                        onEditRules(tournament.id)
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("View Brackets", color = V14TextPrimary, fontSize = 13.sp) },
+                                    leadingIcon = { Icon(Icons.Default.AccountTree, contentDescription = null, tint = V14TextSecondary, modifier = Modifier.size(18.dp)) },
+                                    onClick = {
+                                        showOverflowMenu = false
+                                        onViewBracket(tournament.id)
+                                    }
+                                )
+                                HorizontalDivider(thickness = 0.5.dp, color = V14Border)
+                                if (!isCancelled) {
+                                    DropdownMenuItem(
+                                        text = { Text("Cancel Match & Refund", color = VelorixAmber, fontSize = 13.sp) },
+                                        leadingIcon = { Icon(Icons.Default.Cancel, contentDescription = null, tint = VelorixAmber, modifier = Modifier.size(18.dp)) },
+                                        onClick = {
+                                            showOverflowMenu = false
+                                            showCancelDialog = true
+                                        }
+                                    )
+                                }
+                                DropdownMenuItem(
+                                    text = { Text("Delete Permanently", color = Color(0xFFF87171), fontSize = 13.sp, fontWeight = FontWeight.SemiBold) },
+                                    leadingIcon = { Icon(Icons.Default.DeleteForever, contentDescription = null, tint = Color(0xFFF87171), modifier = Modifier.size(18.dp)) },
+                                    onClick = {
+                                        showOverflowMenu = false
+                                        showDeleteDialog = true
+                                    }
+                                )
+                            }
                         }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
-                )
-            },
-            containerColor = Color.Transparent,
-            bottomBar = {
-                Surface(
-                    color = Color(0xFF0C0C10).copy(alpha = 0.88f),
-                    border = BorderStroke(1.dp, GlassTokens.GlassBorderGradient),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .navigationBarsPadding()
-                ) {
+                    }
+                }
+                HorizontalDivider(thickness = 0.5.dp, color = V14Border)
+            }
+        },
+        bottomBar = {
+            // V14 Dual Pill Action Dock (Matches Home V14DualPillCta)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(V14Bg)
+                    .navigationBarsPadding()
+            ) {
+                HorizontalDivider(thickness = 0.5.dp, color = V14Border)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -230,95 +337,112 @@ fun TournamentDetailsScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     if (isCancelled) {
-                        Button(
-                            onClick = { },
-                            modifier = Modifier.fillMaxWidth().height(48.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3E1D1D)),
-                            shape = RoundedCornerShape(12.dp),
-                            enabled = false
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(46.dp)
+                                .clip(RoundedCornerShape(23.dp))
+                                .background(Color(0xFF230E12))
+                                .border(0.75.dp, Color(0xFFF87171).copy(alpha = 0.35f), RoundedCornerShape(23.dp)),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Default.Cancel, contentDescription = null, tint = Color(0xFFFF5252))
+                            Icon(Icons.Default.Cancel, contentDescription = null, tint = Color(0xFFF87171), modifier = Modifier.size(17.dp))
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                "MATCH CANCELLED (REFUND ISSUED)",
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFFFF8A80),
-                                fontSize = 13.sp
+                                text = "Match Cancelled · Refunds Issued",
+                                color = Color(0xFFFCA5A5),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
                             )
                         }
                     } else {
-                        Button(
-                            onClick = { showRoomBroadcastDialog = true },
-                            modifier = Modifier.weight(1.3f).height(48.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (tournament.roomDetails?.roomId?.isNotBlank() == true) Color(0xFF22C55E) else VelorixAccent
-                            ),
-                            shape = RoundedCornerShape(12.dp),
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                        // Primary V14 Gradient Pill: Set / Edit Room Pass
+                        Row(
+                            modifier = Modifier
+                                .weight(1.25f)
+                                .height(46.dp)
+                                .clip(RoundedCornerShape(23.dp))
+                                .background(
+                                    if (hasRoomCredentials) {
+                                        Brush.horizontalGradient(listOf(Color(0xFF10B981), VelorixEmerald))
+                                    } else {
+                                        Brush.horizontalGradient(listOf(V14AccentPrimary, V14AccentBright))
+                                    }
+                                )
+                                .testTag("tournament_set_room_button")
+                                .v14PressScale { showRoomBroadcastDialog = true }
+                                .padding(horizontal = 14.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
-                                Icons.Default.Key,
+                                imageVector = Icons.Default.Key,
                                 contentDescription = null,
-                                tint = Color.Black,
+                                tint = if (hasRoomCredentials) Color.Black else Color.White,
                                 modifier = Modifier.size(16.dp)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                if (tournament.roomDetails?.roomId?.isNotBlank() == true) "Room Pass" else "Set Room Pass",
+                                text = if (hasRoomCredentials) "Edit Room Pass" else "Set Room Pass",
+                                color = if (hasRoomCredentials) Color.Black else Color.White,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.Black,
-                                fontSize = 12.sp,
-                                maxLines = 1
+                                fontSize = 13.sp,
+                                maxLines = 1,
+                                softWrap = false
                             )
                         }
 
+                        // Secondary V14 Dark Pill: Declare Results (NO loud yellow solid fill!)
                         if (viewModel != null) {
-                            Button(
-                                onClick = { showDeclareStandingsModal = true },
-                                modifier = Modifier.weight(1.2f).height(48.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD60A)),
-                                shape = RoundedCornerShape(12.dp),
-                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+                            Row(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(46.dp)
+                                    .clip(RoundedCornerShape(23.dp))
+                                    .background(V14CardElevated)
+                                    .border(0.75.dp, V14Border, RoundedCornerShape(23.dp))
+                                    .testTag("tournament_results_button")
+                                    .v14PressScale { showDeclareStandingsModal = true }
+                                    .padding(horizontal = 12.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Icon(
-                                    Icons.Default.EmojiEvents,
+                                    imageVector = Icons.Default.EmojiEvents,
                                     contentDescription = null,
-                                    tint = Color.Black,
-                                    modifier = Modifier.size(15.dp)
+                                    tint = VelorixAmber,
+                                    modifier = Modifier.size(16.dp)
                                 )
-                                Spacer(modifier = Modifier.width(4.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    "Results",
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.Black,
-                                    fontSize = 12.sp,
-                                    maxLines = 1
+                                    text = "Results",
+                                    color = V14TextPrimary,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 13.sp,
+                                    maxLines = 1,
+                                    softWrap = false
                                 )
                             }
                         }
 
-                        OutlinedButton(
-                            onClick = { onViewBracket(tournament.id) },
-                            modifier = Modifier.weight(1f).height(48.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
-                            border = BorderStroke(1.dp, Color(0xFF27272A)),
-                            shape = RoundedCornerShape(12.dp),
-                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+                        // Compact Circular Brackets Action
+                        Box(
+                            modifier = Modifier
+                                .size(46.dp)
+                                .clip(CircleShape)
+                                .background(V14CardElevated)
+                                .border(0.75.dp, V14Border, CircleShape)
+                                .testTag("tournament_brackets_button")
+                                .v14PressScale { onViewBracket(tournament.id) },
+                            contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Default.AccountTree, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color.White)
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Brackets", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color.White, maxLines = 1)
-                        }
-
-                        OutlinedButton(
-                            onClick = { showCancelDialog = true },
-                            modifier = Modifier.weight(0.9f).height(48.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFFF5252)),
-                            border = BorderStroke(1.dp, Color(0xFFFF5252).copy(alpha = 0.5f)),
-                            shape = RoundedCornerShape(12.dp),
-                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
-                        ) {
-                            Text("Cancel", fontWeight = FontWeight.Bold, fontSize = 12.sp, maxLines = 1)
+                            Icon(
+                                imageVector = Icons.Default.AccountTree,
+                                contentDescription = "View Brackets",
+                                tint = V14TextPrimary,
+                                modifier = Modifier.size(19.dp)
+                            )
                         }
                     }
                 }
@@ -329,527 +453,414 @@ fun TournamentDetailsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(horizontal = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+                .background(V14Bg),
+            contentPadding = PaddingValues(top = 14.dp, bottom = 36.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            item { Spacer(modifier = Modifier.height(4.dp)) }
-
-            // Cancellation Notice Banner (When match is cancelled)
+            // Cancellation Alert Bento Card
             if (isCancelled) {
                 item {
-                    GlassCard(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(16.dp),
-                        borderBrush = Brush.horizontalGradient(listOf(Color(0xFFFF5252).copy(alpha = 0.8f), Color(0xFFB91C1C).copy(alpha = 0.4f)))
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(Color(0xFF1F0C10))
+                            .border(0.75.dp, Color(0xFFF87171).copy(alpha = 0.35f), RoundedCornerShape(20.dp))
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(32.dp)
-                                        .background(Color(0xFFFF5252).copy(alpha = 0.2f), CircleShape),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        Icons.Default.Warning,
-                                        contentDescription = null,
-                                        tint = Color(0xFFFF5252),
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Text(
-                                    text = "TOURNAMENT CANCELLED BY ADMIN",
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Black,
-                                    color = Color(0xFFFF8A80),
-                                    letterSpacing = 0.5.sp
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(10.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFF87171), modifier = Modifier.size(17.dp))
                             Text(
-                                text = "Reason: ${tournament.cancellationReason.ifBlank { "Insufficient number of players joined before match schedule. The admin has manually cancelled the match." }}",
-                                fontSize = 13.sp,
-                                color = Color.White.copy(alpha = 0.9f),
-                                lineHeight = 18.sp
+                                text = "TOURNAMENT CANCELLED",
+                                color = Color(0xFFFCA5A5),
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.7.sp
                             )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Surface(
-                                color = Color(0xFF3B1E1E),
-                                shape = RoundedCornerShape(8.dp),
-                                border = BorderStroke(1.dp, Color(0xFFFF5252).copy(alpha = 0.3f))
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        Icons.Default.AccountBalanceWallet,
-                                        contentDescription = null,
-                                        tint = VelorixAccent,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = "100% Entry fees refunded to player wallet balances.",
-                                        fontSize = 11.sp,
-                                        color = VelorixAccentLight,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
-                            }
                         }
+                        Text(
+                            text = tournament.cancellationReason.ifBlank { "Insufficient player registrations. Entry fees refunded to player wallets." },
+                            color = V14TextPrimary.copy(alpha = 0.9f),
+                            fontSize = 12.5.sp,
+                            lineHeight = 18.sp
+                        )
                     }
                 }
             }
 
-            // Tournament Hero Card
+            // =================================================================
+            // 1. V14 HERO BENTO CARD
+            // =================================================================
             item {
-                GlassCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(20.dp),
-                    borderBrush = GlassTokens.GlassBorderGradient
-                ) {
-                    Column {
-                        if (tournament.bannerUrl.isNotBlank()) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(160.dp)
-                            ) {
+                V14StaggeredEntrance(delayMillis = 0) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                            .clip(RoundedCornerShape(22.dp))
+                            .background(V14CardSurface)
+                            .border(0.75.dp, V14Border, RoundedCornerShape(22.dp))
+                    ) {
+                        // Dark-scrimmed Hero Banner (eliminates harsh white rectangle cutouts)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(166.dp)
+                                .background(V14CardElevated)
+                        ) {
+                            if (tournament.bannerUrl.isNotBlank()) {
                                 AsyncImage(
                                     model = TournamentImageUploader.resolveBannerModel(tournament.bannerUrl),
                                     contentDescription = tournament.title,
                                     modifier = Modifier.fillMaxSize(),
                                     contentScale = ContentScale.Crop
                                 )
+                            } else {
                                 Box(
                                     modifier = Modifier
                                         .fillMaxSize()
                                         .background(
-                                            Brush.verticalGradient(
-                                                listOf(
-                                                    Color.Transparent,
-                                                    Color(0x660E0919),
-                                                    CardVerifyBg
-                                                )
+                                            Brush.linearGradient(
+                                                listOf(Color(0xFF240912), V14CardSurface, V14CardElevated)
                                             )
                                         )
-                                    )
+                                )
                             }
-                        }
 
-                        Column(modifier = Modifier.padding(18.dp)) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(
+                                        Brush.verticalGradient(
+                                            0.0f to Color(0xB3000000),
+                                            0.40f to Color(0x75000000),
+                                            0.76f to Color(0xEB0C0C10),
+                                            1.0f to V14CardSurface
+                                        )
+                                    )
+                            )
+
+                            // Top Status & Policy Capsules
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 12.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                // Tags: Game & Format & Map
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    TagBadge(text = tournament.format, bg = VelorixAccentLight, textTint = VelorixAccentDark)
-                                    TagBadge(text = tournament.map, bg = Color(0x2064B5F6), textTint = Color(0xFF64B5F6))
-                                }
-
-                                // Status Tag
-                                val statusColor = when (tournament.status.uppercase()) {
-                                    "LIVE" -> Color(0xFFFF5252)
-                                    "COMPLETED" -> Color(0xFF81C784)
-                                    "CANCELLED" -> Color(0xFFFF8A80)
-                                    else -> VelorixAccent
-                                }
-                                Surface(
-                                    color = statusColor.copy(alpha = 0.15f),
-                                    shape = RoundedCornerShape(8.dp),
-                                    border = BorderStroke(1.dp, statusColor.copy(alpha = 0.4f))
+                                Row(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(50))
+                                        .background(Color(0xCC0C0C10))
+                                        .border(0.6.dp, statusColor.copy(alpha = 0.45f), RoundedCornerShape(50))
+                                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
                                 ) {
+                                    Box(modifier = Modifier.size(6.dp).background(statusColor, CircleShape))
                                     Text(
-                                        text = tournament.status.uppercase(),
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                        text = statusUpper,
                                         color = statusColor,
                                         fontSize = 10.sp,
-                                        fontWeight = FontWeight.Black,
-                                        letterSpacing = 1.sp
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 0.6.sp
+                                    )
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(50))
+                                        .background(Color(0xCC0C0C10))
+                                        .border(
+                                            0.6.dp,
+                                            if (isMoneyMatch) VelorixAmber.copy(alpha = 0.42f) else VelorixEmerald.copy(alpha = 0.42f),
+                                            RoundedCornerShape(50)
+                                        )
+                                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        text = if (isMoneyMatch) "18+ CASH POLICY" else "OPEN TRAINING",
+                                        color = if (isMoneyMatch) VelorixAmber else VelorixEmerald,
+                                        fontSize = 9.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 0.5.sp
                                     )
                                 }
                             }
 
-                            Spacer(modifier = Modifier.height(12.dp))
+                            // Bottom High-Contrast Format/Map Pills + Match Title
+                            Column(
+                                modifier = Modifier
+                                    .align(Alignment.BottomStart)
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                            ) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(50))
+                                            .background(V14AccentPrimary.copy(alpha = 0.22f))
+                                            .border(0.6.dp, V14AccentBright.copy(alpha = 0.5f), RoundedCornerShape(50))
+                                            .padding(horizontal = 9.dp, vertical = 3.dp)
+                                    ) {
+                                        Text(
+                                            text = tournament.format.ifBlank { "SOLO" }.uppercase(),
+                                            color = Color(0xFFFFB3C1),
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            letterSpacing = 0.5.sp
+                                        )
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(50))
+                                            .background(V14CardElevated)
+                                            .border(0.6.dp, V14Border, RoundedCornerShape(50))
+                                            .padding(horizontal = 9.dp, vertical = 3.dp)
+                                    ) {
+                                        Text(
+                                            text = tournament.map.ifBlank { "Bermuda" },
+                                            color = V14TextPrimary,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                }
 
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                Text(
+                                    text = tournament.title.ifBlank { "Untitled Tournament" },
+                                    color = V14TextPrimary,
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    lineHeight = 25.sp,
+                                    letterSpacing = (-0.4).sp,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+
+                        // Description + 4-Column Telemetry + V14 Animated Slot Bar
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp),
+                            verticalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
                             Text(
-                                text = tournament.title,
-                                fontSize = 22.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                lineHeight = 28.sp
+                                text = tournament.description.ifBlank { "Official Velorix Free Fire competitive tournament." },
+                                color = V14TextSecondary,
+                                fontSize = 12.5.sp,
+                                lineHeight = 18.sp,
+                                maxLines = 3,
+                                overflow = TextOverflow.Ellipsis
                             )
 
-                            Spacer(modifier = Modifier.height(8.dp))
+                            HorizontalDivider(thickness = 0.5.dp, color = V14Border)
 
-                            Text(
-                                text = tournament.description.ifBlank { "Official Free Fire tournament organized by Velorix Admin Team." },
-                                fontSize = 13.sp,
-                                color = VelorixTextSecondary,
-                                lineHeight = 18.sp
-                            )
-
-                            Spacer(modifier = Modifier.height(16.dp))
-                            HorizontalDivider(color = CardVerifyBorder)
-                            Spacer(modifier = Modifier.height(14.dp))
-
-                            // Stats 4-Column Row
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                StatMiniItem(label = "PRIZE POOL", value = "₹${tournament.prizePool.toInt()}", valueTint = VelorixAccent)
-                                StatMiniItem(label = "ENTRY FEE", value = if (tournament.entryFee > 0f) "₹${tournament.entryFee.toInt()}" else "FREE", valueTint = Color.White)
-                                StatMiniItem(label = "SLOTS", value = "${tournament.registeredPlayers}/${tournament.maxPlayers}", valueTint = Color.White)
-                                StatMiniItem(label = "SCHEDULE", value = tournament.startsAt?.take(10) ?: "TBA", valueTint = Color(0xFF64B5F6))
+                                V14TelemetryCell(
+                                    label = "PRIZE POOL",
+                                    value = "₹${String.format(Locale.US, "%,d", tournament.prizePool.toInt())}",
+                                    valueColor = VelorixEmerald
+                                )
+                                V14TelemetryCell(
+                                    label = "ENTRY",
+                                    value = if (tournament.entryFee > 0f) "₹${tournament.entryFee.toInt()}" else "FREE",
+                                    valueColor = V14TextPrimary
+                                )
+                                V14TelemetryCell(
+                                    label = "SLOTS",
+                                    value = "${tournament.registeredPlayers}/${tournament.maxPlayers}",
+                                    valueColor = V14TextPrimary
+                                )
+                                V14TelemetryCell(
+                                    label = "SCHEDULE",
+                                    value = tournament.startsAt?.take(10) ?: "TBA",
+                                    valueColor = V14TextSecondary
+                                )
                             }
 
-                            Spacer(modifier = Modifier.height(12.dp))
-
-                            // Slots Filled Progress Bar
-                            val progress = if (tournament.maxPlayers > 0) (tournament.registeredPlayers.toFloat() / tournament.maxPlayers.toFloat()).coerceIn(0f, 1f) else 0f
-                            Column {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text("Slot Capacity", fontSize = 11.sp, color = VelorixTextSecondary)
-                                    Text("${tournament.registeredPlayers}/${tournament.maxPlayers} (${(progress * 100).toInt()}%)", fontSize = 11.sp, color = VelorixAccent, fontWeight = FontWeight.Bold)
-                                }
-                                Spacer(modifier = Modifier.height(4.dp))
-                                LinearProgressIndicator(
-                                    progress = { progress },
-                                    modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-                                    color = VelorixAccent,
-                                    trackColor = CardVerifyBorder
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // ==========================================
-            // AGE COMPLIANCE & ELIGIBILITY GATEWAY
-            // ==========================================
-            item {
-                val isMoneyMatch = (tournament.entryFee > 0f) || (tournament.prizePool > 0.0)
-                val userAge = currentUserProfile?.age ?: 0
-                val isUserMinor = (currentUserProfile?.isUnder18 == true) || (userAge in 1..17)
-                val userAlreadyJoined = tournament.registrations.any { reg ->
-                    (currentUserProfile != null && reg.playerId == currentUserProfile.id) ||
-                    (currentUserProfile != null && reg.userId == currentUserProfile.id) ||
-                    (currentUserProfile?.email?.isNotBlank() == true && reg.profile?.email.equals(currentUserProfile.email, ignoreCase = true))
-                }
-
-                GlassCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(18.dp),
-                    borderBrush = if (isMoneyMatch && isUserMinor) {
-                        Brush.linearGradient(listOf(Color(0xFFEF4444), Color(0xFFF59E0B)))
-                    } else if (isMoneyMatch) {
-                        Brush.linearGradient(listOf(Color(0xFF10B981).copy(alpha = 0.5f), Color(0xFF059669).copy(alpha = 0.3f)))
-                    } else {
-                        Brush.linearGradient(listOf(Color(0xFF38BDF8).copy(alpha = 0.5f), Color(0xFF0284C7).copy(alpha = 0.3f)))
-                    }
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = if (isMoneyMatch && isUserMinor) Icons.Default.Lock
-                                    else if (isMoneyMatch) Icons.Default.Verified
-                                    else Icons.Default.SportsEsports,
-                                    contentDescription = null,
-                                    tint = if (isMoneyMatch && isUserMinor) Color(0xFFF87171)
-                                    else if (isMoneyMatch) Color(0xFF34D399)
-                                    else Color(0xFF38BDF8),
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = if (isMoneyMatch && isUserMinor) "AGE RESTRICTION NOTICE (18+)"
-                                    else if (isMoneyMatch) "AGE VERIFIED (18+ ELIGIBLE)"
-                                    else "TRAINING MATCH (OPEN TO ALL AGES)",
-                                    fontSize = 12.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (isMoneyMatch && isUserMinor) Color(0xFFFCA5A5)
-                                    else if (isMoneyMatch) Color(0xFF6EE7B7)
-                                    else Color(0xFF7DD3FC),
-                                    letterSpacing = 0.5.sp
-                                )
-                            }
-
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = if (isMoneyMatch && isUserMinor) Color(0xFF7F1D1D).copy(alpha = 0.4f)
-                                else if (isMoneyMatch) Color(0xFF065F46).copy(alpha = 0.4f)
-                                else Color(0xFF0C4A6E).copy(alpha = 0.4f),
-                                border = BorderStroke(
-                                    1.dp,
-                                    if (isMoneyMatch && isUserMinor) Color(0xFFDC2626)
-                                    else if (isMoneyMatch) Color(0xFF059669)
-                                    else Color(0xFF0284C7)
-                                )
-                            ) {
-                                Text(
-                                    text = if (isMoneyMatch && isUserMinor) "MINOR DETECTED"
-                                    else if (isMoneyMatch) "18+ VERIFIED"
-                                    else "ALL AGES",
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = if (isMoneyMatch && isUserMinor) Color(0xFFFCA5A5)
-                                    else if (isMoneyMatch) Color(0xFF6EE7B7)
-                                    else Color(0xFF7DD3FC),
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        val explanationText = if (isMoneyMatch && isUserMinor) {
-                            "This is a real-money tournament with a ₹${tournament.prizePool.toInt()} prize pool and ₹${tournament.entryFee.toInt()} entry fee. Legal regulations prohibit players under 18 from participating in cash contests. You are eligible to compete in all Free Training & Scrim matches."
-                        } else if (isMoneyMatch) {
-                            "You are verified as 18+ (Age: ${if (userAge > 0) userAge else "18+"}) and eligible to compete for the ₹${tournament.prizePool.toInt()} cash prize pool. Real-money wallet entry of ₹${tournament.entryFee.toInt()} will be processed upon joining."
-                        } else {
-                            "This is a Free Training & Scrim match without cash entry fees or monetary prizes. Players of all ages (including under 18) are welcome to practice, test team lineups, and compete for leaderboards."
-                        }
-
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = Color(0xFF0B0E14),
-                            border = BorderStroke(1.dp, Color(0xFF1E2530)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                Text(
-                                    text = explanationText,
-                                    color = if (isMoneyMatch && isUserMinor) Color(0xFFFCA5A5) else Color(0xFFCBD5E1),
-                                    fontSize = 11.5.sp,
-                                    lineHeight = 16.sp
-                                )
-
-                                Spacer(modifier = Modifier.height(10.dp))
-
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Surface(
-                                        shape = RoundedCornerShape(6.dp),
-                                        color = Color(0xFF131822),
-                                        border = BorderStroke(1.dp, Color(0xFF222B3D)),
-                                        modifier = Modifier.weight(1f)
-                                    ) {
-                                        Column(modifier = Modifier.padding(6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                            Text("Match Type", color = VelorixTextSecondary, fontSize = 9.sp)
-                                            Text(if (isMoneyMatch) "Cash Tournament" else "Training / Scrim", color = Color.White, fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
-                                        }
-                                    }
-                                    Surface(
-                                        shape = RoundedCornerShape(6.dp),
-                                        color = Color(0xFF131822),
-                                        border = BorderStroke(1.dp, Color(0xFF222B3D)),
-                                        modifier = Modifier.weight(1f)
-                                    ) {
-                                        Column(modifier = Modifier.padding(6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                            Text("Age Rule", color = VelorixTextSecondary, fontSize = 9.sp)
-                                            Text(if (isMoneyMatch) "18+ Mandatory" else "Minors Permitted", color = if (isMoneyMatch) Color(0xFFFBBF24) else Color(0xFF34D399), fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        if (userAlreadyJoined) {
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = Color(0xFF065F46).copy(alpha = 0.3f),
-                                border = BorderStroke(1.dp, Color(0xFF059669)),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(10.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.Center
-                                ) {
-                                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF34D399), modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("YOU ARE REGISTERED IN THIS TOURNAMENT", color = Color(0xFF6EE7B7), fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
-                                }
-                            }
-                        } else if (isMoneyMatch && isUserMinor) {
-                            Button(
-                                onClick = {
-                                    Toast.makeText(context, "Entry Blocked: Real-money tournaments require 18+. You can join Free Training matches.", Toast.LENGTH_LONG).show()
-                                },
-                                enabled = false,
-                                modifier = Modifier.fillMaxWidth().height(44.dp),
-                                shape = RoundedCornerShape(12.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    disabledContainerColor = Color(0xFF2A1515),
-                                    disabledContentColor = Color(0xFFEF4444)
-                                )
-                            ) {
-                                Icon(Icons.Default.Block, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("LOCKED FOR MINORS (18+ CASH ONLY)", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
-                            }
-                        } else {
-                            Button(
-                                onClick = {
-                                    if (currentUserProfile == null) {
-                                        Toast.makeText(context, "Please sign in to register for tournaments.", Toast.LENGTH_SHORT).show()
-                                        return@Button
-                                    }
-                                    val newReg = PlayerRegistration(
-                                        id = "${tournament.id}_${currentUserProfile.id}",
-                                        userId = currentUserProfile.id,
-                                        playerId = currentUserProfile.id,
-                                        playerName = currentUserProfile.username.ifBlank { currentUserProfile.ign.ifBlank { "Player" } },
-                                        gameUsername = currentUserProfile.ign.ifBlank { currentUserProfile.username },
-                                        gameId = currentUserProfile.gameId.ifBlank { currentUserProfile.id },
-                                        age = userAge,
-                                        paymentStatus = if (isMoneyMatch) "PAID" else "FREE_TRAINING",
-                                        status = "confirmed",
-                                        registeredAt = System.currentTimeMillis()
-                                    )
-                                    onAddParticipant?.invoke(tournament.id, newReg)
-                                    Toast.makeText(context, "Registration submitted successfully!", Toast.LENGTH_SHORT).show()
-                                },
-                                modifier = Modifier.fillMaxWidth().height(44.dp),
-                                shape = RoundedCornerShape(12.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (isMoneyMatch) VelorixAccent else Color(0xFF38BDF8)
-                                )
-                            ) {
-                                Icon(
-                                    imageVector = if (isMoneyMatch) Icons.Default.Paid else Icons.Default.PlayArrow,
-                                    contentDescription = null,
-                                    tint = Color.Black,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = if (isMoneyMatch) "JOIN CASH TOURNAMENT (₹${tournament.entryFee.toInt()})" else "JOIN TRAINING MATCH (FREE)",
-                                    color = Color.Black,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Room Credentials Management Card (ADMIN OVERSIGHT)
-            item {
-                GlassCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(18.dp),
-                    borderBrush = GlassTokens.GlassBorderGradient
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.Key, contentDescription = null, tint = VelorixAccent, modifier = Modifier.size(20.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Column {
-                                    Text("ROOM CREDENTIALS", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = VelorixAccent, letterSpacing = 0.5.sp)
+                                    Text("Slot Capacity", fontSize = 11.5.sp, color = V14TextSecondary)
                                     Text(
-                                        if (tournament.roomDetails?.roomId?.isNotBlank() == true) "Broadcasted to players" else "Window opens 5m prior",
-                                        color = if (tournament.roomDetails?.roomId?.isNotBlank() == true) Color(0xFF86EFAC) else Color(0xFFFFD54F),
-                                        fontSize = 9.sp,
+                                        text = "${tournament.registeredPlayers}/${tournament.maxPlayers} (${(slotProgress * 100).toInt()}%)",
+                                        fontSize = 11.5.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = if (slotProgress >= 1f) VelorixEmerald else V14AccentBright,
                                         fontWeight = FontWeight.Bold
                                     )
                                 }
-                            }
-
-                            // Shifted action buttons to top-right as requested
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Surface(
+                                Box(
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .clickable {
+                                        .fillMaxWidth()
+                                        .height(7.dp)
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(V14BarMuted)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth(animSlotProgress)
+                                            .fillMaxHeight()
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(
+                                                Brush.horizontalGradient(
+                                                    listOf(V14AccentDeep, V14AccentPrimary, V14AccentBright)
+                                                )
+                                            )
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // =================================================================
+            // 2. CLEAN UNDERLINE SECTION SWITCHER (Overview | Roster | Prizes | Rules)
+            // =================================================================
+            item {
+                val tabs = listOf(
+                    "Overview",
+                    "Roster (${tournament.registeredPlayers})",
+                    "Prizes",
+                    "Rules"
+                )
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(24.dp)
+                    ) {
+                        tabs.forEachIndexed { index, label ->
+                            val isSelected = selectedSection == index
+                            Column(
+                                modifier = Modifier
+                                    .clickable { selectedSection = index }
+                                    .padding(top = 6.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = label,
+                                    fontSize = 13.5.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isSelected) V14TextPrimary else V14TextMuted
+                                )
+                                Spacer(modifier = Modifier.height(9.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .width(30.dp)
+                                        .height(2.dp)
+                                        .background(
+                                            if (isSelected) V14AccentPrimary else Color.Transparent,
+                                            RoundedCornerShape(1.dp)
+                                        )
+                                )
+                            }
+                        }
+                    }
+                    HorizontalDivider(thickness = 0.5.dp, color = V14Border)
+                }
+            }
+
+            // =================================================================
+            // TAB 0: OVERVIEW — 100% ADMIN OPERATIONS (ZERO USER-PANEL JOIN UI!)
+            // =================================================================
+            if (selectedSection == 0) {
+                // Room Credentials Bento Card
+                item {
+                    V14BentoSectionCard(
+                        icon = Icons.Default.Key,
+                        iconTint = if (hasRoomCredentials) VelorixEmerald else V14AccentBright,
+                        title = "Room Credentials",
+                        subtitle = if (hasRoomCredentials) "Live & synced to confirmed players"
+                        else if (minutesUntilStart > 5L) "Broadcast window opens in ${minutesUntilStart}m"
+                        else "Ready to broadcast to players",
+                        trailingContent = {
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Box(
+                                    modifier = Modifier
+                                        .height(32.dp)
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .background(V14CardElevated)
+                                        .border(0.75.dp, V14Border, RoundedCornerShape(16.dp))
+                                        .v14PressScale {
                                             com.example.notification.VelorixFcmManager.dispatchMatchReminderPush(
                                                 context = context,
                                                 tournament = tournament,
                                                 minutesLeft = 15
                                             )
                                             Toast.makeText(context, "15-Min Reminder pushed to players!", Toast.LENGTH_SHORT).show()
-                                        },
-                                    color = Color(0xFF1E293B),
-                                    border = BorderStroke(1.dp, Color(0xFF38BDF8).copy(alpha = 0.5f))
+                                        }
+                                        .padding(horizontal = 10.dp),
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(Icons.Default.NotificationsActive, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(13.dp))
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Remind", color = Color(0xFF38BDF8), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Icon(Icons.Default.NotificationsActive, contentDescription = "Remind", tint = V14TextSecondary, modifier = Modifier.size(13.dp))
+                                        Text("Remind", color = V14TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                                     }
                                 }
-
-                                Surface(
+                                Box(
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .clickable { showRoomBroadcastDialog = true },
-                                    color = VelorixAccent
+                                        .height(32.dp)
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .background(V14AccentPrimary.copy(alpha = 0.16f))
+                                        .border(0.75.dp, V14AccentBright.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
+                                        .v14PressScale { showRoomBroadcastDialog = true }
+                                        .padding(horizontal = 11.dp),
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(Icons.Default.BroadcastOnPersonal, contentDescription = null, tint = Color.Black, modifier = Modifier.size(14.dp))
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text(
-                                            if (tournament.roomDetails?.roomId?.isNotBlank() == true) "Edit Pass" else "Set Pass",
-                                            color = Color.Black,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
+                                    Text(
+                                        text = if (hasRoomCredentials) "Edit" else "Set Pass",
+                                        color = V14AccentBright,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
                                 }
                             }
                         }
-
-                        Spacer(modifier = Modifier.height(14.dp))
-
-                        if (tournament.roomDetails != null && tournament.roomDetails?.roomId?.isNotBlank() == true) {
+                    ) {
+                        if (hasRoomCredentials) {
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(V14CardElevated)
+                                    .border(0.75.dp, V14Border, RoundedCornerShape(14.dp)),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                CredentialBox(
-                                    modifier = Modifier.weight(1f),
+                                V14CredentialCell(
                                     label = "ROOM ID",
                                     value = tournament.roomDetails?.roomId ?: "-",
+                                    modifier = Modifier.weight(1f),
                                     onCopy = {
                                         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                                         clipboard.setPrimaryClip(ClipData.newPlainText("Room ID", tournament.roomDetails?.roomId ?: ""))
                                         Toast.makeText(context, "Room ID copied!", Toast.LENGTH_SHORT).show()
                                     }
                                 )
-                                CredentialBox(
-                                    modifier = Modifier.weight(1f),
+                                Box(modifier = Modifier.width(0.5.dp).height(42.dp).background(V14Border))
+                                V14CredentialCell(
                                     label = "PASSWORD",
-                                    value = tournament.roomDetails?.roomPassword ?: "-",
+                                    value = tournament.roomDetails?.roomPassword?.ifBlank { "None" } ?: "None",
+                                    modifier = Modifier.weight(1f),
                                     onCopy = {
                                         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                                         clipboard.setPrimaryClip(ClipData.newPlainText("Room Password", tournament.roomDetails?.roomPassword ?: ""))
@@ -858,152 +869,259 @@ fun TournamentDetailsScreen(
                                 )
                             }
                         } else {
-                            Surface(
-                                color = VelorixBg,
-                                shape = RoundedCornerShape(12.dp),
-                                border = BorderStroke(1.dp, CardVerifyBorder),
-                                modifier = Modifier.fillMaxWidth().clickable { showRoomBroadcastDialog = true }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(V14CardElevated)
+                                    .border(0.75.dp, V14Border, RoundedCornerShape(14.dp))
+                                    .v14PressScale { showRoomBroadcastDialog = true }
+                                    .padding(horizontal = 14.dp, vertical = 13.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Row(
-                                    modifier = Modifier.padding(14.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                                        Icon(Icons.Default.LockClock, contentDescription = null, tint = Color(0xFFFFD54F), modifier = Modifier.size(24.dp))
-                                        Spacer(modifier = Modifier.width(12.dp))
-                                        Column {
-                                            Text(
-                                                if (minutesUntilStart > 5L) "Room Credentials Locked ($minutesUntilStart min remaining)" else "Broadcast Window Active",
-                                                fontSize = 13.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = Color.White
-                                            )
-                                            Spacer(modifier = Modifier.height(2.dp))
-                                            Text(
-                                                "Tap here or 'Set Pass' above to broadcast Free Fire room ID & password now.",
-                                                fontSize = 11.sp,
-                                                color = VelorixTextSecondary,
-                                                lineHeight = 15.sp
-                                            )
-                                        }
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                    Icon(Icons.Default.LockClock, contentDescription = null, tint = VelorixAmber, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column {
+                                        Text(
+                                            text = if (minutesUntilStart > 5L) "Room Locked (${minutesUntilStart}m left)" else "Broadcast Room Credentials",
+                                            color = V14TextPrimary,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Text(
+                                            text = "Tap to publish custom Room ID & Password",
+                                            color = V14TextMuted,
+                                            fontSize = 11.sp
+                                        )
                                     }
-                                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = VelorixAccent, modifier = Modifier.size(16.dp))
                                 }
+                                Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = V14TextSecondary, modifier = Modifier.size(15.dp))
                             }
                         }
                     }
                 }
-            }
 
-            // Participant Roster Management Section (ADMIN)
-            item {
-                GlassCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(18.dp),
-                    borderBrush = GlassTokens.GlassBorderGradient
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.Groups, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(20.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("REGISTERED PARTICIPANTS (${tournament.registeredPlayers}/${tournament.maxPlayers})", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White, letterSpacing = 0.5.sp)
-                            }
-                            IconButton(
-                                onClick = { showAddParticipantDialog = true },
-                                modifier = Modifier.size(30.dp)
+                // Match Proofs & Anti-Cheat Bento Card
+                item {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(V14CardSurface)
+                            .border(0.75.dp, V14Border, RoundedCornerShape(20.dp))
+                            .v14PressScale { showInspectProofsDialog = true }
+                            .padding(16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background((if (pendingProofsCount > 0) VelorixAmber else V14TextSecondary).copy(alpha = 0.14f)),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Icon(Icons.Default.PersonAdd, contentDescription = "Add Participant", tint = VelorixAccent, modifier = Modifier.size(18.dp))
+                                Icon(
+                                    imageVector = Icons.Default.VerifiedUser,
+                                    contentDescription = null,
+                                    tint = if (pendingProofsCount > 0) VelorixAmber else V14TextSecondary,
+                                    modifier = Modifier.size(18.dp)
+                                )
                             }
-                        }
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Text(
-                            text = "Manage player registrations, assign room slots, whitelist VIPs, or remove inactive players.",
-                            fontSize = 11.sp,
-                            color = VelorixTextSecondary
-                        )
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        if (tournament.registrations.isEmpty()) {
-                            Surface(
-                                color = Color(0xFF141416),
-                                shape = RoundedCornerShape(10.dp),
-                                border = BorderStroke(1.dp, Color(0xFF27272A)),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(14.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Text(
-                                        "No player records in roster yet.",
-                                        fontSize = 12.sp,
-                                        color = VelorixTextSecondary
-                                    )
-                                    Button(
-                                        onClick = { showAddParticipantDialog = true },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF27272A)),
-                                        shape = RoundedCornerShape(6.dp),
-                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                                    ) {
-                                        Text("Add Player", fontSize = 11.sp, color = Color.White)
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text("Match Proofs & Claims", color = V14TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                    if (pendingProofsCount > 0) {
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(50))
+                                                .background(VelorixAmber)
+                                                .padding(horizontal = 7.dp, vertical = 2.dp)
+                                        ) {
+                                            Text("$pendingProofsCount PENDING", color = Color.Black, fontSize = 9.sp, fontWeight = FontWeight.Black)
+                                        }
                                     }
                                 }
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = if (matchProofs.isEmpty()) "No scoreboard proofs submitted yet"
+                                    else "${matchProofs.size} submission(s) ready for verification",
+                                    color = V14TextSecondary,
+                                    fontSize = 11.5.sp
+                                )
+                            }
+                        }
+                        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = V14TextMuted, modifier = Modifier.size(16.dp))
+                    }
+                }
+
+                // Admin Operations Bento Card (Single Clean Card, Hairline-Divided Rows)
+                item {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(V14CardSurface)
+                            .border(0.75.dp, V14Border, RoundedCornerShape(20.dp))
+                    ) {
+                        Text(
+                            text = "ADMIN OPERATIONS",
+                            color = V14TextMuted,
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.8.sp,
+                            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 6.dp)
+                        )
+                        if (viewModel != null) {
+                            V14AdminOpRow(
+                                icon = Icons.Default.Forum,
+                                iconTint = VelorixEmerald,
+                                title = "Lobby Chat Moderation",
+                                subtitle = "Pin announcements, mute players, or broadcast room alerts",
+                                onClick = { showLobbyChatModal = true }
+                            )
+                        }
+                        V14AdminOpRow(
+                            icon = Icons.Default.PersonAdd,
+                            iconTint = V14TextPrimary,
+                            title = "Add Participant Manually",
+                            subtitle = "${tournament.registeredPlayers} of ${tournament.maxPlayers} slots occupied · Assign VIP slot",
+                            onClick = { showAddParticipantDialog = true }
+                        )
+                        V14AdminOpRow(
+                            icon = Icons.Default.PieChart,
+                            iconTint = VelorixAmber,
+                            title = "Customize Prize Split",
+                            subtitle = "1st ₹${(if (tournament.firstPlacePrize > 0f) tournament.firstPlacePrize else tournament.prizePool * 0.5f).toInt()} · Kill ₹${(if (tournament.perKillPrize > 0f) tournament.perKillPrize else 20f).toInt()}",
+                            onClick = { showEditPrizeDialog = true }
+                        )
+                        V14AdminOpRow(
+                            icon = Icons.Default.Gavel,
+                            iconTint = V14AccentBright,
+                            title = "Rules & Loadout Settings",
+                            subtitle = if (tournament.emulatorAllowed) "Emulator allowed · ${tournament.safeZoneShrinkSpeed}" else "Mobile only · ${if (tournament.limitedAmmo) "Limited ammo" else "Unlimited ammo"}",
+                            onClick = { onEditRules(tournament.id) },
+                            showDivider = false
+                        )
+                    }
+                }
+            }
+
+            // =================================================================
+            // TAB 1: ROSTER (Full Admin Roster Management)
+            // =================================================================
+            if (selectedSection == 1) {
+                item {
+                    V14BentoSectionCard(
+                        icon = Icons.Default.Groups,
+                        iconTint = V14TextPrimary,
+                        title = "Registered Roster",
+                        subtitle = "${tournament.registeredPlayers} of ${tournament.maxPlayers} slots filled",
+                        trailingContent = {
+                            Row(
+                                modifier = Modifier
+                                    .height(34.dp)
+                                    .clip(RoundedCornerShape(17.dp))
+                                    .background(V14AccentPrimary.copy(alpha = 0.16f))
+                                    .border(0.75.dp, V14AccentBright.copy(alpha = 0.4f), RoundedCornerShape(17.dp))
+                                    .v14PressScale { showAddParticipantDialog = true }
+                                    .padding(horizontal = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Icon(Icons.Default.PersonAdd, contentDescription = null, tint = V14AccentBright, modifier = Modifier.size(14.dp))
+                                Text("Add Player", color = V14AccentBright, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    ) {
+                        if (tournament.registrations.isEmpty()) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 24.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Icon(Icons.Default.Groups, contentDescription = null, tint = V14TextMuted, modifier = Modifier.size(28.dp))
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text("No players registered yet", color = V14TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 13.5.sp)
+                                Spacer(modifier = Modifier.height(3.dp))
+                                Text("Use 'Add Player' to assign VIP or offline slots.", color = V14TextSecondary, fontSize = 11.5.sp)
                             }
                         } else {
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                val displayRegistrations: List<PlayerRegistration> = tournament.registrations.take(10)
-                                for (idx in displayRegistrations.indices) {
-                                    val reg: PlayerRegistration = displayRegistrations[idx]
-                                    Surface(
-                                        color = Color(0xFF141416),
-                                        shape = RoundedCornerShape(10.dp),
-                                        border = BorderStroke(1.dp, Color(0xFF27272A)),
-                                        modifier = Modifier.fillMaxWidth()
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                tournament.registrations.forEachIndexed { idx, reg ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 10.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Row(
-                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Surface(
-                                                    color = Color(0xFF27272A),
-                                                    shape = CircleShape,
-                                                    modifier = Modifier.size(24.dp)
-                                                ) {
-                                                    Box(contentAlignment = Alignment.Center) {
-                                                        Text("${idx + 1}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                                                    }
-                                                }
-                                                Spacer(modifier = Modifier.width(10.dp))
-                                                Column {
-                                                    Text(reg.playerName.ifBlank { reg.gameUsername }, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                                                    Text("UID: ${reg.gameId}", fontSize = 10.sp, color = VelorixTextSecondary)
-                                                }
-                                            }
-                                            Surface(
-                                                color = if (reg.paymentStatus == "PAID") Color(0xFF166534) else Color(0xFF3F3F46),
-                                                shape = RoundedCornerShape(4.dp)
+                                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(28.dp)
+                                                    .clip(CircleShape)
+                                                    .background(V14CardElevated)
+                                                    .border(0.6.dp, V14Border, CircleShape),
+                                                contentAlignment = Alignment.Center
                                             ) {
                                                 Text(
-                                                    reg.paymentStatus,
-                                                    fontSize = 9.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = Color.White,
-                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                    text = "${idx + 1}",
+                                                    color = V14TextSecondary,
+                                                    fontSize = 11.sp,
+                                                    fontFamily = FontFamily.Monospace,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.width(12.dp))
+                                            Column {
+                                                Text(
+                                                    text = reg.playerName.ifBlank { reg.gameUsername.ifBlank { "Player #${idx + 1}" } },
+                                                    color = V14TextPrimary,
+                                                    fontSize = 13.5.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                Text(
+                                                    text = "UID: ${reg.gameId.ifBlank { reg.playerId }}",
+                                                    color = V14TextMuted,
+                                                    fontSize = 11.sp,
+                                                    fontFamily = FontFamily.Monospace,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
                                                 )
                                             }
                                         }
+                                        val isPaid = reg.paymentStatus.equals("PAID", ignoreCase = true)
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(50))
+                                                .background(if (isPaid) VelorixEmerald.copy(alpha = 0.12f) else V14CardElevated)
+                                                .border(
+                                                    0.6.dp,
+                                                    if (isPaid) VelorixEmerald.copy(alpha = 0.4f) else V14Border,
+                                                    RoundedCornerShape(50)
+                                                )
+                                                .padding(horizontal = 9.dp, vertical = 3.dp)
+                                        ) {
+                                            Text(
+                                                text = reg.paymentStatus.ifBlank { "CONFIRMED" },
+                                                color = if (isPaid) VelorixEmerald else V14TextSecondary,
+                                                fontSize = 9.5.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+                                    if (idx < tournament.registrations.lastIndex) {
+                                        HorizontalDivider(thickness = 0.5.dp, color = V14Border)
                                     }
                                 }
                             }
@@ -1012,102 +1130,33 @@ fun TournamentDetailsScreen(
                 }
             }
 
-            // Match Proofs & Anti-Cheat Verification Center (ADMIN ONLY)
-            item {
-                val pendingProofsCount = matchProofs.count { it.status.equals("pending", ignoreCase = true) }
-                GlassCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(18.dp),
-                    borderBrush = if (pendingProofsCount > 0) Brush.horizontalGradient(listOf(Color(0xFFF59E0B), Color(0xFFD97706))) else GlassTokens.GlassBorderGradient
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.VerifiedUser, contentDescription = null, tint = if (pendingProofsCount > 0) Color(0xFFF59E0B) else VelorixAccent, modifier = Modifier.size(20.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("MATCH PROOFS & RESULT CLAIMS", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White, letterSpacing = 0.5.sp)
-                            }
-                            if (pendingProofsCount > 0) {
-                                Surface(color = Color(0xFFF59E0B), shape = RoundedCornerShape(6.dp)) {
-                                    Text("$pendingProofsCount PENDING", modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), color = Color.Black, fontSize = 9.sp, fontWeight = FontWeight.Black)
-                                }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Text(
-                            text = "Inspect player scoreboard screenshots, verify kills/rank claims, and dispatch automated wallet payouts.",
-                            fontSize = 11.sp,
-                            color = VelorixTextSecondary
-                        )
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        Button(
-                            onClick = { showInspectProofsDialog = true },
-                            modifier = Modifier.fillMaxWidth().height(40.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (pendingProofsCount > 0) Color(0xFFF59E0B) else Color(0xFF27272A)
-                            ),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Icon(Icons.Default.FactCheck, contentDescription = null, tint = if (pendingProofsCount > 0) Color.Black else Color.White, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                if (matchProofs.isEmpty()) "Open Proofs Inspector (0 Submissions)" else "Inspect & Review Proofs (${matchProofs.size})",
-                                fontWeight = FontWeight.Bold,
-                                color = if (pendingProofsCount > 0) Color.Black else Color.White,
-                                fontSize = 12.sp
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Prize Pool Distribution Graph & Visual Pie Chart
-            item {
-                GlassCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(18.dp),
-                    borderBrush = GlassTokens.GlassBorderGradient
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.PieChart, contentDescription = null, tint = Color(0xFFFFD700), modifier = Modifier.size(20.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("PRIZE POOL BREAKDOWN", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = VelorixTextPrimary, letterSpacing = 0.5.sp)
-                            }
-                            Surface(
+            // =================================================================
+            // TAB 2: PRIZES (Single Non-Duplicated V14 Bento Card)
+            // =================================================================
+            if (selectedSection == 2) {
+                item {
+                    V14BentoSectionCard(
+                        icon = Icons.Default.EmojiEvents,
+                        iconTint = VelorixAmber,
+                        title = "Prize Distribution",
+                        subtitle = "Tap any slice or card to inspect payout share",
+                        trailingContent = {
+                            Row(
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .border(1.dp, VelorixAccent.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                                    .clickable { showEditPrizeDialog = true },
-                                color = VelorixAccent.copy(alpha = 0.15f)
+                                    .height(34.dp)
+                                    .clip(RoundedCornerShape(17.dp))
+                                    .background(V14AccentPrimary.copy(alpha = 0.16f))
+                                    .border(0.75.dp, V14AccentBright.copy(alpha = 0.4f), RoundedCornerShape(17.dp))
+                                    .v14PressScale { showEditPrizeDialog = true }
+                                    .padding(horizontal = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
                             ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(Icons.Default.Edit, contentDescription = null, tint = VelorixAccent, modifier = Modifier.size(13.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Edit Prizes", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = VelorixAccent)
-                                }
+                                Icon(Icons.Default.Edit, contentDescription = null, tint = V14AccentBright, modifier = Modifier.size(13.dp))
+                                Text("Edit Split", color = V14AccentBright, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                             }
                         }
-
-                        Spacer(modifier = Modifier.height(14.dp))
-
-                        // Interactive Pie Chart
+                    ) {
                         PrizeDistributionPieChart(
                             prizePool = tournament.prizePool,
                             firstPlacePrize = tournament.firstPlacePrize,
@@ -1117,335 +1166,152 @@ fun TournamentDetailsScreen(
                             maxPlayers = tournament.maxPlayers,
                             modifier = Modifier.fillMaxWidth()
                         )
+                        Spacer(modifier = Modifier.height(14.dp))
+                        HorizontalDivider(thickness = 0.5.dp, color = V14Border)
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            text = "Payouts disburse automatically to player wallets after match standings audit.",
+                            color = V14TextMuted,
+                            fontSize = 11.5.sp,
+                            lineHeight = 16.sp
+                        )
+                    }
+                }
+            }
 
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        val firstPrize = if (tournament.firstPlacePrize > 0f) tournament.firstPlacePrize else tournament.prizePool * 0.50f
-                        val secondPrize = if (tournament.secondPlacePrize > 0f) tournament.secondPlacePrize else tournament.prizePool * 0.25f
-                        val thirdPrize = if (tournament.thirdPlacePrize > 0f) tournament.thirdPlacePrize else tournament.prizePool * 0.15f
-                        val perKill = if (tournament.perKillPrize > 0f) tournament.perKillPrize else 20f
-
-                        // Individual Prize Cards
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            PrizeRankCard(modifier = Modifier.weight(1f), rank = "1st Place", prize = "₹${firstPrize.toInt()}", color = Color(0xFFFFD700))
-                            PrizeRankCard(modifier = Modifier.weight(1f), rank = "2nd Place", prize = "₹${secondPrize.toInt()}", color = Color(0xFFC0C0C0))
-                            PrizeRankCard(modifier = Modifier.weight(1f), rank = "3rd Place", prize = "₹${thirdPrize.toInt()}", color = Color(0xFFCD7F32))
-                        }
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Surface(
-                            color = VelorixBg,
-                            shape = RoundedCornerShape(10.dp),
-                            border = BorderStroke(1.dp, CardVerifyBorder),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
+            // =================================================================
+            // TAB 3: RULES (Clean V14 Bento Loadout + Official Regulations)
+            // =================================================================
+            if (selectedSection == 3) {
+                item {
+                    V14BentoSectionCard(
+                        icon = Icons.Default.Gavel,
+                        iconTint = V14AccentBright,
+                        title = "Loadout & Match Rules",
+                        subtitle = if (isMoneyMatch) "18+ Cash Compliance · Competitive Lobby" else "Open Training Lobby",
+                        trailingContent = {
                             Row(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                                modifier = Modifier
+                                    .height(34.dp)
+                                    .clip(RoundedCornerShape(17.dp))
+                                    .background(V14CardElevated)
+                                    .border(0.75.dp, V14Border, RoundedCornerShape(17.dp))
+                                    .v14PressScale { onEditRules(tournament.id) }
+                                    .padding(horizontal = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
                             ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.GpsFixed, contentDescription = null, tint = VelorixAccent, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Per Kill Bounty", fontSize = 12.sp, color = VelorixTextPrimary, fontWeight = FontWeight.SemiBold)
-                                }
-                                Text("₹${perKill.toInt()} / kill", fontSize = 13.sp, color = VelorixAccent, fontWeight = FontWeight.Bold)
+                                Icon(Icons.Default.Edit, contentDescription = null, tint = V14TextPrimary, modifier = Modifier.size(13.dp))
+                                Text("Edit", color = V14TextPrimary, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
                             }
+                        }
+                    ) {
+                        V14RuleLine("Allowed Weapons", tournament.allowedGuns.ifBlank { "All Standard Weapons" }, VelorixEmerald)
+                        V14RuleLine("Banned Weapons", tournament.bannedGuns.ifBlank { "M79, M82B, Crossbow" }, Color(0xFFF87171))
+                        V14RuleLine("Allowed Character Skills", tournament.allowedSkills.ifBlank { "All Active & Passive Skills" }, V14TextPrimary)
+                        if (tournament.bannedSkills.isNotBlank() && !tournament.bannedSkills.equals("None", ignoreCase = true)) {
+                            V14RuleLine("Banned Character Skills", tournament.bannedSkills, Color(0xFFF87171))
                         }
 
                         Spacer(modifier = Modifier.height(10.dp))
-
-                        // Human-Written Settlement Terms Box
-                        Surface(
-                            color = Color(0xFF141720),
-                            shape = RoundedCornerShape(12.dp),
-                            border = BorderStroke(1.dp, Color(0xFF282D3D)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(modifier = Modifier.padding(14.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Info, contentDescription = null, tint = VelorixAccent, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = "Official Prize Settlement Terms",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color.White
-                                    )
-                                }
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Text(
-                                    text = "Total guaranteed tournament purse is ₹${tournament.prizePool.toInt()}. The Champion (1st Place) will receive ₹${firstPrize.toInt()} credited directly into their Velorix wallet upon match audit. The 1st Runner-Up (2nd Place) secures ₹${secondPrize.toInt()}, and 3rd Place secures ₹${thirdPrize.toInt()}. In addition, each recorded elimination awards an instant bounty of ₹${perKill.toInt()} per kill. Prize funds are disbursed automatically upon room score audit.",
-                                    fontSize = 11.5.sp,
-                                    color = Color(0xFFD1D5DB),
-                                    lineHeight = 16.sp
-                                )
-                            }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            V14ToggleRuleTile("Gun Attributes", if (tournament.gunAttributesAllowed) "ENABLED" else "OFF", tournament.gunAttributesAllowed, Modifier.weight(1f))
+                            V14ToggleRuleTile("Ammo Mode", if (tournament.limitedAmmo) "LIMITED" else "UNLIMITED", tournament.limitedAmmo, Modifier.weight(1f))
                         }
-                    }
-                }
-            }
-
-            // Weapon & Gun Rules Section (ADMIN OVERSIGHT)
-            item {
-                GlassCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(18.dp),
-                    borderBrush = GlassTokens.GlassBorderGradient
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.Shield, contentDescription = null, tint = VelorixAccent, modifier = Modifier.size(20.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("GUNS & WEAPONS REGULATIONS", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = VelorixTextPrimary, letterSpacing = 0.5.sp)
-                            }
-                            IconButton(onClick = { onEditRules(tournament.id) }, modifier = Modifier.size(28.dp)) {
-                                Icon(Icons.Default.Edit, contentDescription = "Edit Rules", tint = VelorixAccent, modifier = Modifier.size(16.dp))
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        // Allowed Guns
-                        RuleDetailItem(
-                            icon = Icons.Default.CheckCircle,
-                            iconTint = Color(0xFF81C784),
-                            title = "Allowed Weapons",
-                            details = tournament.allowedGuns.ifBlank { "All Standard Weapons (AR, SMG, Shotguns, Snipers)" }
-                        )
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        // Banned Guns
-                        RuleDetailItem(
-                            icon = Icons.Default.HighlightOff,
-                            iconTint = Color(0xFFFF5252),
-                            title = "Banned & Restricted Guns",
-                            details = tournament.bannedGuns.ifBlank { "M79 (Launcher), M82B, Crossbow, Flash Freeze" }
-                        )
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        // Gun Attributes & Ammo Rules
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            SettingPill(
-                                modifier = Modifier.weight(1f),
-                                label = "Gun Skin Attributes",
-                                value = if (tournament.gunAttributesAllowed) "ATTRIBUTES ON" else "NO ATTRIBUTES (OFF)",
-                                isAllowed = tournament.gunAttributesAllowed
-                            )
-                            SettingPill(
-                                modifier = Modifier.weight(1f),
-                                label = "Ammo Mode",
-                                value = if (tournament.limitedAmmo) "LIMITED AMMO" else "UNLIMITED AMMO",
-                                isAllowed = tournament.limitedAmmo
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Character Skills & Gameplay Tactical Rules (ADMIN OVERSIGHT)
-            item {
-                GlassCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(18.dp),
-                    borderBrush = GlassTokens.GlassBorderGradient
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.PersonOutline, contentDescription = null, tint = Color(0xFF64B5F6), modifier = Modifier.size(20.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("CHARACTER SKILLS & GAMEPLAY SETTINGS", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = VelorixTextPrimary, letterSpacing = 0.5.sp)
-                            }
-                            IconButton(onClick = { onEditRules(tournament.id) }, modifier = Modifier.size(28.dp)) {
-                                Icon(Icons.Default.Edit, contentDescription = "Edit Skills", tint = VelorixAccent, modifier = Modifier.size(16.dp))
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        // Character Skills Status
-                        SettingPill(
-                            modifier = Modifier.fillMaxWidth(),
-                            label = "Character Skills Mode",
-                            value = if (tournament.characterSkillsAllowed) "CHARACTER SKILLS ALLOWED" else "NO CHARACTER SKILLS (DISABLED)",
-                            isAllowed = tournament.characterSkillsAllowed
-                        )
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        if (tournament.characterSkillsAllowed) {
-                            RuleDetailItem(
-                                icon = Icons.Default.Check,
-                                iconTint = Color(0xFF81C784),
-                                title = "Allowed Character Skills",
-                                details = tournament.allowedSkills.ifBlank { "All Standard Active & Passive (Alok, Tatsuya, Kelly, Hayato, Moco, Maxim)" }
-                            )
-
-                            Spacer(modifier = Modifier.height(8.dp))
-
-                            RuleDetailItem(
-                                icon = Icons.Default.Block,
-                                iconTint = Color(0xFFFF5252),
-                                title = "Banned Character Skills",
-                                details = tournament.bannedSkills.ifBlank { "None (Or e.g. Chrono, Dimitry, Wukong, Orion)" }
-                            )
-
-                            Spacer(modifier = Modifier.height(10.dp))
-                        }
-
-                        // Device & Tactical Restrictions
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            SettingPill(
-                                modifier = Modifier.weight(1f),
-                                label = "Emulator / PC Players",
-                                value = if (tournament.emulatorAllowed) "EMULATOR ALLOWED" else "MOBILE ONLY (BLOCKED)",
-                                isAllowed = tournament.emulatorAllowed
-                            )
-                            SettingPill(
-                                modifier = Modifier.weight(1f),
-                                label = "Rooftop Camping",
-                                value = if (tournament.roofCampingAllowed) "ROOF CAMPING ON" else "ROOF CAMPING BANNED",
-                                isAllowed = tournament.roofCampingAllowed
-                            )
-                        }
-
                         Spacer(modifier = Modifier.height(8.dp))
-
-                        // Match Modifiers (Headshot, Revival, Fall Damage)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            SettingPill(
-                                modifier = Modifier.weight(1f),
-                                label = "Headshot Only",
-                                value = if (tournament.headshotOnly) "HEADSHOT ONLY" else "STANDARD DAMAGE",
-                                isAllowed = !tournament.headshotOnly
-                            )
-                            SettingPill(
-                                modifier = Modifier.weight(1f),
-                                label = "Revival System",
-                                value = if (tournament.revivalAllowed) "REVIVAL ON" else "PERMADEATH",
-                                isAllowed = tournament.revivalAllowed
-                            )
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            V14ToggleRuleTile("Character Skills", if (tournament.characterSkillsAllowed) "ALLOWED" else "DISABLED", tournament.characterSkillsAllowed, Modifier.weight(1f))
+                            V14ToggleRuleTile("Emulator / PC", if (tournament.emulatorAllowed) "ALLOWED" else "MOBILE ONLY", !tournament.emulatorAllowed, Modifier.weight(1f))
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            V14ToggleRuleTile("Headshot Mode", if (tournament.headshotOnly) "HEADSHOT ONLY" else "STANDARD", !tournament.headshotOnly, Modifier.weight(1f))
+                            V14ToggleRuleTile("Revival System", if (tournament.revivalAllowed) "ENABLED" else "PERMADEATH", tournament.revivalAllowed, Modifier.weight(1f))
                         }
 
                         if (tournament.customMatchSettings.isNotBlank()) {
-                            Spacer(modifier = Modifier.height(10.dp))
-                            RuleDetailItem(
-                                icon = Icons.Default.Tune,
-                                iconTint = VelorixAccent,
+                            Spacer(modifier = Modifier.height(12.dp))
+                            V14RuleLine(
                                 title = "Room Modifiers & Safe Zone",
-                                details = "${tournament.customMatchSettings} | Safe Zone: ${tournament.safeZoneShrinkSpeed}"
+                                details = "${tournament.customMatchSettings} · Safe Zone: ${tournament.safeZoneShrinkSpeed}",
+                                titleColor = V14AccentBright,
+                                showDivider = false
                             )
                         }
                     }
                 }
-            }
 
-            // Description & Official Rules
-            item {
-                GlassCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(18.dp),
-                    borderBrush = GlassTokens.GlassBorderGradient
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.MenuBook, contentDescription = null, tint = VelorixAccent, modifier = Modifier.size(20.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("OFFICIAL RULES & REGULATIONS", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = VelorixTextPrimary, letterSpacing = 0.5.sp)
-                        }
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
+                item {
+                    V14BentoSectionCard(
+                        icon = Icons.Default.MenuBook,
+                        iconTint = V14TextSecondary,
+                        title = "Official Regulations",
+                        subtitle = "Displayed to registered participants"
+                    ) {
                         Text(
                             text = tournament.rules.ifBlank {
-                                "1. All players must enter the custom room with their registered Free Fire UID.\n" +
-                                "2. Teaming with opponents or using third-party cheats will result in instant disqualification and permanent platform ban.\n" +
-                                "3. Screenshot of the final scoreboard is mandatory for prize claim and dispute resolution.\n" +
-                                "4. In case of tie, kill count will be given higher priority.\n" +
-                                "5. Room ID and password are confidential. Any player inviting external unapproved players will be disqualified."
+                                "1. Players must enter the custom room with their registered Free Fire UID.\n" +
+                                    "2. Teaming or third-party cheats result in permanent ban.\n" +
+                                    "3. Final scoreboard screenshot is required for prize claim.\n" +
+                                    "4. Room ID and password are confidential."
                             },
-                            fontSize = 12.sp,
-                            color = Color.White.copy(alpha = 0.85f),
-                            lineHeight = 18.sp
+                            color = V14TextSecondary,
+                            fontSize = 12.5.sp,
+                            lineHeight = 20.sp
                         )
                     }
                 }
             }
-
-            item { Spacer(modifier = Modifier.height(24.dp)) }
         }
     }
 
-    // ==========================================
-    // DIALOG: 5-MIN LOCKED ROOM ID BROADCASTER
-    // ==========================================
+    // =========================================================================
+    // ADMIN DIALOGS (All Firebase Sync & Workflows Preserved)
+    // =========================================================================
+
+    // 1. Broadcast Room ID & Password Dialog
     if (showRoomBroadcastDialog) {
         FrostedGlassAlertDialog(
             onDismissRequest = { showRoomBroadcastDialog = false },
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Key, contentDescription = null, tint = VelorixAccent)
+                    Icon(Icons.Default.Key, contentDescription = null, tint = V14AccentBright)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Broadcast Room ID & Pass", color = VelorixTextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text("Broadcast Room ID & Pass", color = V14TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 }
             },
             text = {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     if (minutesUntilStart > 5L && !bypass5MinCheck) {
                         Surface(
-                            color = Color(0xFF3E2723),
-                            shape = RoundedCornerShape(10.dp),
-                            border = BorderStroke(1.dp, Color(0xFFFFB74D))
+                            color = Color(0xFF23180E),
+                            shape = RoundedCornerShape(14.dp),
+                            border = BorderStroke(0.75.dp, VelorixAmber.copy(alpha = 0.45f))
                         ) {
                             Column(modifier = Modifier.padding(12.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFFFB74D), modifier = Modifier.size(18.dp))
+                                    Icon(Icons.Default.Warning, contentDescription = null, tint = VelorixAmber, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text("5-Minute Rule Enforced", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFFB74D))
+                                    Text("5-Minute Window Enforced", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = VelorixAmber)
                                 }
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    "Room ID & Password can only be entered 5 minutes before the match start time to prevent unauthorized room filling. ($minutesUntilStart minutes remaining).",
+                                    "$minutesUntilStart minutes remaining until match start. Enable bypass to broadcast early.",
                                     fontSize = 11.sp,
-                                    color = Color.White.copy(alpha = 0.9f),
+                                    color = V14TextPrimary.copy(alpha = 0.85f),
                                     lineHeight = 15.sp
                                 )
-                                Spacer(modifier = Modifier.height(8.dp))
+                                Spacer(modifier = Modifier.height(6.dp))
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    Text("Admin Emergency Bypass", fontSize = 10.sp, color = VelorixTextSecondary)
+                                    Text("Admin Emergency Bypass", fontSize = 11.sp, color = V14TextSecondary)
                                     Switch(
                                         checked = bypass5MinCheck,
                                         onCheckedChange = { bypass5MinCheck = it },
-                                        colors = SwitchDefaults.colors(checkedThumbColor = VelorixAccent)
+                                        colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = V14AccentPrimary)
                                     )
                                 }
                             }
@@ -1458,33 +1324,41 @@ fun TournamentDetailsScreen(
                         onValueChange = { roomIdInput = it },
                         label = { Text("Free Fire Custom Room ID") },
                         placeholder = { Text("e.g. 84920194") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = VelorixAccent,
-                            unfocusedBorderColor = CardVerifyBorder
+                            focusedContainerColor = V14CardElevated,
+                            unfocusedContainerColor = V14CardElevated,
+                            focusedBorderColor = V14AccentPrimary,
+                            unfocusedBorderColor = V14Border,
+                            focusedTextColor = V14TextPrimary,
+                            unfocusedTextColor = V14TextPrimary
                         )
                     )
-
                     Spacer(modifier = Modifier.height(10.dp))
-
                     OutlinedTextField(
                         value = roomPassInput,
                         onValueChange = { roomPassInput = it },
                         label = { Text("Room Password") },
                         placeholder = { Text("e.g. 1234 or velorix") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = VelorixAccent,
-                            unfocusedBorderColor = CardVerifyBorder
+                            focusedContainerColor = V14CardElevated,
+                            unfocusedContainerColor = V14CardElevated,
+                            focusedBorderColor = V14AccentPrimary,
+                            unfocusedBorderColor = V14Border,
+                            focusedTextColor = V14TextPrimary,
+                            unfocusedTextColor = V14TextPrimary
                         )
                     )
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
+                    Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        "Credentials will be synced in real-time to all verified participants.",
+                        "Credentials sync in real time to all confirmed participants.",
                         fontSize = 11.sp,
-                        color = VelorixTextSecondary
+                        color = V14TextMuted
                     )
                 }
             },
@@ -1498,6 +1372,15 @@ fun TournamentDetailsScreen(
                         val cleanedRoomId = roomIdInput.trim()
                         val cleanedRoomPass = roomPassInput.trim()
                         onPublishRoomCredentials(cleanedRoomId, cleanedRoomPass, bypass5MinCheck)
+                        viewModel?.sendManualNotification(
+                            title = "Room ID & Password Live: ${tournament.title}",
+                            message = "Room ID: $cleanedRoomId | Password: ${cleanedRoomPass.ifBlank { "Open" }}. Join lobby now!",
+                            type = "ROOM_CREDENTIALS",
+                            targetType = "TOURNAMENT",
+                            tournamentId = tournament.id,
+                            roomId = cleanedRoomId,
+                            roomPassword = cleanedRoomPass
+                        )
                         com.example.notification.VelorixFcmManager.dispatchRoomDetailsPush(
                             context = context,
                             tournament = tournament,
@@ -1507,123 +1390,122 @@ fun TournamentDetailsScreen(
                         com.example.analytics.VelorixAnalytics.logRoomCredentialsViewed(tournament.id, cleanedRoomId)
                         showRoomBroadcastDialog = false
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent),
+                    colors = ButtonDefaults.buttonColors(containerColor = V14AccentPrimary, contentColor = Color.White),
+                    shape = RoundedCornerShape(14.dp),
                     enabled = isWithin5Minutes || bypass5MinCheck
                 ) {
-                    Text("Broadcast to Players", fontWeight = FontWeight.Bold, color = Color.Black)
+                    Text("Broadcast", fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showRoomBroadcastDialog = false }) {
-                    Text("Cancel", color = VelorixTextSecondary)
+                    Text("Cancel", color = V14TextSecondary)
                 }
             }
         )
     }
 
-    // ==========================================
-    // DIALOG: ADD PARTICIPANT MANUALLY (ADMIN)
-    // ==========================================
+    // 2. Add Participant Dialog (Admin Manual Slot Assignment)
     if (showAddParticipantDialog) {
+        val parsedAge = manualPlayerAge.toIntOrNull() ?: 18
+        val isPlayerUnder18 = manualPlayerIsMinor || (parsedAge in 1..17)
+        val canSubmit = !(isMoneyMatch && isPlayerUnder18)
+
         FrostedGlassAlertDialog(
             onDismissRequest = { showAddParticipantDialog = false },
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.PersonAdd, contentDescription = null, tint = VelorixAccent)
+                    Icon(Icons.Default.PersonAdd, contentDescription = null, tint = V14AccentBright)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Add Player to Roster", color = VelorixTextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text("Add Player to Roster", color = V14TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 }
             },
             text = {
                 Column(modifier = Modifier.fillMaxWidth()) {
-                    val isMoneyMatch = (tournament.entryFee > 0f) || (tournament.prizePool > 0.0)
-                    val parsedAge = manualPlayerAge.toIntOrNull() ?: 18
-                    val isPlayerUnder18 = manualPlayerIsMinor || (parsedAge in 1..17)
-
-                    Text("Manually register a VIP, offline, or invited player to this tournament.", fontSize = 12.sp, color = VelorixTextSecondary)
+                    Text("Manually register a VIP or invited player to this match.", fontSize = 12.sp, color = V14TextSecondary)
                     Spacer(modifier = Modifier.height(10.dp))
                     OutlinedTextField(
                         value = manualPlayerIgn,
                         onValueChange = { manualPlayerIgn = it },
                         label = { Text("In-Game Name (IGN)") },
-                        placeholder = { Text("e.g. Velorix_Champion") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = V14CardElevated,
+                            unfocusedContainerColor = V14CardElevated,
+                            focusedBorderColor = V14AccentPrimary,
+                            unfocusedBorderColor = V14Border,
+                            focusedTextColor = V14TextPrimary,
+                            unfocusedTextColor = V14TextPrimary
+                        )
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(
                         value = manualPlayerUid,
                         onValueChange = { manualPlayerUid = it },
                         label = { Text("Free Fire UID") },
-                        placeholder = { Text("e.g. 589302194") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = V14CardElevated,
+                            unfocusedContainerColor = V14CardElevated,
+                            focusedBorderColor = V14AccentPrimary,
+                            unfocusedBorderColor = V14Border,
+                            focusedTextColor = V14TextPrimary,
+                            unfocusedTextColor = V14TextPrimary
+                        )
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                         OutlinedTextField(
                             value = manualPlayerAge,
                             onValueChange = { if (it.length <= 3 && it.all { ch -> ch.isDigit() }) manualPlayerAge = it },
-                            label = { Text("Player Age") },
-                            placeholder = { Text("18") },
+                            label = { Text("Age") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(14.dp),
                             modifier = Modifier.weight(1f),
-                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = V14CardElevated,
+                                unfocusedContainerColor = V14CardElevated,
+                                focusedBorderColor = V14AccentPrimary,
+                                unfocusedBorderColor = V14Border,
+                                focusedTextColor = V14TextPrimary,
+                                unfocusedTextColor = V14TextPrimary
+                            )
                         )
                         Row(
-                            modifier = Modifier
-                                .weight(1.3f)
-                                .clickable { manualPlayerIsMinor = !manualPlayerIsMinor },
+                            modifier = Modifier.weight(1.3f).clickable { manualPlayerIsMinor = !manualPlayerIsMinor },
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Checkbox(
                                 checked = isPlayerUnder18,
                                 onCheckedChange = { manualPlayerIsMinor = it },
-                                colors = CheckboxDefaults.colors(checkedColor = if (isMoneyMatch) Color(0xFFEF4444) else VelorixAccent)
+                                colors = CheckboxDefaults.colors(checkedColor = if (isMoneyMatch) Color(0xFFEF4444) else V14AccentPrimary)
                             )
-                            Text("Under 18 (Minor)", fontSize = 11.sp, color = if (isMoneyMatch && isPlayerUnder18) Color(0xFFFCA5A5) else VelorixTextSecondary)
+                            Text("Under 18", fontSize = 11.5.sp, color = if (isMoneyMatch && isPlayerUnder18) Color(0xFFFCA5A5) else V14TextSecondary)
                         }
                     }
-
                     if (isMoneyMatch && isPlayerUnder18) {
                         Spacer(modifier = Modifier.height(8.dp))
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = Color(0xFF2A1515),
-                            border = BorderStroke(1.dp, Color(0xFFEF4444)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(modifier = Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.Block, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    "Minor Age Restriction: Under-18 players cannot participate in real-money matches (Prize ₹${tournament.prizePool.toInt()}). Enroll them in Training matches only.",
-                                    color = Color(0xFFFCA5A5),
-                                    fontSize = 10.sp,
-                                    lineHeight = 14.sp
-                                )
-                            }
-                        }
+                        Text(
+                            "Under-18 players cannot participate in real-money matches.",
+                            color = Color(0xFFFCA5A5),
+                            fontSize = 11.sp
+                        )
                     }
                 }
             },
             confirmButton = {
-                val isMoneyMatch = (tournament.entryFee > 0f) || (tournament.prizePool > 0.0)
-                val parsedAge = manualPlayerAge.toIntOrNull() ?: 18
-                val isPlayerUnder18 = manualPlayerIsMinor || (parsedAge in 1..17)
-                val canSubmit = !(isMoneyMatch && isPlayerUnder18)
-
                 Button(
                     onClick = {
                         if (manualPlayerIgn.isBlank() || manualPlayerUid.isBlank()) {
                             Toast.makeText(context, "Please enter Player IGN & UID", Toast.LENGTH_SHORT).show()
                             return@Button
                         }
-                        if (isMoneyMatch && isPlayerUnder18) {
-                            Toast.makeText(context, "Registration blocked: Minors cannot join cash prize matches.", Toast.LENGTH_LONG).show()
+                        if (!canSubmit) {
+                            Toast.makeText(context, "Minors cannot join cash matches.", Toast.LENGTH_LONG).show()
                             return@Button
                         }
                         val newReg = PlayerRegistration(
@@ -1641,50 +1523,41 @@ fun TournamentDetailsScreen(
                         manualPlayerAge = "18"
                         manualPlayerIsMinor = false
                         showAddParticipantDialog = false
-                        Toast.makeText(context, "Player added to tournament roster!", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Player added to roster!", Toast.LENGTH_SHORT).show()
                     },
                     enabled = canSubmit,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = VelorixAccent,
-                        disabledContainerColor = Color(0xFF27272A),
-                        disabledContentColor = Color(0xFF71717A)
-                    )
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = V14AccentPrimary, contentColor = Color.White)
                 ) {
-                    Text(if (isMoneyMatch && isPlayerUnder18) "Age Restricted" else "Add to Match", color = if (canSubmit) Color.Black else Color(0xFF71717A), fontWeight = FontWeight.Bold)
+                    Text(if (canSubmit) "Add Player" else "Restricted", fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showAddParticipantDialog = false }) {
-                    Text("Cancel", color = VelorixTextSecondary)
+                    Text("Cancel", color = V14TextSecondary)
                 }
             }
         )
     }
 
-    // ==========================================
-    // DIALOG: ADMIN PROOFS & ANTI-CHEAT INSPECTOR
-    // ==========================================
+    // 3. Match Proofs Inspector Dialog
     if (showInspectProofsDialog) {
         AlertDialog(
             onDismissRequest = { showInspectProofsDialog = false },
             title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.VerifiedUser, contentDescription = null, tint = VelorixAccent)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Match Proofs & Anti-Cheat (${matchProofs.size})", color = VelorixTextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                }
+                Text("Match Proofs (${matchProofs.size})", color = V14TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
             },
             text = {
                 if (matchProofs.isEmpty()) {
                     Column(
-                        modifier = Modifier.fillMaxWidth().padding(24.dp),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 20.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = VelorixAccent, modifier = Modifier.size(40.dp))
+                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = VelorixEmerald, modifier = Modifier.size(34.dp))
                         Spacer(modifier = Modifier.height(10.dp))
-                        Text("No match screenshot submissions yet.", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Text("No proof submissions yet", color = V14TextPrimary, fontWeight = FontWeight.Bold, fontSize = 13.5.sp)
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text("Players upload victory scoreboard proofs which will appear here for admin review.", color = VelorixTextSecondary, fontSize = 11.sp, textAlign = TextAlign.Center)
+                        Text("Player scoreboard claims will appear here for review.", color = V14TextSecondary, fontSize = 11.5.sp, textAlign = TextAlign.Center)
                     }
                 } else {
                     LazyColumn(
@@ -1692,95 +1565,62 @@ fun TournamentDetailsScreen(
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         items(matchProofs) { proof ->
-                            Surface(
-                                color = VelorixBg,
-                                shape = RoundedCornerShape(12.dp),
-                                border = BorderStroke(1.dp, if (proof.status == "approved") Color(0xFF81C784) else CardVerifyBorder),
-                                modifier = Modifier.fillMaxWidth()
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(V14CardElevated)
+                                    .border(0.75.dp, V14Border, RoundedCornerShape(14.dp))
+                                    .padding(12.dp)
                             ) {
-                                Column(modifier = Modifier.padding(12.dp)) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Column {
-                                            Text(proof.username.ifBlank { "Player" }, fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp)
-                                            Text("UID: ${proof.gameAccountId}", fontSize = 10.sp, color = VelorixTextSecondary)
-                                        }
-                                        Surface(
-                                            color = when (proof.status) {
-                                                "approved" -> Color(0xFF2E7D32)
-                                                "rejected" -> Color(0xFFC62828)
-                                                else -> Color(0xFFE65100)
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                    Column {
+                                        Text(proof.username.ifBlank { "Player" }, fontWeight = FontWeight.Bold, color = V14TextPrimary, fontSize = 13.sp)
+                                        Text("UID: ${proof.gameAccountId}", fontSize = 10.5.sp, fontFamily = FontFamily.Monospace, color = V14TextMuted)
+                                    }
+                                    Text(
+                                        text = proof.status.uppercase(),
+                                        color = when (proof.status.lowercase()) {
+                                            "approved" -> VelorixEmerald
+                                            "rejected" -> Color(0xFFF87171)
+                                            else -> VelorixAmber
+                                        },
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text("Rank #${proof.claimedRank} · ${proof.claimedKills} Kills", color = V14TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+
+                                if (proof.status.equals("pending", ignoreCase = true)) {
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Button(
+                                            onClick = {
+                                                val prizeAmt = when (proof.claimedRank) {
+                                                    1 -> if (tournament.firstPlacePrize > 0f) tournament.firstPlacePrize.toDouble() else tournament.prizePool * 0.50
+                                                    2 -> if (tournament.secondPlacePrize > 0f) tournament.secondPlacePrize.toDouble() else tournament.prizePool * 0.25
+                                                    3 -> if (tournament.thirdPlacePrize > 0f) tournament.thirdPlacePrize.toDouble() else tournament.prizePool * 0.15
+                                                    else -> 0.0
+                                                } + (proof.claimedKills * (if (tournament.perKillPrize > 0f) tournament.perKillPrize.toDouble() else 20.0))
+                                                onApproveMatchProof(proof.id, prizeAmt, proof.claimedKills)
                                             },
-                                            shape = RoundedCornerShape(6.dp)
+                                            modifier = Modifier.weight(1f).height(36.dp),
+                                            colors = ButtonDefaults.buttonColors(containerColor = VelorixEmerald, contentColor = Color.Black),
+                                            shape = RoundedCornerShape(10.dp),
+                                            contentPadding = PaddingValues(horizontal = 8.dp)
                                         ) {
-                                            Text(
-                                                text = proof.status.uppercase(),
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                                fontSize = 9.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = Color.White
-                                            )
+                                            Text("Approve", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                                         }
-                                    }
-
-                                    Spacer(modifier = Modifier.height(6.dp))
-
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        Surface(color = CardVerifyBg, shape = RoundedCornerShape(6.dp), modifier = Modifier.weight(1f)) {
-                                            Column(modifier = Modifier.padding(6.dp)) {
-                                                Text("Claimed Rank", fontSize = 9.sp, color = VelorixTextSecondary)
-                                                Text("#${proof.claimedRank}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFFD700))
-                                            }
-                                        }
-                                        Surface(color = CardVerifyBg, shape = RoundedCornerShape(6.dp), modifier = Modifier.weight(1f)) {
-                                            Column(modifier = Modifier.padding(6.dp)) {
-                                                Text("Claimed Kills", fontSize = 9.sp, color = VelorixTextSecondary)
-                                                Text("${proof.claimedKills} Kills", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = VelorixAccent)
-                                            }
-                                        }
-                                    }
-
-                                    if (proof.status == "pending") {
-                                        Spacer(modifier = Modifier.height(10.dp))
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        OutlinedButton(
+                                            onClick = { onRejectMatchProof(proof.id, "Scoreboard mismatch or suspicious gameplay.") },
+                                            modifier = Modifier.weight(1f).height(36.dp),
+                                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFF87171)),
+                                            border = BorderStroke(0.75.dp, Color(0xFFF87171).copy(alpha = 0.55f)),
+                                            shape = RoundedCornerShape(10.dp),
+                                            contentPadding = PaddingValues(horizontal = 8.dp)
                                         ) {
-                                            Button(
-                                                onClick = {
-                                                    val prizeAmt = when (proof.claimedRank) {
-                                                        1 -> if (tournament.firstPlacePrize > 0f) tournament.firstPlacePrize.toDouble() else tournament.prizePool * 0.50
-                                                        2 -> if (tournament.secondPlacePrize > 0f) tournament.secondPlacePrize.toDouble() else tournament.prizePool * 0.25
-                                                        3 -> if (tournament.thirdPlacePrize > 0f) tournament.thirdPlacePrize.toDouble() else tournament.prizePool * 0.15
-                                                        else -> 0.0
-                                                    } + (proof.claimedKills * (if (tournament.perKillPrize > 0f) tournament.perKillPrize.toDouble() else 20.0))
-
-                                                    onApproveMatchProof(proof.id, prizeAmt, proof.claimedKills)
-                                                },
-                                                modifier = Modifier.weight(1f).height(36.dp),
-                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
-                                                shape = RoundedCornerShape(8.dp)
-                                            ) {
-                                                Text("Approve & Pay", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                                            }
-
-                                            OutlinedButton(
-                                                onClick = {
-                                                    onRejectMatchProof(proof.id, "Scoreboard mismatch or suspicious gameplay.")
-                                                },
-                                                modifier = Modifier.weight(1f).height(36.dp),
-                                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFFF5252)),
-                                                border = BorderStroke(1.dp, Color(0xFFFF5252).copy(alpha = 0.6f)),
-                                                shape = RoundedCornerShape(8.dp)
-                                            ) {
-                                                Text("Reject", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                            }
+                                            Text("Reject", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                                         }
                                     }
                                 }
@@ -1792,223 +1632,157 @@ fun TournamentDetailsScreen(
             confirmButton = {
                 Button(
                     onClick = { showInspectProofsDialog = false },
-                    colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent)
+                    colors = ButtonDefaults.buttonColors(containerColor = V14TextPrimary, contentColor = Color.Black),
+                    shape = RoundedCornerShape(14.dp)
                 ) {
-                    Text("Close Inspector", color = Color.Black, fontWeight = FontWeight.Bold)
+                    Text("Close", fontWeight = FontWeight.Bold)
                 }
             },
-            containerColor = CardVerifyBg
+            containerColor = V14CardSurface
         )
     }
 
-    // Edit Prize Distribution Structure Dialog
+    // 4. Edit Prize Split Dialog
     if (showEditPrizeDialog) {
         val currPool = editPrizePoolInput.toFloatOrNull() ?: tournament.prizePool
         AlertDialog(
             onDismissRequest = { showEditPrizeDialog = false },
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.AccountBalanceWallet, contentDescription = null, tint = VelorixAccent)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Customize Prize Distribution", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                }
-            },
+            title = { Text("Customize Prize Split", color = V14TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold) },
             text = {
-                Column(
-                    modifier = Modifier.verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Text(
-                        "Set custom prize distribution for ${tournament.title}. Changes will be recalculated and saved across user app and live nodes.",
-                        fontSize = 12.sp,
-                        color = Color.LightGray
-                    )
-
+                Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     OutlinedTextField(
                         value = editPrizePoolInput,
                         onValueChange = { editPrizePoolInput = it },
                         label = { Text("Total Prize Pool (₹)") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = V14CardElevated,
+                            unfocusedContainerColor = V14CardElevated,
+                            focusedBorderColor = V14AccentPrimary,
+                            unfocusedBorderColor = V14Border,
+                            focusedTextColor = V14TextPrimary,
+                            unfocusedTextColor = V14TextPrimary
+                        )
                     )
-
-                    Text("Preset Split Ratios", fontSize = 11.sp, color = VelorixTextSecondary, fontWeight = FontWeight.Bold)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Surface(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(8.dp))
-                                .border(1.dp, VelorixAccent.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                                .clickable {
-                                    editFirstPlaceInput = (currPool * 0.50f).toInt().toString()
-                                    editSecondPlaceInput = (currPool * 0.25f).toInt().toString()
-                                    editThirdPlaceInput = (currPool * 0.15f).toInt().toString()
-                                    editPerKillInput = "20"
-                                }
-                                .padding(vertical = 6.dp),
-                            color = Color(0xFF161922)
-                        ) {
-                            Text("50/25/15 + Kill", fontSize = 10.sp, color = VelorixAccent, textAlign = TextAlign.Center)
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        V14SplitPresetPill("50/25/15", Modifier.weight(1f)) {
+                            editFirstPlaceInput = (currPool * 0.50f).toInt().toString()
+                            editSecondPlaceInput = (currPool * 0.25f).toInt().toString()
+                            editThirdPlaceInput = (currPool * 0.15f).toInt().toString()
+                            editPerKillInput = "20"
                         }
-
-                        Surface(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(8.dp))
-                                .border(1.dp, Color(0xFFFFD54F).copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                                .clickable {
-                                    editFirstPlaceInput = (currPool * 0.60f).toInt().toString()
-                                    editSecondPlaceInput = (currPool * 0.25f).toInt().toString()
-                                    editThirdPlaceInput = (currPool * 0.15f).toInt().toString()
-                                    editPerKillInput = "0"
-                                }
-                                .padding(vertical = 6.dp),
-                            color = Color(0xFF161922)
-                        ) {
-                            Text("60/25/15 Pro", fontSize = 10.sp, color = Color(0xFFFFD54F), textAlign = TextAlign.Center)
+                        V14SplitPresetPill("60/25/15", Modifier.weight(1f)) {
+                            editFirstPlaceInput = (currPool * 0.60f).toInt().toString()
+                            editSecondPlaceInput = (currPool * 0.25f).toInt().toString()
+                            editThirdPlaceInput = (currPool * 0.15f).toInt().toString()
+                            editPerKillInput = "0"
                         }
-
-                        Surface(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(8.dp))
-                                .border(1.dp, Color(0xFF81C784).copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                                .clickable {
-                                    editFirstPlaceInput = currPool.toInt().toString()
-                                    editSecondPlaceInput = "0"
-                                    editThirdPlaceInput = "0"
-                                    editPerKillInput = "0"
-                                }
-                                .padding(vertical = 6.dp),
-                            color = Color(0xFF161922)
-                        ) {
-                            Text("Winner Takes All", fontSize = 10.sp, color = Color(0xFF81C784), textAlign = TextAlign.Center)
+                        V14SplitPresetPill("100% #1", Modifier.weight(1f)) {
+                            editFirstPlaceInput = currPool.toInt().toString()
+                            editSecondPlaceInput = "0"
+                            editThirdPlaceInput = "0"
+                            editPerKillInput = "0"
                         }
                     }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedTextField(
                             value = editFirstPlaceInput,
                             onValueChange = { editFirstPlaceInput = it },
-                            label = { Text("1st Place (₹)") },
+                            label = { Text("1st (₹)") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(14.dp),
                             modifier = Modifier.weight(1f),
-                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFFFFD54F), unfocusedBorderColor = CardVerifyBorder)
+                            colors = OutlinedTextFieldDefaults.colors(focusedContainerColor = V14CardElevated, unfocusedContainerColor = V14CardElevated, focusedBorderColor = VelorixAmber, unfocusedBorderColor = V14Border, focusedTextColor = V14TextPrimary, unfocusedTextColor = V14TextPrimary)
                         )
                         OutlinedTextField(
                             value = editSecondPlaceInput,
                             onValueChange = { editSecondPlaceInput = it },
-                            label = { Text("2nd Place (₹)") },
+                            label = { Text("2nd (₹)") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(14.dp),
                             modifier = Modifier.weight(1f),
-                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFFC0C0C0), unfocusedBorderColor = CardVerifyBorder)
+                            colors = OutlinedTextFieldDefaults.colors(focusedContainerColor = V14CardElevated, unfocusedContainerColor = V14CardElevated, focusedBorderColor = V14TextPrimary, unfocusedBorderColor = V14Border, focusedTextColor = V14TextPrimary, unfocusedTextColor = V14TextPrimary)
                         )
                     }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedTextField(
                             value = editThirdPlaceInput,
                             onValueChange = { editThirdPlaceInput = it },
-                            label = { Text("3rd Place (₹)") },
+                            label = { Text("3rd (₹)") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(14.dp),
                             modifier = Modifier.weight(1f),
-                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFFCD7F32), unfocusedBorderColor = CardVerifyBorder)
+                            colors = OutlinedTextFieldDefaults.colors(focusedContainerColor = V14CardElevated, unfocusedContainerColor = V14CardElevated, focusedBorderColor = Color(0xFFFB923C), unfocusedBorderColor = V14Border, focusedTextColor = V14TextPrimary, unfocusedTextColor = V14TextPrimary)
                         )
                         OutlinedTextField(
                             value = editPerKillInput,
                             onValueChange = { editPerKillInput = it },
                             label = { Text("Per Kill (₹)") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(14.dp),
                             modifier = Modifier.weight(1f),
-                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFFFF5252), unfocusedBorderColor = CardVerifyBorder)
+                            colors = OutlinedTextFieldDefaults.colors(focusedContainerColor = V14CardElevated, unfocusedContainerColor = V14CardElevated, focusedBorderColor = V14AccentPrimary, unfocusedBorderColor = V14Border, focusedTextColor = V14TextPrimary, unfocusedTextColor = V14TextPrimary)
                         )
-                    }
-
-                    Surface(
-                        color = Color(0xFF0F1117),
-                        shape = RoundedCornerShape(8.dp),
-                        border = BorderStroke(1.dp, Color(0xFF232733)),
-                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
-                    ) {
-                        Column(modifier = Modifier.padding(10.dp)) {
-                            Text("Narrative Summary:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = VelorixAccent)
-                            Spacer(modifier = Modifier.height(3.dp))
-                            Text(
-                                "Champion: ₹${editFirstPlaceInput} | Runner-Up: ₹${editSecondPlaceInput} | 3rd: ₹${editThirdPlaceInput} | Kill Bounty: ₹${editPerKillInput}/kill. Distributed automatically upon verified match result screenshot.",
-                                fontSize = 10.5.sp,
-                                color = Color.White.copy(alpha = 0.85f)
-                            )
-                        }
                     }
                 }
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        val newPool = editPrizePoolInput.toFloatOrNull() ?: tournament.prizePool
-                        val newFirst = editFirstPlaceInput.toFloatOrNull() ?: 0f
-                        val newSecond = editSecondPlaceInput.toFloatOrNull() ?: 0f
-                        val newThird = editThirdPlaceInput.toFloatOrNull() ?: 0f
-                        val newPerKill = editPerKillInput.toFloatOrNull() ?: 0f
-
                         val updatedTournament = tournament.copy(
-                            prizePool = newPool,
-                            firstPlacePrize = newFirst,
-                            secondPlacePrize = newSecond,
-                            thirdPlacePrize = newThird,
-                            perKillPrize = newPerKill
+                            prizePool = editPrizePoolInput.toFloatOrNull() ?: tournament.prizePool,
+                            firstPlacePrize = editFirstPlaceInput.toFloatOrNull() ?: 0f,
+                            secondPlacePrize = editSecondPlaceInput.toFloatOrNull() ?: 0f,
+                            thirdPlacePrize = editThirdPlaceInput.toFloatOrNull() ?: 0f,
+                            perKillPrize = editPerKillInput.toFloatOrNull() ?: 0f
                         )
                         onUpdateTournament?.invoke(updatedTournament)
                         showEditPrizeDialog = false
-                        Toast.makeText(context, "Prize distribution updated successfully!", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Prize split updated!", Toast.LENGTH_SHORT).show()
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent)
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = V14AccentPrimary, contentColor = Color.White)
                 ) {
-                    Text("Save & Apply Structure", color = Color.Black, fontWeight = FontWeight.Bold)
+                    Text("Save Split", fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showEditPrizeDialog = false }) {
-                    Text("Cancel", color = VelorixTextSecondary)
+                    Text("Cancel", color = V14TextSecondary)
                 }
             },
-            containerColor = CardVerifyBg
+            containerColor = V14CardSurface
         )
     }
 
-    // Manual Cancellation Dialog
+    // 5. Manual Cancellation Dialog
     if (showCancelDialog) {
         AlertDialog(
             onDismissRequest = { showCancelDialog = false },
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFFF5252))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Manual Match Cancellation", color = VelorixTextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                }
-            },
+            title = { Text("Cancel Match & Refund", color = V14TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold) },
             text = {
                 Column {
                     Text(
-                        "Cancel this tournament manually (e.g. if player registrations are not sufficient). This will set the tournament status to CANCELLED and broadcast the reason to all players.",
-                        fontSize = 13.sp,
-                        color = VelorixTextSecondary,
-                        lineHeight = 17.sp
+                        "Sets status to CANCELLED and notifies players with your reason.",
+                        fontSize = 12.5.sp,
+                        color = V14TextSecondary
                     )
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
                     OutlinedTextField(
                         value = cancelReasonInput,
                         onValueChange = { cancelReasonInput = it },
                         label = { Text("Cancellation Reason") },
+                        shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Color(0xFFFF5252),
-                            unfocusedBorderColor = CardVerifyBorder
+                            focusedContainerColor = V14CardElevated,
+                            unfocusedContainerColor = V14CardElevated,
+                            focusedBorderColor = Color(0xFFF87171),
+                            unfocusedBorderColor = V14Border,
+                            focusedTextColor = V14TextPrimary,
+                            unfocusedTextColor = V14TextPrimary
                         )
                     )
                 }
@@ -2019,283 +1793,332 @@ fun TournamentDetailsScreen(
                         onCancelTournament(tournament.id, cancelReasonInput.trim().ifBlank { "Insufficient players joined. Match cancelled manually." })
                         showCancelDialog = false
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF5252))
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444), contentColor = Color.White)
                 ) {
-                    Text("Confirm Cancel Match", fontWeight = FontWeight.Bold, color = Color.White)
+                    Text("Confirm Cancel", fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showCancelDialog = false }) {
-                    Text("Keep Match", color = VelorixTextSecondary)
+                    Text("Keep Match", color = V14TextSecondary)
                 }
             },
-            containerColor = CardVerifyBg
+            containerColor = V14CardSurface
         )
     }
 
-        // Delete Tournament Dialog
-        var isDeleting by remember { mutableStateOf(false) }
-
-        if (showDeleteDialog) {
-            AlertDialog(
-                onDismissRequest = { if (!isDeleting) showDeleteDialog = false },
-                title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .background(Color(0xFFEF4444).copy(alpha = 0.15f), CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.DeleteForever, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(18.dp))
+    // 6. Delete Tournament Dialog
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { if (!isDeleting) showDeleteDialog = false },
+            title = { Text("Delete Tournament?", color = V14TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "Permanently delete \"${tournament.title}\" along with all slots, proofs, and registrations? This cannot be undone.",
+                    fontSize = 12.5.sp,
+                    color = V14TextSecondary,
+                    lineHeight = 18.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (!isDeleting) {
+                            isDeleting = true
+                            Toast.makeText(context, "Deleting tournament...", Toast.LENGTH_SHORT).show()
+                            onDeleteTournament(tournament.id)
+                            showDeleteDialog = false
                         }
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text("Delete Tournament?", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                    }
-                },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text(
-                            "Are you sure you want to permanently delete \"${tournament.title}\"? This action cannot be undone and will purge all match slots, proofs, and registrations from the database.",
-                            fontSize = 13.sp,
-                            color = Color(0xFFA1A1AA),
-                            lineHeight = 17.sp
-                        )
-                        if (isDeleting) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(16.dp),
-                                    color = Color(0xFFEF4444),
-                                    strokeWidth = 2.dp
-                                )
-                                Text(
-                                    "Deleting tournament from database...",
-                                    fontSize = 12.sp,
-                                    color = Color(0xFFFCA5A5)
-                                )
-                            }
-                        }
-                    }
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            if (!isDeleting) {
-                                isDeleting = true
-                                Toast.makeText(context, "Deleting tournament...", Toast.LENGTH_SHORT).show()
-                                onDeleteTournament(tournament.id)
-                                showDeleteDialog = false
-                            }
-                        },
-                        enabled = !isDeleting,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
-                        shape = RoundedCornerShape(10.dp)
-                    ) {
-                        Text("Delete Permanently", fontWeight = FontWeight.Bold, color = Color.White)
-                    }
-                },
-                dismissButton = {
-                    TextButton(
-                        onClick = { showDeleteDialog = false },
-                        enabled = !isDeleting
-                    ) {
-                        Text("Cancel", color = Color(0xFFA1A1AA))
-                    }
-                },
-                containerColor = Color.Black,
-                shape = RoundedCornerShape(14.dp)
-            )
-        }
-
-        if (showLobbyChatModal && viewModel != null) {
-            androidx.compose.ui.window.Dialog(
-                onDismissRequest = { showLobbyChatModal = false },
-                properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth(0.96f)
-                        .fillMaxHeight(0.88f)
-                        .background(Color.Black, RoundedCornerShape(8.dp))
-                        .border(0.5.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(8.dp))
+                    },
+                    enabled = !isDeleting,
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444), contentColor = Color.White)
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 10.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "LOBBY CHAT • ${tournament.title.uppercase()}",
-                            color = Color.White,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        IconButton(onClick = { showLobbyChatModal = false }) {
-                            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
-                        }
-                    }
-                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.1f))
-                    TournamentLobbyChatModeratorSection(
-                        viewModel = viewModel,
-                        tournaments = listOf(tournament),
-                        initialTournamentId = tournament.id
-                    )
+                    Text("Delete", fontWeight = FontWeight.Bold)
                 }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }, enabled = !isDeleting) {
+                    Text("Cancel", color = V14TextSecondary)
+                }
+            },
+            containerColor = V14CardSurface
+        )
+    }
+
+    // 7. Lobby Chat Modal
+    if (showLobbyChatModal && viewModel != null) {
+        Dialog(
+            onDismissRequest = { showLobbyChatModal = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth(0.96f)
+                    .fillMaxHeight(0.88f)
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(V14Bg)
+                    .border(0.75.dp, V14Border, RoundedCornerShape(22.dp))
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "LOBBY CHAT · ${tournament.title.uppercase()}",
+                        color = V14TextPrimary,
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(onClick = { showLobbyChatModal = false }) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = V14TextPrimary)
+                    }
+                }
+                HorizontalDivider(thickness = 0.5.dp, color = V14Border)
+                TournamentLobbyChatModeratorSection(
+                    viewModel = viewModel,
+                    tournaments = listOf(tournament),
+                    initialTournamentId = tournament.id
+                )
             }
         }
-
-        if (showDeclareStandingsModal && viewModel != null) {
-            DeclareStandingsAndPrizesDialog(
-                tournament = tournament,
-                viewModel = viewModel,
-                onDismiss = { showDeclareStandingsModal = false }
-            )
-        }
     }
-}
 
-@Composable
-private fun TagBadge(text: String, bg: Color, textTint: Color) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.padding(end = 6.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .size(5.dp)
-                .background(textTint, RoundedCornerShape(50))
-        )
-        Spacer(modifier = Modifier.width(5.dp))
-        Text(
-            text = text,
-            color = textTint,
-            fontSize = 10.sp,
-            fontWeight = FontWeight.Bold
+    // 8. Declare Standings & Prizes Modal
+    if (showDeclareStandingsModal && viewModel != null) {
+        DeclareStandingsAndPrizesDialog(
+            tournament = tournament,
+            viewModel = viewModel,
+            onDismiss = { showDeclareStandingsModal = false }
         )
     }
 }
 
 @Composable
-private fun StatMiniItem(label: String, value: String, valueTint: Color) {
-    Column {
-        Text(text = label, fontSize = 9.sp, fontWeight = FontWeight.Bold, color = VelorixTextSecondary, letterSpacing = 0.5.sp)
-        Spacer(modifier = Modifier.height(2.dp))
-        Text(text = value, fontSize = 14.sp, fontWeight = FontWeight.Black, color = valueTint)
-    }
-}
-
-@Composable
-private fun CredentialBox(
-    modifier: Modifier = Modifier,
-    label: String,
-    value: String,
-    onCopy: () -> Unit
+private fun V14BentoSectionCard(
+    icon: ImageVector,
+    iconTint: Color,
+    title: String,
+    subtitle: String,
+    trailingContent: (@Composable () -> Unit)? = null,
+    content: @Composable ColumnScope.() -> Unit
 ) {
     Column(
-        modifier = modifier
-            .background(Color.Black)
-            .clickable { onCopy() }
-            .padding(vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .background(V14CardSurface)
+            .border(0.75.dp, V14Border, RoundedCornerShape(20.dp))
+            .padding(16.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(text = label, fontSize = 10.sp, color = VelorixAccent, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.8.sp)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.ContentCopy, contentDescription = "Copy", tint = VelorixAccent, modifier = Modifier.size(11.dp))
-                Spacer(modifier = Modifier.width(3.dp))
-                Text("COPY", color = VelorixAccent, fontSize = 8.5.sp, fontWeight = FontWeight.ExtraBold)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f).padding(end = 8.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(iconTint.copy(alpha = 0.14f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(16.dp))
+                }
+                Spacer(modifier = Modifier.width(10.dp))
+                Column {
+                    Text(
+                        text = title,
+                        color = V14TextPrimary,
+                        fontSize = 14.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = subtitle,
+                        color = V14TextSecondary,
+                        fontSize = 11.5.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+            if (trailingContent != null) {
+                trailingContent()
             }
         }
+        Spacer(modifier = Modifier.height(14.dp))
+        content()
+    }
+}
+
+@Composable
+private fun V14TelemetryCell(label: String, value: String, valueColor: Color) {
+    Column {
+        Text(
+            text = label,
+            fontSize = 9.5.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = V14TextMuted,
+            letterSpacing = 0.6.sp
+        )
+        Spacer(modifier = Modifier.height(3.dp))
         Text(
             text = value,
-            fontSize = 18.sp,
-            color = Color.White,
-            fontWeight = FontWeight.Black,
-            letterSpacing = 1.sp,
+            fontSize = 13.5.sp,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace,
+            color = valueColor,
+            maxLines = 1
+        )
+    }
+}
+
+@Composable
+private fun V14CredentialCell(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    onCopy: () -> Unit
+) {
+    Column(
+        modifier = modifier
+            .clickable(onClick = onCopy)
+            .padding(horizontal = 14.dp, vertical = 12.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(label, fontSize = 9.5.sp, color = V14TextMuted, fontWeight = FontWeight.Bold, letterSpacing = 0.7.sp)
+            Icon(Icons.Default.ContentCopy, contentDescription = "Copy $label", tint = V14AccentBright, modifier = Modifier.size(13.dp))
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = value,
+            color = V14TextPrimary,
+            fontSize = 15.5.sp,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
-        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
     }
 }
 
 @Composable
-private fun PrizeRankCard(
-    modifier: Modifier = Modifier,
-    rank: String,
-    prize: String,
-    color: Color
-) {
-    Column(
-        modifier = modifier
-            .background(Color.Black)
-            .padding(vertical = 8.dp, horizontal = 4.dp),
-        horizontalAlignment = Alignment.Start
-    ) {
-        Text(text = rank, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = color)
-        Spacer(modifier = Modifier.height(2.dp))
-        Text(text = prize, fontSize = 14.sp, fontWeight = FontWeight.Black, color = Color.White)
-        Spacer(modifier = Modifier.height(6.dp))
-        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
-    }
-}
-
-@Composable
-private fun RuleDetailItem(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+private fun V14AdminOpRow(
+    icon: ImageVector,
     iconTint: Color,
     title: String,
-    details: String
+    subtitle: String,
+    onClick: () -> Unit,
+    showDivider: Boolean = true
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Color.Black)
-    ) {
+    Column(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 10.dp),
-            verticalAlignment = Alignment.Top
+                .clickable(onClick = onClick)
+                .padding(horizontal = 16.dp, vertical = 13.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(18.dp).padding(top = 2.dp))
-            Spacer(modifier = Modifier.width(10.dp))
-            Column {
-                Text(text = title, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = iconTint)
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(text = details, fontSize = 12.sp, color = Color.White.copy(alpha = 0.9f), lineHeight = 16.sp)
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f).padding(end = 10.dp)) {
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(iconTint.copy(alpha = 0.12f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(16.dp))
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Column {
+                    Text(title, color = V14TextPrimary, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+                    Text(subtitle, color = V14TextSecondary, fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
+            Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = V14TextMuted, modifier = Modifier.size(15.dp))
         }
-        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+        if (showDivider) {
+            HorizontalDivider(thickness = 0.5.dp, color = V14Border, modifier = Modifier.padding(horizontal = 16.dp))
+        }
     }
 }
 
 @Composable
-private fun SettingPill(
-    modifier: Modifier = Modifier,
+private fun V14RuleLine(
+    title: String,
+    details: String,
+    titleColor: Color,
+    showDivider: Boolean = true
+) {
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
+        Text(title, color = titleColor, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(3.dp))
+        Text(details, color = V14TextPrimary.copy(alpha = 0.88f), fontSize = 12.5.sp, lineHeight = 18.sp)
+        if (showDivider) {
+            Spacer(modifier = Modifier.height(9.dp))
+            HorizontalDivider(thickness = 0.5.dp, color = V14Border)
+        }
+    }
+}
+
+@Composable
+private fun V14ToggleRuleTile(
     label: String,
     value: String,
-    isAllowed: Boolean
+    positive: Boolean,
+    modifier: Modifier = Modifier
 ) {
-    val tint = if (isAllowed) Color(0xFF81C784) else Color(0xFFFF8A80)
     Column(
         modifier = modifier
-            .background(Color.Black)
-            .padding(vertical = 8.dp, horizontal = 4.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(V14CardElevated)
+            .border(0.6.dp, V14Border, RoundedCornerShape(14.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp)
     ) {
-        Text(text = label, fontSize = 9.sp, color = VelorixTextSecondary, fontWeight = FontWeight.SemiBold)
-        Spacer(modifier = Modifier.height(2.dp))
-        Text(text = value, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = tint)
-        Spacer(modifier = Modifier.height(6.dp))
-        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+        Text(label, color = V14TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Medium)
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = value,
+            color = if (positive) VelorixEmerald else Color(0xFFF87171),
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+@Composable
+private fun V14SplitPresetPill(label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier,
+        shape = RoundedCornerShape(12.dp),
+        color = V14CardElevated,
+        border = BorderStroke(0.75.dp, V14Border)
+    ) {
+        Text(
+            text = label,
+            color = V14TextPrimary,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(vertical = 8.dp)
+        )
     }
 }

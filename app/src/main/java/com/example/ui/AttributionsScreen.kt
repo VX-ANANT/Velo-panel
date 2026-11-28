@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -27,6 +28,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.common.UntitledIcons
 import com.example.ui.theme.VelorixAccent
+import com.example.ui.theme.VelorixAmber
+import com.example.ui.theme.VelorixEmerald
 
 data class TechAttribution(
     val title: String,
@@ -55,7 +58,7 @@ fun AttributionsScreen(
                 description = "Dual-database high-throughput backend architecture combining Firebase Realtime Database (RTDB) for zero-latency room syncing and Cloud Firestore for multi-document transactional persistence.",
                 license = "Apache License 2.0 / Google Terms of Service",
                 icon = Icons.Outlined.CloudSync,
-                accentColor = Color(0xFFF59E0B),
+                accentColor = VelorixAmber,
                 features = listOf(
                     "Realtime WebSocket node replication at 60Hz",
                     "Dual-write ACID transactions for wallet debits/credits",
@@ -70,7 +73,7 @@ fun AttributionsScreen(
                 description = "Custom-engineered vector icon suite, hairline card borders, micro-tint elevation, and clean grid layouts inspired by modern product design standards.",
                 license = "Commercial & Open Product License",
                 icon = Icons.Outlined.DesignServices,
-                accentColor = Color(0xFF6366F1),
+                accentColor = V14AccentBright,
                 features = listOf(
                     "Geometric line-art vector icons (Trophy, Shield, Zap, Bracket, Sparkles)",
                     "Subtle neutral elevation with 0.5dp dark borders",
@@ -79,13 +82,13 @@ fun AttributionsScreen(
                 )
             ),
             TechAttribution(
-                title = "Google Gemini Generative AI",
-                provider = "Google DeepMind / Google AI Studio",
+                title = "Generative AI Copilot Engine",
+                provider = "Google Generative AI SDK",
                 category = "Artificial Intelligence",
-                description = "Gemini 2.5 Flash model integration via Google Generative AI Android SDK for real-time tournament rule analysis, bracket conflict resolution, fraud detection, and admin copilot assistance.",
-                license = "Google AI Studio API Terms",
+                description = "Real-time tournament rule analysis, bracket conflict resolution, fraud detection, and admin copilot assistance.",
+                license = "Apache License 2.0",
                 icon = Icons.Outlined.AutoAwesome,
-                accentColor = Color(0xFF38BDF8),
+                accentColor = V14AccentBright,
                 features = listOf(
                     "Sub-second latency tournament dispute analysis",
                     "Real-time fraud and abnormal match proof verification",
@@ -100,7 +103,7 @@ fun AttributionsScreen(
                 description = "Declarative, reactive Android UI toolkit built with Kotlin, utilizing Material Design 3 dynamic color tokens, smooth spatial transitions, and hardware-accelerated rendering.",
                 license = "Apache License 2.0",
                 icon = Icons.Outlined.Layers,
-                accentColor = Color(0xFF10B981),
+                accentColor = VelorixEmerald,
                 features = listOf(
                     "Zero-lag 120fps animated state transitions",
                     "Edge-to-edge system insets and immersive status bars",
@@ -115,7 +118,7 @@ fun AttributionsScreen(
                 description = "Modern federated authentication supporting Google Sign-In with ID tokens, passkeys, and biometric verification with zero legacy APIs.",
                 license = "Google Play Services SDK Terms",
                 icon = Icons.Outlined.Fingerprint,
-                accentColor = Color(0xFFEC4899),
+                accentColor = V14AccentBright,
                 features = listOf(
                     "One-tap account selection dialog",
                     "Automatic credential discovery and fallback",
@@ -130,7 +133,7 @@ fun AttributionsScreen(
                 description = "Server-synchronized sliding window log and fractional token-bucket engine regulating API throughput, prevent multi-request race conditions, and deter brute-force attempts.",
                 license = "Proprietary Velorix Esports Engine",
                 icon = Icons.Outlined.Speed,
-                accentColor = Color(0xFF8B5CF6),
+                accentColor = VelorixEmerald,
                 features = listOf(
                     "Continuous sub-second fractional token refills",
                     "Sliding window log preventing edge-of-interval abuse",
@@ -145,7 +148,7 @@ fun AttributionsScreen(
                 description = "Lightweight structured concurrency and asynchronous data streaming powering real-time Firestore snapshots, timer countdowns, and network IO tasks.",
                 license = "Apache License 2.0",
                 icon = Icons.Outlined.Code,
-                accentColor = Color(0xFFF97316),
+                accentColor = VelorixAmber,
                 features = listOf(
                     "Structured lifecycle-aware coroutine scopes",
                     "Cold and hot Flow state management",
@@ -161,78 +164,97 @@ fun AttributionsScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            text = "Attribution & Credits",
-                            color = Color.White,
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "Core frameworks, libraries & platform architecture",
-                            color = Color(0xFF94A3B8),
-                            fontSize = 11.sp
-                        )
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                            tint = Color.White
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color(0xFF090B10)
-                )
-            )
-        },
-        containerColor = Color(0xFF090B10)
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-        ) {
-            // Minimalist Tab Switcher
-            Surface(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                shape = RoundedCornerShape(10.dp),
-                color = Color(0xFF111420),
-                border = BorderStroke(1.dp, Color(0xFF1E2638))
+                    .background(V14Bg)
+                    .statusBarsPadding()
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(3.dp)
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    tabs.forEachIndexed { index, label ->
-                        val isSelected = selectedTab == index
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(V14CardSurface)
+                            .border(1.dp, V14Border, CircleShape)
+                            .clickable(onClick = onNavigateBack),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            text = "Attribution & Credits",
+                            color = V14TextPrimary,
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "FRAMEWORKS, LIBRARIES & ARCHITECTURE",
+                            color = V14TextMuted,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp
+                        )
+                    }
+                }
+                HorizontalDivider(thickness = 0.5.dp, color = V14Border)
+            }
+        },
+        containerColor = V14Bg
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(V14Bg)
+                .padding(innerPadding)
+        ) {
+            // Flat V14 Underline Mode Selector (no nested box-in-box)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                tabs.forEachIndexed { index, label ->
+                    val isSelected = selectedTab == index
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { selectedTab = index }
+                            .padding(vertical = 8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = label,
+                            color = if (isSelected) V14TextPrimary else V14TextSecondary,
+                            fontSize = 11.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
                         Box(
                             modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (isSelected) Color(0xFF1E293B) else Color.Transparent)
-                                .clickable { selectedTab = index }
-                                .padding(vertical = 8.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = label,
-                                color = if (isSelected) Color.White else Color(0xFF64748B),
-                                fontSize = 11.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                            )
-                        }
+                                .fillMaxWidth(0.75f)
+                                .height(2.dp)
+                                .background(if (isSelected) V14AccentPrimary else Color.Transparent)
+                        )
                     }
                 }
             }
+            HorizontalDivider(thickness = 0.5.dp, color = V14Border)
 
             when (selectedTab) {
                 0 -> {
@@ -312,9 +334,9 @@ fun AttributionsScreen(
 private fun AttributionCard(item: TechAttribution) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        color = Color(0xFF111420),
-        border = BorderStroke(1.dp, Color(0xFF1E2638))
+        shape = RoundedCornerShape(18.dp),
+        color = V14CardSurface,
+        border = BorderStroke(1.dp, V14Border)
     ) {
         Column(
             modifier = Modifier
@@ -349,13 +371,13 @@ private fun AttributionCard(item: TechAttribution) {
                     Column {
                         Text(
                             text = item.title,
-                            color = Color.White,
+                            color = V14TextPrimary,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
                             text = item.provider,
-                            color = Color(0xFF94A3B8),
+                            color = V14TextSecondary,
                             fontSize = 11.sp
                         )
                     }
@@ -363,7 +385,8 @@ private fun AttributionCard(item: TechAttribution) {
 
                 Surface(
                     shape = RoundedCornerShape(6.dp),
-                    color = Color(0xFF1E293B),
+                    color = V14CardElevated,
+                    border = BorderStroke(0.5.dp, V14Border),
                     modifier = Modifier.padding(start = 8.dp)
                 ) {
                     Text(
@@ -380,7 +403,7 @@ private fun AttributionCard(item: TechAttribution) {
 
             Text(
                 text = item.description,
-                color = Color(0xFFCBD5E1),
+                color = V14TextSecondary,
                 fontSize = 12.sp,
                 lineHeight = 17.sp
             )
@@ -402,7 +425,7 @@ private fun AttributionCard(item: TechAttribution) {
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = feat,
-                            color = Color(0xFF94A3B8),
+                            color = V14TextSecondary,
                             fontSize = 11.sp
                         )
                     }
@@ -418,12 +441,12 @@ private fun AttributionCard(item: TechAttribution) {
             ) {
                 Text(
                     text = "License",
-                    color = Color(0xFF64748B),
+                    color = V14TextMuted,
                     fontSize = 10.sp
                 )
                 Text(
                     text = item.license,
-                    color = Color(0xFF94A3B8),
+                    color = V14TextSecondary,
                     fontSize = 10.sp,
                     fontFamily = FontFamily.Monospace
                 )
@@ -497,7 +520,7 @@ private fun LicenseCard(license: OpenSourceLicense) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color.Black)
+            .background(V14Bg)
     ) {
         Column(
             modifier = Modifier
@@ -511,13 +534,13 @@ private fun LicenseCard(license: OpenSourceLicense) {
             ) {
                 Text(
                     text = license.name,
-                    color = Color.White,
+                    color = V14TextPrimary,
                     fontSize = 12.5.sp,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
                     text = license.licenseType,
-                    color = Color(0xFF38BDF8),
+                    color = V14AccentBright,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold
                 )
@@ -525,19 +548,19 @@ private fun LicenseCard(license: OpenSourceLicense) {
 
             Text(
                 text = license.author,
-                color = Color(0xFF64748B),
+                color = V14TextMuted,
                 fontSize = 11.sp,
                 modifier = Modifier.padding(top = 1.dp, bottom = 6.dp)
             )
 
             Text(
                 text = license.summary,
-                color = Color(0xFFCBD5E1),
+                color = V14TextSecondary,
                 fontSize = 11.5.sp,
                 lineHeight = 16.sp
             )
         }
-        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+        HorizontalDivider(thickness = 0.5.dp, color = V14Border)
     }
 }
 
@@ -546,7 +569,7 @@ private fun ArchitectureOverviewCard() {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color.Black)
+            .background(V14Bg)
     ) {
         Column(
             modifier = Modifier
@@ -555,19 +578,19 @@ private fun ArchitectureOverviewCard() {
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Outlined.Hub, contentDescription = null, tint = Color(0xFF818CF8), modifier = Modifier.size(20.dp))
+                Icon(Icons.Outlined.Hub, contentDescription = null, tint = V14AccentBright, modifier = Modifier.size(20.dp))
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Velorix Dual-Engine Architecture", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text("Velorix Dual-Engine Architecture", color = V14TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
             }
 
             Text(
                 text = "The Velorix platform operates on an enterprise dual-backend architecture designed for zero data desynchronization between player client apps and administrative management consoles.",
-                color = Color(0xFFCBD5E1),
+                color = V14TextSecondary,
                 fontSize = 12.sp,
                 lineHeight = 17.sp
             )
         }
-        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+        HorizontalDivider(thickness = 0.5.dp, color = V14Border)
     }
 }
 
@@ -576,7 +599,7 @@ private fun DualSyncSystemCard() {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color.Black)
+            .background(V14Bg)
     ) {
         Column(
             modifier = Modifier
@@ -585,19 +608,19 @@ private fun DualSyncSystemCard() {
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Outlined.SyncAlt, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(20.dp))
+                Icon(Icons.Outlined.SyncAlt, contentDescription = null, tint = V14AccentBright, modifier = Modifier.size(20.dp))
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Live Bidirectional Synchronization", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text("Live Bidirectional Synchronization", color = V14TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
             }
 
             Text(
                 text = "1. Realtime Database (RTDB): Live slot capacity, player count updates, and instant room ID/Password broadcast channels.\n2. Cloud Firestore: Tournament rules, historical logs, payout adjudication, and admin permission enforcement.\n3. Automatic Provisioning: Every player is auto-activated upon Google, Phone, or Email authentication without manual approval barriers.",
-                color = Color(0xFF94A3B8),
+                color = V14TextSecondary,
                 fontSize = 11.5.sp,
                 lineHeight = 17.sp
             )
         }
-        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+        HorizontalDivider(thickness = 0.5.dp, color = V14Border)
     }
 }
 
@@ -606,7 +629,7 @@ private fun SecurityComplianceCard() {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color.Black)
+            .background(V14Bg)
     ) {
         Column(
             modifier = Modifier
@@ -615,19 +638,19 @@ private fun SecurityComplianceCard() {
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Outlined.Security, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(20.dp))
+                Icon(Icons.Outlined.Security, contentDescription = null, tint = VelorixEmerald, modifier = Modifier.size(20.dp))
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Security, Cryptography & Rate Limiting", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text("Security, Cryptography & Rate Limiting", color = V14TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
             }
 
             Text(
                 text = "All administrative commands and player transactions are protected by token-bucket rate limiting (60 queries/min, 15 mutations/min, 5 auth attempts/5min) with cross-device Firebase lockout synchronization.",
-                color = Color(0xFF94A3B8),
+                color = V14TextSecondary,
                 fontSize = 11.5.sp,
                 lineHeight = 17.sp
             )
         }
-        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+        HorizontalDivider(thickness = 0.5.dp, color = V14Border)
     }
 }
 
@@ -636,7 +659,7 @@ private fun TeamCreditsCard() {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color.Black)
+            .background(V14Bg)
     ) {
         Column(
             modifier = Modifier
@@ -645,19 +668,19 @@ private fun TeamCreditsCard() {
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Outlined.Group, contentDescription = null, tint = Color(0xFFEC4899), modifier = Modifier.size(20.dp))
+                Icon(Icons.Outlined.Group, contentDescription = null, tint = V14AccentBright, modifier = Modifier.size(20.dp))
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Project Credits & Engineering", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text("Project Credits & Engineering", color = V14TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
             }
 
             Text(
                 text = "Velorix Free Fire Esports Platform • Developed & Maintained by Velorix Esports Systems Team\nLead Administrator: anantisback47@gmail.com\nFirebase Project: velorix-tournaments (27931798964)",
-                color = Color(0xFFCBD5E1),
+                color = V14TextSecondary,
                 fontSize = 11.5.sp,
                 lineHeight = 17.sp
             )
         }
-        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+        HorizontalDivider(thickness = 0.5.dp, color = V14Border)
     }
 }
 
@@ -671,14 +694,14 @@ private fun PlatformSignatureFooter() {
     ) {
         Text(
             text = "VELORIX ESPORTS TOURNAMENT ENGINE v3.4.2",
-            color = Color(0xFF475569),
+            color = V14TextMuted,
             fontSize = 10.sp,
             fontWeight = FontWeight.Bold,
             letterSpacing = 1.sp
         )
         Text(
-            text = "Powered by Google Firebase & Gemini AI Studio",
-            color = Color(0xFF334155),
+            text = "Real-Time Esports Cloud Infrastructure",
+            color = V14TextMuted.copy(alpha = 0.7f),
             fontSize = 9.5.sp
         )
     }

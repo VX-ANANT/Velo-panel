@@ -30,6 +30,8 @@ import com.example.domain.model.RedeemClaimRecord
 import com.example.domain.model.UnifiedAdminRequest
 import com.example.domain.model.ChatReportItem
 import com.example.domain.model.VerifiedBankDeposit
+import com.example.domain.model.ManualNotificationRecord
+import com.example.domain.model.ManualNotificationResult
 import com.example.data.repository.AdminIntegrationSyncManager
 import com.example.data.validation.UserRateLimiter
 import com.example.ui.common.GlobalErrorManager
@@ -313,6 +315,18 @@ class TournamentDashboardViewModel(
     private val _verifiedBankDeposits = MutableStateFlow<List<VerifiedBankDeposit>>(emptyList())
     val verifiedBankDeposits: StateFlow<List<VerifiedBankDeposit>> = _verifiedBankDeposits.asStateFlow()
 
+    private val _manualNotifications = MutableStateFlow<List<ManualNotificationRecord>>(emptyList())
+    val manualNotifications: StateFlow<List<ManualNotificationRecord>> = _manualNotifications.asStateFlow()
+
+    private val _securityAuditLogs = MutableStateFlow<List<AdminAuditLogItem>>(emptyList())
+    val securityAuditLogs: StateFlow<List<AdminAuditLogItem>> = _securityAuditLogs.asStateFlow()
+
+    private val _reconciliationSummaryJson = MutableStateFlow<String?>(null)
+    val reconciliationSummaryJson: StateFlow<String?> = _reconciliationSummaryJson.asStateFlow()
+
+    private val _isReconcilingBackend = MutableStateFlow(false)
+    val isReconcilingBackend: StateFlow<Boolean> = _isReconcilingBackend.asStateFlow()
+
     private var activeChannelStreamJob: Job? = null
 
     // In-memory locks to prevent real-time stream snapshots from causing 'revert-and-reactivate' UI glitches
@@ -322,26 +336,38 @@ class TournamentDashboardViewModel(
     private val lockedDeletedUserIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     fun setManualLoginEmail(email: String?) {
-        overrideUserEmail = email
-        if (email != null && email.isNotBlank()) {
-            val cleanEmail = email.trim().lowercase()
-            repository.recordAccountLocally(cleanEmail, cleanEmail.substringBefore("@"), "super_admin")
+        val cleanEmail = email?.trim()?.lowercase()?.takeIf {
+            com.example.data.validation.TournamentBackendValidator.isAllowedAdminEmail(it)
+        }
+        overrideUserEmail = cleanEmail
+        if (cleanEmail == null) {
+            synchronized(activeStreamJobs) {
+                activeStreamJobs.forEach { it.cancel() }
+                activeStreamJobs.clear()
+            }
+            _uiState.value = DashboardState.Loading
+            return
         }
         val curr = _uiState.value
         if (curr is DashboardState.Success) {
-            _uiState.value = curr.copy(currentUserEmail = email)
-        } else if (email != null) {
-            _uiState.value = DashboardState.Success(currentUserEmail = email)
+            _uiState.value = curr.copy(currentUserEmail = cleanEmail)
+        } else {
+            _uiState.value = DashboardState.Success(currentUserEmail = cleanEmail)
         }
-        if (email != null) {
+        val firebaseEmail = repository.auth.currentUser?.email?.trim()?.lowercase()
+        if (com.example.data.validation.TournamentBackendValidator.isAllowedAdminEmail(firebaseEmail)) {
             startStreams(forceRestart = true)
             extractAndSyncRealDataFromBackend()
         }
     }
 
     init {
-        startStreams(forceRestart = false)
-        extractAndSyncRealDataFromBackend()
+        val currentFirebaseEmail = repository.auth.currentUser?.email?.trim()?.lowercase()
+        if (com.example.data.validation.TournamentBackendValidator.isAllowedAdminEmail(currentFirebaseEmail)) {
+            overrideUserEmail = currentFirebaseEmail
+            startStreams(forceRestart = false)
+            extractAndSyncRealDataFromBackend()
+        }
     }
 
     fun fetchData() {
@@ -371,7 +397,14 @@ class TournamentDashboardViewModel(
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val targetEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
+                val authEmail = repository.auth.currentUser?.email?.trim()?.lowercase()
+                if (!com.example.data.validation.TournamentBackendValidator.isAllowedAdminEmail(authEmail)) {
+                    _uiState.update { curr ->
+                        (curr as? DashboardState.Success)?.copy(isSyncing = false) ?: curr
+                    }
+                    return@launch
+                }
+                val targetEmail = authEmail!!
                 repository.ensureAuthenticatedSession(targetEmail)
                 GlobalErrorManager.emitSuccess("Extracting real data from Firebase RTDB & Cloud Firestore...")
                 var result = repository.extractRealDataFromBackend(forceServer = true)
@@ -391,7 +424,7 @@ class TournamentDashboardViewModel(
                         )
                 }
 
-                val initialEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
+                val initialEmail = targetEmail
 
                 withContext(Dispatchers.Default) {
                     _uiState.update { curr ->
@@ -440,7 +473,11 @@ class TournamentDashboardViewModel(
             activeStreamJobs.clear()
         }
 
-        val initialEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
+        val authEmail = repository.auth.currentUser?.email?.trim()?.lowercase()
+        if (!com.example.data.validation.TournamentBackendValidator.isAllowedAdminEmail(authEmail)) {
+            return
+        }
+        val initialEmail = authEmail!!
         _uiState.update { curr ->
             if (curr !is DashboardState.Success) {
                 DashboardState.Success(currentUserEmail = initialEmail)
@@ -450,8 +487,7 @@ class TournamentDashboardViewModel(
         }
 
         viewModelScope.launch(Dispatchers.IO) {
-            val targetEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
-            repository.ensureAuthenticatedSession(targetEmail)
+            repository.ensureAuthenticatedSession(initialEmail)
         }
 
         // 1. Stream users (CPU heavy reconciliation on Dispatchers.Default with debouncing & distinct check)
@@ -866,13 +902,86 @@ class TournamentDashboardViewModel(
             }
         }
 
-        // 21. Stream Unified 12-Channel Request Hub (/admin_requests/all, /support_tickets, /reports)
+        // 21. Stream Unified 12-Channel Request Hub (/admin_requests/all, /ban_appeals, /appeals, /support_tickets, /reports)
         val unifiedRequestsJob = viewModelScope.launch(Dispatchers.Default) {
             try {
                 integrationSyncManager.getUnifiedAdminRequestsStream()
                     .distinctUntilChanged()
                     .flowOn(Dispatchers.Default)
-                    .collect { list -> _unifiedRequests.value = list }
+                    .collect { list ->
+                        _unifiedRequests.value = list
+                        // Automatically enrich or synthesize banned accounts from incoming Ban Appeals into Players repository
+                        val appeals = list.filter { it.isBanAppeal }
+                        if (appeals.isNotEmpty()) {
+                            _uiState.update { curr ->
+                                val s = curr as? DashboardState.Success ?: return@update curr
+                                val mutableUsers = s.users.toMutableList()
+                                var changed = false
+                                appeals.forEach { req ->
+                                    val reqUid = req.userId.trim()
+                                    val reqEmail = req.userEmail.trim().lowercase()
+                                    val reqIgn = req.inGameName.trim().lowercase()
+                                    val reqName = req.username.trim().lowercase()
+                                    val reqCase = req.relatedId.trim().uppercase()
+                                    val isStillOpen = !req.status.equals("RESOLVED", true) && !req.status.equals("APPROVED", true)
+                                    val idx = mutableUsers.indexOfFirst { u ->
+                                        (reqUid.isNotBlank() && u.id.equals(reqUid, ignoreCase = true)) ||
+                                            (reqEmail.contains("@") && u.email.trim().lowercase() == reqEmail) ||
+                                            (reqCase.isNotBlank() && u.banCaseId.trim().uppercase() == reqCase) ||
+                                            (reqIgn.isNotBlank() && reqIgn != "player" && (u.ign.trim().lowercase() == reqIgn || u.username.trim().lowercase() == reqIgn)) ||
+                                            (reqName.isNotBlank() && reqName != "player" && (u.username.trim().lowercase() == reqName || u.ign.trim().lowercase() == reqName))
+                                    }
+                                    if (idx >= 0) {
+                                        val existing = mutableUsers[idx]
+                                        val locked = lockedUserStates[existing.id]?.takeIf { System.currentTimeMillis() - it.second < 25_000L }?.first
+                                        val effectiveBanned = locked?.isBanned ?: (existing.isBanned || isStillOpen)
+                                        val enriched = existing.copy(
+                                            isBanned = effectiveBanned,
+                                            banCaseId = existing.banCaseId.ifBlank { req.relatedId },
+                                            banReason = existing.banReason.ifBlank { req.description.ifBlank { req.subject } },
+                                            activeAppealTicketId = req.id.ifBlank { existing.activeAppealTicketId },
+                                            activeAppealStatus = req.status.ifBlank { existing.activeAppealStatus }
+                                        )
+                                        if (enriched != existing) {
+                                            mutableUsers[idx] = enriched
+                                            changed = true
+                                        }
+                                    } else {
+                                        val synthId = reqUid.ifBlank {
+                                            if (reqCase.isNotBlank()) "appeal_${reqCase.lowercase()}"
+                                            else "appeal_${req.id.lowercase()}"
+                                        }
+                                        val locked = lockedUserStates[synthId]?.takeIf { System.currentTimeMillis() - it.second < 25_000L }?.first
+                                        if (!lockedDeletedUserIds.contains(synthId)) {
+                                            mutableUsers.add(
+                                                0,
+                                                locked ?: UserProfile(
+                                                    id = synthId,
+                                                    username = req.username.ifBlank { req.inGameName.ifBlank { "Banned Player" } },
+                                                    ign = req.inGameName.ifBlank { req.username },
+                                                    email = if (req.userEmail.contains("@")) req.userEmail else "",
+                                                    phone = if (!req.userEmail.contains("@") && req.userEmail.any { it.isDigit() }) req.userEmail else "",
+                                                    gameId = req.freeFireId,
+                                                    isBanned = isStillOpen,
+                                                    status = if (isStillOpen) "BANNED" else "ACTIVE",
+                                                    accountStatus = if (isStillOpen) "BANNED" else "ACTIVE",
+                                                    banReason = req.description.ifBlank { req.subject.ifBlank { "Violation of Fair Play Terms" } },
+                                                    banCaseId = req.relatedId,
+                                                    activeAppealTicketId = req.id,
+                                                    activeAppealStatus = req.status,
+                                                    bannedAt = req.createdAt,
+                                                    createdAt = req.createdAt,
+                                                    lastActive = req.updatedAt
+                                                )
+                                            )
+                                            changed = true
+                                        }
+                                    }
+                                }
+                                if (changed) s.withDerivedMetrics(newUsers = mutableUsers) else s
+                            }
+                        }
+                    }
             } catch (e: Exception) {
                 if (e !is kotlinx.coroutines.CancellationException) e.printStackTrace()
             }
@@ -914,6 +1023,30 @@ class TournamentDashboardViewModel(
             }
         }
 
+        // 25. Stream Manual Notification History (Firestore manual_notifications)
+        val manualNotificationsJob = viewModelScope.launch(Dispatchers.Default) {
+            try {
+                integrationSyncManager.getManualNotificationsStream()
+                    .distinctUntilChanged()
+                    .flowOn(Dispatchers.Default)
+                    .collect { list -> _manualNotifications.value = list }
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) e.printStackTrace()
+            }
+        }
+
+        // 26. Stream Security Audit Logs (Firestore security_audit_logs)
+        val securityAuditLogsJob = viewModelScope.launch(Dispatchers.Default) {
+            try {
+                integrationSyncManager.getSecurityAuditLogsStream()
+                    .distinctUntilChanged()
+                    .flowOn(Dispatchers.Default)
+                    .collect { list -> _securityAuditLogs.value = list }
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) e.printStackTrace()
+            }
+        }
+
         startSelectedChannelStream(_selectedAdminChannel.value)
 
         synchronized(activeStreamJobs) {
@@ -922,7 +1055,8 @@ class TournamentDashboardViewModel(
                     userJob, ticketsJob, payoutsJob, adminsJob, bannedJob, tournamentsJob,
                     tokensJob, bannersJob, annJob, proofsJob, notifsJob, categoriesJob,
                     deletionRequestsJob, dataExportsJob, depositsJob, tokenConvJob, missionsJob, sysConfigJob, auditLogsJob,
-                    redeemCodesJob, redeemClaimsJob, unifiedRequestsJob, chatReportsJob, unifiedWithdrawalsJob, verifiedBankDepositsJob
+                    redeemCodesJob, redeemClaimsJob, unifiedRequestsJob, chatReportsJob, unifiedWithdrawalsJob, verifiedBankDepositsJob,
+                    manualNotificationsJob, securityAuditLogsJob
                 )
             )
         }
@@ -1283,36 +1417,168 @@ class TournamentDashboardViewModel(
     }
 
     fun toggleUserBan(user: UserProfile, explicitBanned: Boolean? = null) {
-        if (user.isGuestSession) {
+        val newBanned = explicitBanned ?: !user.isBanned
+        if (newBanned && user.isGuestSession) {
             GlobalErrorManager.emitError("Guest/anonymous sessions cannot be banned globally.")
             return
         }
-        val newBanned = explicitBanned ?: !user.isBanned
-        val reason = if (newBanned) user.banReason.ifBlank { "Banned by Admin Panel" } else ""
+        val reason = if (newBanned) user.banReason.ifBlank { "Violation of Fair Play Terms / Anti-Cheat & Third-Party Tool Detection" } else ""
         val currAdminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
-        
+        val now = System.currentTimeMillis()
+        val optimisticUpdated = user.copy(
+            isBanned = newBanned,
+            status = if (newBanned) "BANNED" else "ACTIVE",
+            accountStatus = if (newBanned) "BANNED" else "ACTIVE",
+            banReason = reason,
+            banType = if (newBanned) "PERMANENT" else "",
+            banCaseId = if (newBanned) user.banCaseId.ifBlank { "BAN-${user.id.take(6).uppercase()}" } else "",
+            bannedAt = if (newBanned) now else 0L,
+            isSuspended = if (!newBanned) false else user.isSuspended,
+            suspendedUntil = if (!newBanned) 0L else user.suspendedUntil,
+            activeAppealStatus = if (!newBanned) "RESOLVED" else user.activeAppealStatus,
+            version = (user.version + 1).coerceAtLeast(1),
+            updatedAt = now
+        )
+
+        // Apply optimistic lock + immediate UI update so tapping Unban/Ban responds instantly without reverting
+        lockedUserStates[user.id] = optimisticUpdated to now
+        repository.lastExtractedUsers[user.id] = optimisticUpdated
+        _uiState.update { curr ->
+            val s = curr as? DashboardState.Success ?: return@update curr
+            s.withDerivedMetrics(users = s.users.map { if (it.id == user.id) optimisticUpdated else it })
+        }
+        if (!newBanned) {
+            _unifiedRequests.update { list ->
+                list.map { req ->
+                    val matchesUser = req.isBanAppeal && (
+                        req.userId.equals(user.id, true) ||
+                        (user.activeAppealTicketId.isNotBlank() && req.id.equals(user.activeAppealTicketId, true)) ||
+                        (user.banCaseId.isNotBlank() && req.relatedId.equals(user.banCaseId, true)) ||
+                        (user.email.isNotBlank() && req.userEmail.equals(user.email, true)) ||
+                        (user.ign.isNotBlank() && req.inGameName.equals(user.ign, true))
+                    )
+                    if (matchesUser) req.copy(status = "RESOLVED", updatedAt = now) else req
+                }
+            }
+        }
+
         viewModelScope.launch(Dispatchers.IO) {
-            try {
+            val syncOk = try {
                 integrationSyncManager.setUserBanStatus(user, newBanned, reason, currAdminEmail)
+            } catch (_: Exception) { false }
+
+            try {
+                if (newBanned) {
+                    repository.banPlayer(user.id, user.email, reason, currAdminEmail, user.gameId)
+                } else {
+                    repository.unbanPlayer(user.id, user.email, user.gameId)
+                }
             } catch (_: Exception) {}
+
             val result = userRoleManager.toggleUserBan(user, newBanned, reason, currAdminEmail)
-            result.onSuccess { updatedUser ->
-                lockedUserStates[user.id] = updatedUser to System.currentTimeMillis()
-                
-                // Server-side confirmation completed: safely update local UI state
+            val confirmed = result.getOrNull() ?: if (syncOk) optimisticUpdated else null
+            if (confirmed != null) {
+                lockedUserStates[user.id] = confirmed to System.currentTimeMillis()
+                repository.lastExtractedUsers[user.id] = confirmed
                 _uiState.update { curr ->
                     val s = curr as? DashboardState.Success ?: return@update curr
-                    s.withDerivedMetrics(users = s.users.map { if (it.id == user.id) updatedUser else it })
+                    s.withDerivedMetrics(users = s.users.map { if (it.id == user.id) confirmed else it })
                 }
                 if (newBanned) {
-                    GlobalErrorManager.emitSuccess("Player ${user.username} (${user.id}) banned successfully")
+                    GlobalErrorManager.emitSuccess("Player ${user.username} (${user.id}) banned across RTDB & Firestore!")
                 } else {
-                    GlobalErrorManager.emitSuccess("Player ${user.username} (${user.id}) unbanned successfully")
+                    GlobalErrorManager.emitSuccess("Player ${user.username} (${user.id}) unbanned & synced across all databases!")
                 }
-            }.onFailure { e ->
-                e.printStackTrace()
-                GlobalErrorManager.emitError("Failed to toggle ban: ${e.message}")
+            } else {
+                val err = result.exceptionOrNull()
+                err?.printStackTrace()
+                lockedUserStates.remove(user.id)
+                GlobalErrorManager.emitError("Failed to toggle ban: ${err?.message ?: "Unknown error"}")
             }
+        }
+    }
+
+    fun approveBanAppealAndUnban(req: UnifiedAdminRequest, adminNote: String = "") {
+        val currAdminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
+        val now = System.currentTimeMillis()
+        val matchedUser = (_uiState.value as? DashboardState.Success)?.users?.firstOrNull { u ->
+            (req.userId.isNotBlank() && u.id.equals(req.userId, true)) ||
+                (req.relatedId.isNotBlank() && u.banCaseId.equals(req.relatedId, true)) ||
+                (req.userEmail.contains("@") && u.email.equals(req.userEmail, true)) ||
+                (req.inGameName.isNotBlank() && (u.ign.equals(req.inGameName, true) || u.username.equals(req.inGameName, true))) ||
+                (req.username.isNotBlank() && req.username != "Player" && (u.username.equals(req.username, true) || u.ign.equals(req.username, true)))
+        }
+
+        // Optimistic UI update for both Players list and Ban Appeals queue
+        if (matchedUser != null) {
+            val unbanned = matchedUser.copy(
+                isBanned = false,
+                status = "ACTIVE",
+                accountStatus = "ACTIVE",
+                banReason = "",
+                banType = "",
+                banCaseId = "",
+                bannedAt = 0L,
+                isSuspended = false,
+                suspendedUntil = 0L,
+                activeAppealStatus = "RESOLVED",
+                updatedAt = now
+            )
+            lockedUserStates[matchedUser.id] = unbanned to now
+            repository.lastExtractedUsers[matchedUser.id] = unbanned
+            _uiState.update { curr ->
+                val s = curr as? DashboardState.Success ?: return@update curr
+                s.withDerivedMetrics(users = s.users.map { if (it.id == matchedUser.id) unbanned else it })
+            }
+        }
+        _unifiedRequests.update { list ->
+            list.map { item ->
+                if (item.id == req.id) item.copy(
+                    status = "RESOLVED",
+                    adminReply = adminNote.ifBlank { "Ban appeal APPROVED & account UNBANNED by Admin." },
+                    updatedAt = now
+                ) else item
+            }
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            integrationSyncManager.approveBanAppealAndUnban(
+                req = req,
+                matchedUser = matchedUser,
+                adminNote = adminNote,
+                adminEmail = currAdminEmail
+            )
+            val uidToUnban = matchedUser?.id ?: req.userId
+            if (uidToUnban.isNotBlank()) {
+                try {
+                    repository.unbanPlayer(
+                        uid = uidToUnban,
+                        email = matchedUser?.email ?: req.userEmail,
+                        gameId = matchedUser?.gameId ?: req.freeFireId
+                    )
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
+    fun rejectBanAppeal(req: UnifiedAdminRequest, adminNote: String = "") {
+        val currAdminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
+        val now = System.currentTimeMillis()
+        _unifiedRequests.update { list ->
+            list.map { item ->
+                if (item.id == req.id) item.copy(
+                    status = "REJECTED",
+                    adminReply = adminNote.ifBlank { "Ban appeal REJECTED due to confirmed Fair Play violation." },
+                    updatedAt = now
+                ) else item
+            }
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            integrationSyncManager.rejectBanAppeal(
+                req = req,
+                adminNote = adminNote,
+                adminEmail = currAdminEmail
+            )
         }
     }
 
@@ -2092,8 +2358,80 @@ class TournamentDashboardViewModel(
     }
 
     fun sendGlobalBroadcastNotification(title: String, message: String, type: String = "ANNOUNCEMENT") {
+        sendManualNotification(
+            title = title,
+            message = message,
+            type = type,
+            targetType = "ALL"
+        )
+    }
+
+    fun sendManualNotification(
+        title: String,
+        message: String,
+        type: String = "MANUAL",
+        targetType: String = "ALL",
+        targetUserId: String = "",
+        targetEmail: String = "",
+        targetUsername: String = "",
+        targetUserIds: List<String> = emptyList(),
+        tournamentId: String = "",
+        topic: String = "",
+        imageUrl: String = "",
+        roomId: String = "",
+        roomPassword: String = "",
+        onComplete: (ManualNotificationResult) -> Unit = {}
+    ) {
         viewModelScope.launch(Dispatchers.IO) {
-            integrationSyncManager.sendGlobalBroadcastNotification(title, message, type)
+            val adminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
+            val result = integrationSyncManager.sendManualNotification(
+                title = title,
+                message = message,
+                type = type,
+                targetType = targetType,
+                targetUserId = targetUserId,
+                targetEmail = targetEmail,
+                targetUsername = targetUsername,
+                targetUserIds = targetUserIds,
+                tournamentId = tournamentId,
+                topic = topic,
+                imageUrl = imageUrl,
+                roomId = roomId,
+                roomPassword = roomPassword,
+                adminEmail = adminEmail
+            )
+            withContext(Dispatchers.Main) {
+                onComplete(result)
+            }
+        }
+    }
+
+    fun triggerBackendReconciliation() {
+        if (_isReconcilingBackend.value) return
+        viewModelScope.launch(Dispatchers.IO) {
+            _isReconcilingBackend.value = true
+            val adminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
+            val res = integrationSyncManager.triggerBackendReconciliation(adminEmail)
+            res.onSuccess { json ->
+                _reconciliationSummaryJson.value = json
+            }.onFailure { err ->
+                _reconciliationSummaryJson.value = "{\n  \"error\": \"${err.message?.replace("\"", "'") ?: "Unknown error"}\"\n}"
+            }
+            _isReconcilingBackend.value = false
+        }
+    }
+
+    fun approveAccountDeletionFromUnifiedTicket(req: UnifiedAdminRequest, adminNote: String = "") {
+        viewModelScope.launch(Dispatchers.IO) {
+            val adminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
+            val ok = integrationSyncManager.approveAccountDeletionFromUnifiedTicket(req, adminNote, adminEmail)
+            if (ok && req.userId.isNotBlank()) {
+                lockedDeletedUserIds.add(req.userId)
+                _uiState.update { curr ->
+                    val s = curr as? DashboardState.Success ?: return@update curr
+                    s.withDerivedMetrics(newUsers = s.users.filter { it.id != req.userId })
+                }
+            }
         }
     }
 
@@ -2145,6 +2483,7 @@ class TournamentDashboardViewModel(
     fun publishTournamentStandings(
         tournament: Tournament,
         standings: List<TournamentStandingEntry>,
+        tiePrizeMode: String = "SPLIT_TIED_POOL",
         onComplete: (Boolean) -> Unit = {}
     ) {
         viewModelScope.launch(Dispatchers.IO) {
@@ -2152,7 +2491,8 @@ class TournamentDashboardViewModel(
             val ok = integrationSyncManager.publishTournamentStandingsAndPrizes(
                 tournament = tournament,
                 rawStandings = standings,
-                adminEmail = adminEmail
+                adminEmail = adminEmail,
+                tiePrizeMode = tiePrizeMode
             )
             if (ok) {
                 val sorted = standings.sortedBy { it.rank.coerceAtLeast(1) }
@@ -2215,24 +2555,35 @@ class TournamentDashboardViewModel(
     }
 
     fun setUserBanWithReason(user: UserProfile, isBanned: Boolean, reason: String) {
+        val now = System.currentTimeMillis()
+        val updated = user.copy(
+            isBanned = isBanned,
+            status = if (isBanned) "BANNED" else "ACTIVE",
+            accountStatus = if (isBanned) "BANNED" else "ACTIVE",
+            banReason = if (isBanned) reason.ifBlank { "Violation of Fair Play Policy" } else "",
+            banType = if (isBanned) "PERMANENT" else "",
+            banCaseId = if (isBanned) user.banCaseId.ifBlank { "BAN-${user.id.take(6).uppercase()}" } else "",
+            bannedAt = if (isBanned) now else 0L,
+            activeAppealStatus = if (!isBanned) "RESOLVED" else user.activeAppealStatus,
+            version = user.version + 1,
+            updatedAt = now
+        )
+        lockedUserStates[user.id] = Pair(updated, now)
+        repository.lastExtractedUsers[user.id] = updated
+        _uiState.update { curr ->
+            val s = curr as? DashboardState.Success ?: return@update curr
+            s.withDerivedMetrics(newUsers = s.users.map { if (it.id == user.id) updated else it })
+        }
         viewModelScope.launch(Dispatchers.IO) {
             val adminEmail = overrideUserEmail ?: repository.auth.currentUser?.email ?: "anantisback47@gmail.com"
-            val ok = integrationSyncManager.setUserBanStatus(user, isBanned, reason, adminEmail)
-            if (ok) {
-                val updated = user.copy(
-                    isBanned = isBanned,
-                    status = if (isBanned) "banned" else "active",
-                    banReason = if (isBanned) reason.ifBlank { "Violation of Fair Play Policy" } else "",
-                    banType = if (isBanned) "PERMANENT" else "",
-                    version = user.version + 1,
-                    updatedAt = System.currentTimeMillis()
-                )
-                lockedUserStates[user.id] = Pair(updated, System.currentTimeMillis())
-                _uiState.update { curr ->
-                    val s = curr as? DashboardState.Success ?: return@update curr
-                    s.withDerivedMetrics(newUsers = s.users.map { if (it.id == user.id) updated else it })
+            integrationSyncManager.setUserBanStatus(user, isBanned, reason, adminEmail)
+            try {
+                if (isBanned) {
+                    repository.banPlayer(user.id, user.email, reason, adminEmail, user.gameId)
+                } else {
+                    repository.unbanPlayer(user.id, user.email, user.gameId)
                 }
-            }
+            } catch (_: Exception) {}
         }
     }
 

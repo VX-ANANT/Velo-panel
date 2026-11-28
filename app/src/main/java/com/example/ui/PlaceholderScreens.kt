@@ -58,610 +58,58 @@ import java.util.*
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ElaborateScreen(title: String, onNavigateBack: () -> Unit, content: @Composable (PaddingValues) -> Unit) {
-    GlassBackgroundBox {
-        Scaffold(
-            topBar = {
-                Column(modifier = Modifier.fillMaxWidth().background(Color(0xFF0B0F17))) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        IconButton(
-                            onClick = onNavigateBack,
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Back",
-                                tint = VelorixAccentLight,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = title,
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 18.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
-                }
-            },
-            containerColor = Color.Black
-        ) { padding ->
-            content(padding)
-        }
-    }
-}
-
-@Composable
-fun TournamentsListScreenContent(
-    uiState: DashboardState,
-    onTournamentClick: ((String) -> Unit)? = null,
-    onSettingsClick: ((String) -> Unit)? = null,
-    onBracketClick: ((String) -> Unit)? = null,
-    onDuplicateTournament: ((com.example.domain.model.Tournament) -> Unit)? = null,
-    onExportJson: (() -> Unit)? = null,
-    onImportJson: ((String) -> Unit)? = null,
-    onSyncCloud: (() -> Unit)? = null,
-    onCreateTournament: (() -> Unit)? = null,
-    viewModel: com.example.ui.viewmodel.TournamentDashboardViewModel? = null
-) {
-    var selectedTab by remember { mutableStateOf(0) }
-    var selectedCategory by remember { mutableStateOf("ALL") }
-    var searchQuery by remember { mutableStateOf("") }
-    var tournamentForStandingsModal by remember { mutableStateOf<com.example.domain.model.Tournament?>(null) }
-    val tournamentsList = (uiState as? DashboardState.Success)?.tournaments ?: emptyList()
-    val dynamicCategories = (uiState as? DashboardState.Success)?.categories ?: com.example.domain.model.FreeFireCategories.DEFAULT_CATEGORIES
-    val context = androidx.compose.ui.platform.LocalContext.current
-    
-    var showExportDialog by remember { mutableStateOf(false) }
-    var showImportDialog by remember { mutableStateOf(false) }
-    var importJsonText by remember { mutableStateOf("") }
-    var extractedJsonText by remember { mutableStateOf("") }
-    var syncStatusMessage by remember { mutableStateOf<String?>(null) }
-    
-    val filteredList = remember(tournamentsList, selectedTab, selectedCategory, searchQuery) {
-        tournamentsList.filter { t ->
-            val matchesTab = when (selectedTab) {
-                1 -> t.status.equals("upcoming", ignoreCase = true)
-                2 -> t.status.equals("live", ignoreCase = true)
-                3 -> t.status.equals("ended", ignoreCase = true) || t.status.equals("completed", ignoreCase = true)
-                4 -> t.status.equals("cancelled", ignoreCase = true)
-                else -> true
-            }
-            val matchesCategory = selectedCategory == "ALL" || t.canonicalCategory.equals(selectedCategory, ignoreCase = true)
-            val matchesQuery = searchQuery.isBlank() ||
-                    t.title.contains(searchQuery, ignoreCase = true) ||
-                    t.game.contains(searchQuery, ignoreCase = true) ||
-                    t.map.contains(searchQuery, ignoreCase = true) ||
-                    t.canonicalCategory.contains(searchQuery, ignoreCase = true)
-            matchesTab && matchesCategory && matchesQuery
-        }
-    }
-    
-    Column(modifier = Modifier.fillMaxSize().background(Color.Black).padding(horizontal = 12.dp)) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 16.dp, bottom = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column {
-                Text("All Tournaments", color = VelorixTextPrimary, fontWeight = FontWeight.Bold, fontSize = 20.sp)
-                Text("${filteredList.size} Matches listed", color = VelorixTextSecondary, fontSize = 11.sp)
-            }
-            
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
+    Scaffold(
+        topBar = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(V14Bg)
+                    .statusBarsPadding()
             ) {
-                if (onCreateTournament != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Box(
                         modifier = Modifier
-                            .size(36.dp)
+                            .size(40.dp)
                             .clip(CircleShape)
-                            .background(VelorixAccent.copy(alpha = 0.16f))
-                            .border(0.75.dp, VelorixAccent.copy(alpha = 0.4f), CircleShape)
-                            .clickable(onClick = onCreateTournament),
+                            .background(V14CardSurface)
+                            .border(1.dp, V14Border, CircleShape)
+                            .clickable(onClick = onNavigateBack),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Default.Add, contentDescription = "Create Match", tint = VelorixAccent, modifier = Modifier.size(18.dp))
-                    }
-                }
-
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFF14141B))
-                        .border(0.75.dp, Color(0xFF1E1E27), CircleShape)
-                        .clickable {
-                            val json = org.json.JSONArray().apply {
-                                tournamentsList.forEach { t ->
-                                    put(org.json.JSONObject().apply {
-                                        put("id", t.id)
-                                        put("tournamentId", t.id)
-                                        put("title", t.title)
-                                        put("game", t.game)
-                                        put("map", t.map)
-                                        put("format", t.format)
-                                        put("status", t.status)
-                                        put("prizePool", t.prizePool)
-                                        put("entryFee", t.entryFee)
-                                        put("registeredPlayers", t.registeredPlayers)
-                                        put("maxPlayers", t.maxPlayers)
-                                        put("bannerUrl", t.bannerUrl)
-                                    })
-                                }
-                            }.toString(2)
-                            extractedJsonText = json
-                            val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("TournamentsJSON", json))
-                            showExportDialog = true
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.Default.ContentCopy, contentDescription = "Export JSON", tint = Color.White, modifier = Modifier.size(16.dp))
-                }
-
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFF14141B))
-                        .border(0.75.dp, Color(0xFF1E1E27), CircleShape)
-                        .clickable { showImportDialog = true },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.Default.FileUpload, contentDescription = "Import / Push JSON", tint = VelorixAccent, modifier = Modifier.size(16.dp))
-                }
-
-                val isCloudSyncing = (uiState as? DashboardState.Success)?.isSyncing ?: false
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFF4ADE80).copy(alpha = 0.12f))
-                        .border(0.75.dp, Color(0xFF4ADE80).copy(alpha = 0.35f), CircleShape)
-                        .bounceClick(scaleDown = 0.90f)
-                        .clickable {
-                            syncStatusMessage = "Extracting live tournaments directly from Firebase backend..."
-                            onSyncCloud?.invoke()
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (isCloudSyncing) {
-                        CircularProgressIndicator(
-                            color = Color(0xFF4ADE80),
-                            strokeWidth = 2.dp,
-                            modifier = Modifier.size(14.dp)
-                        )
-                    } else {
                         Icon(
-                            Icons.Default.CloudSync,
-                            contentDescription = "Extract & Sync Backend",
-                            tint = Color(0xFF4ADE80),
-                            modifier = Modifier.size(16.dp)
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = Color.White,
+                            modifier = Modifier.size(19.dp)
                         )
                     }
-                }
-            }
-        }
-        
-        if (syncStatusMessage != null) {
-            Text(
-                text = syncStatusMessage ?: "",
-                color = Color(0xFF86EFAC),
-                fontSize = 11.sp,
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
-        }
-        
-        OutlinedTextField(
-            value = searchQuery,
-            onValueChange = { searchQuery = it },
-            placeholder = { Text("Search tournament, map, or game...", color = Color.Gray, fontSize = 13.sp) },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color.White,
-                focusedBorderColor = VelorixAccent,
-                unfocusedBorderColor = CardVerifyBorder
-            )
-        )
-
-        ScrollableTabRow(
-            selectedTabIndex = selectedTab,
-            containerColor = Color.Transparent,
-            contentColor = VelorixAccent,
-            edgePadding = 0.dp,
-            divider = { HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f)) },
-            indicator = { tabPositions ->
-                if (selectedTab < tabPositions.size) {
-                    TabRowDefaults.SecondaryIndicator(
-                        Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
-                        color = VelorixAccent
-                    )
-                }
-            }
-        ) {
-            listOf("All", "Upcoming", "Live", "Completed", "Cancelled").forEachIndexed { index, title ->
-                Tab(
-                    selected = selectedTab == index,
-                    onClick = { selectedTab = index },
-                    text = { Text(title, color = if (selectedTab == index) VelorixAccent else VelorixTextSecondary, fontWeight = FontWeight.Bold) }
-                )
-            }
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        // Category Mode Underline Selector (No Box-in-Box)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            val allChips = listOf("ALL" to "All Categories") + dynamicCategories.map { it.id to (if (it.name.isNotBlank()) it.name else it.label) }
-            allChips.forEach { (catKey, catLabel) ->
-                val isSelected = selectedCategory == catKey
-                Column(
-                    modifier = Modifier
-                        .clickable { selectedCategory = catKey }
-                        .padding(vertical = 6.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
+                    Spacer(modifier = Modifier.width(12.dp))
                     Text(
-                        text = catLabel,
-                        fontSize = 12.sp,
-                        color = if (isSelected) VelorixAccentLight else VelorixTextSecondary,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Box(
-                        modifier = Modifier
-                            .width(24.dp)
-                            .height(1.5.dp)
-                            .background(if (isSelected) VelorixAccent else Color.Transparent)
+                        text = title,
+                        color = V14TextPrimary,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 18.sp,
+                        letterSpacing = (-0.3).sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
+                HorizontalDivider(thickness = 0.5.dp, color = V14Border)
             }
-        }
-        HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
-        Spacer(modifier = Modifier.height(10.dp))
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(bottom = 90.dp)) {
-            if (filteredList.isEmpty()) {
-                item {
-                    Text("No tournaments found matching criteria.", color = VelorixTextSecondary, modifier = Modifier.padding(16.dp))
-                }
-            }
-            items(filteredList.size) { i ->
-                val t = filteredList[i]
-                val statusColor = when (t.status.uppercase()) {
-                    "UPCOMING" -> Color(0xFF64B5F6)
-                    "LIVE" -> Color(0xFFFF5252)
-                    "COMPLETED", "ENDED" -> Color(0xFF81C784)
-                    "CANCELLED" -> Color(0xFFFF8A80)
-                    else -> VelorixAccent
-                }
-                val isMoneyTournament = (t.entryFee > 0f) || (t.prizePool > 0.0)
-
-                GlassCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = {
-                        if (onTournamentClick != null) onTournamentClick(t.id)
-                        else onSettingsClick?.invoke(t.id)
-                    }
-                ) {
-                    if (t.bannerUrl.isNotBlank()) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = 100.dp, max = 140.dp)
-                                .aspectRatio(16f / 9f, matchHeightConstraintsFirst = false)
-                                .clip(RoundedCornerShape(8.dp))
-                        ) {
-                            AsyncImage(
-                                model = TournamentImageUploader.resolveBannerModel(t.bannerUrl),
-                                contentDescription = t.title,
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(
-                                        Brush.verticalGradient(
-                                            listOf(
-                                                Color.Transparent,
-                                                Color(0x66000000),
-                                                Color(0xEE000000)
-                                            )
-                                        )
-                                    )
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(10.dp))
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f, fill = false).padding(end = 8.dp)) {
-                            Text(
-                                text = t.title,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                fontSize = 16.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = "${t.game} • ${t.canonicalCategory} • ${t.format} • Map: ${t.map}",
-                                color = VelorixTextSecondary,
-                                fontSize = 11.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = if (isMoneyTournament) "18+ CASH" else "TRAINING",
-                                color = if (isMoneyTournament) Color(0xFFFBBF24) else Color(0xFF34D399),
-                                fontSize = 9.5.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text("•", color = Color(0xFF52525B), fontSize = 10.sp)
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(modifier = Modifier.size(6.dp).background(statusColor, CircleShape))
-                                Spacer(modifier = Modifier.width(5.dp))
-                                Text(
-                                    text = t.status.uppercase(),
-                                    color = statusColor,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.ExtraBold
-                                )
-                            }
-                        }
-                    }
-
-                    if (t.status.equals("CANCELLED", ignoreCase = true) && t.cancellationReason.isNotBlank()) {
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = "Cancelled: ${t.cancellationReason}",
-                            color = Color(0xFFFF8A80),
-                            fontSize = 11.sp,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    // Clean Hairline Data Strip (No Box-in-Box)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Prize Pool", color = VelorixTextSecondary, fontSize = 10.sp)
-                            Text("₹${t.prizePool.toInt()}", color = VelorixAccentLight, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                        Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("Entry Fee", color = VelorixTextSecondary, fontSize = 10.sp)
-                            Text(if (t.entryFee > 0f) "₹${t.entryFee.toInt()}" else "FREE", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                        Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.End) {
-                            Text("Slots", color = VelorixTextSecondary, fontSize = 10.sp)
-                            Text("${t.registeredPlayers}/${t.maxPlayers}", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(10.dp))
-                                .border(0.75.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(10.dp))
-                                .clickable {
-                                    if (onTournamentClick != null) onTournamentClick(t.id)
-                                    else onSettingsClick?.invoke(t.id)
-                                }
-                                .padding(horizontal = 11.dp, vertical = 7.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.Visibility,
-                                contentDescription = "Match Details",
-                                tint = Color.White,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Text("View", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
-                        }
-                        Row(
-                            modifier = Modifier
-                                .background(Color(0xFFFBBF24).copy(alpha = 0.14f), RoundedCornerShape(10.dp))
-                                .border(0.75.dp, Color(0xFFFBBF24).copy(alpha = 0.48f), RoundedCornerShape(10.dp))
-                                .clickable {
-                                    if (viewModel != null) {
-                                        tournamentForStandingsModal = t
-                                    } else {
-                                        onSettingsClick?.invoke(t.id)
-                                    }
-                                }
-                                .padding(horizontal = 11.dp, vertical = 7.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.EmojiEvents,
-                                contentDescription = "Declare Winners",
-                                tint = Color(0xFFFBBF24),
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Text("Winners", color = Color(0xFFFBBF24), fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
-                        }
-                        Row(
-                            modifier = Modifier
-                                .background(Color(0xFF38BDF8).copy(alpha = 0.14f), RoundedCornerShape(10.dp))
-                                .border(0.75.dp, Color(0xFF38BDF8).copy(alpha = 0.48f), RoundedCornerShape(10.dp))
-                                .clickable { onSettingsClick?.invoke(t.id) }
-                                .padding(horizontal = 11.dp, vertical = 7.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.Edit,
-                                contentDescription = "Edit Match",
-                                tint = Color(0xFF38BDF8),
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Text("Edit", color = Color(0xFF38BDF8), fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
-                        }
-                        Row(
-                            modifier = Modifier
-                                .background(Color(0xFF38BDF8).copy(alpha = 0.12f), RoundedCornerShape(10.dp))
-                                .border(0.75.dp, Color(0xFF38BDF8).copy(alpha = 0.42f), RoundedCornerShape(10.dp))
-                                .clickable {
-                                    onDuplicateTournament?.invoke(t)
-                                    Toast.makeText(context, "Duplicating '${t.title}'...", Toast.LENGTH_SHORT).show()
-                                }
-                                .padding(horizontal = 11.dp, vertical = 7.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.ContentCopy,
-                                contentDescription = "Duplicate / Clone Tournament",
-                                tint = Color(0xFF38BDF8),
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Text("Clone", color = Color(0xFF38BDF8), fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
-                        }
-                    }
-                }
-            }
-
-            item {
-                Spacer(modifier = Modifier.height(115.dp))
-            }
-        }
-    }
-
-    if (tournamentForStandingsModal != null && viewModel != null) {
-        DeclareStandingsAndPrizesDialog(
-            tournament = tournamentForStandingsModal!!,
-            viewModel = viewModel,
-            onDismiss = { tournamentForStandingsModal = null }
-        )
-    }
-
-    // Export JSON Dialog
-    if (showExportDialog) {
-        AlertDialog(
-            onDismissRequest = { showExportDialog = false },
-            title = { Text("Extracted Tournaments JSON", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp) },
-            text = {
-                Column {
-                    Text("All ${tournamentsList.size} tournaments exported and copied to clipboard.", fontSize = 12.sp, color = VelorixTextSecondary)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = extractedJsonText,
-                        onValueChange = {},
-                        readOnly = true,
-                        modifier = Modifier.fillMaxWidth().height(180.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
-                            focusedBorderColor = Color.White.copy(alpha = 0.14f),
-                            unfocusedBorderColor = Color.White.copy(alpha = 0.08f)
-                        )
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = { showExportDialog = false },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Text("Done", fontWeight = FontWeight.Bold)
-                }
-            },
-            containerColor = Color.Black
-        )
-    }
-
-    // Import / Push JSON Dialog
-    if (showImportDialog) {
-        AlertDialog(
-            onDismissRequest = { showImportDialog = false },
-            title = { Text("Push Tournaments JSON", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp) },
-            text = {
-                Column {
-                    Text("Paste a single tournament or array of tournaments JSON to instantly push to Realtime Database & Firestore:", fontSize = 12.sp, color = VelorixTextSecondary)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = importJsonText,
-                        onValueChange = { importJsonText = it },
-                        placeholder = { Text("Paste JSON here...", color = Color.Gray, fontSize = 12.sp) },
-                        modifier = Modifier.fillMaxWidth().height(180.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
-                            focusedBorderColor = VelorixAccent,
-                            unfocusedBorderColor = Color.White.copy(alpha = 0.08f)
-                        )
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        if (importJsonText.isNotBlank()) {
-                            onImportJson?.invoke(importJsonText)
-                            syncStatusMessage = "JSON pushed to Cloud endpoints!"
-                            showImportDialog = false
-                            importJsonText = ""
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Text("Push To Cloud", fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showImportDialog = false }) {
-                    Text("Cancel", color = VelorixTextSecondary)
-                }
-            },
-            containerColor = Color.Black
-        )
+        },
+        containerColor = V14Bg
+    ) { padding ->
+        content(padding)
     }
 }
+
+// TournamentsListScreenContent has been rebuilt in TournamentsListScreen.kt
+
 
 @Composable
 fun AnalyticsScreen(
@@ -681,57 +129,93 @@ fun AnalyticsScreen(
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
+                .background(V14Bg)
                 .padding(padding)
                 .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(top = 14.dp, bottom = 32.dp)
         ) {
             item {
-                Text("REALTIME METRICS SUMMARY", color = VelorixTextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                Text(
+                    "REALTIME METRICS SUMMARY",
+                    color = V14TextMuted,
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.2.sp
+                )
             }
 
             item {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    AnalyticsCard(modifier = Modifier.weight(1f), title = "Total Registered Players", value = "$usersCount")
-                    AnalyticsCard(modifier = Modifier.weight(1f), title = "Active Tournaments", value = "${tourneys.size}")
+                    AnalyticsCard(modifier = Modifier.weight(1f), title = "Registered Players", value = "$usersCount", accent = V14AccentBright)
+                    AnalyticsCard(modifier = Modifier.weight(1f), title = "Active Tournaments", value = "${tourneys.size}", accent = VelorixEmerald)
                 }
             }
 
             item {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    AnalyticsCard(modifier = Modifier.weight(1f), title = "Total Tournament Prize Pools", value = "₹${totalPrizePool.toInt()}")
-                    AnalyticsCard(modifier = Modifier.weight(1f), title = "Total Player Enrollments", value = "$totalRegistrations")
+                    AnalyticsCard(modifier = Modifier.weight(1f), title = "Total Prize Pools", value = "₹${totalPrizePool.toInt()}", accent = VelorixAmber)
+                    AnalyticsCard(modifier = Modifier.weight(1f), title = "Player Enrollments", value = "$totalRegistrations", accent = V14TextPrimary)
                 }
             }
 
             item {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    AnalyticsCard(modifier = Modifier.weight(1f), title = "Pending Cashouts", value = "₹${pendingCashouts.toInt()}")
-                    AnalyticsCard(modifier = Modifier.weight(1f), title = "Open Support Complaints", value = "$openTickets")
+                    AnalyticsCard(modifier = Modifier.weight(1f), title = "Pending Cashouts", value = "₹${pendingCashouts.toInt()}", accent = VelorixAmber)
+                    AnalyticsCard(modifier = Modifier.weight(1f), title = "Open Support Tickets", value = "$openTickets", accent = V14AccentBright)
                 }
             }
 
             item {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    AnalyticsCard(modifier = Modifier.weight(1f), title = "Verified Staff Admins", value = "$activeAdmins")
-                    AnalyticsCard(modifier = Modifier.weight(1f), title = "Pending Verification", value = "${successState?.pendingRegistrationsCount ?: 0}")
+                    AnalyticsCard(modifier = Modifier.weight(1f), title = "Verified Staff Admins", value = "$activeAdmins", accent = VelorixEmerald)
+                    AnalyticsCard(modifier = Modifier.weight(1f), title = "Pending Verification", value = "${successState?.pendingRegistrationsCount ?: 0}", accent = VelorixAmber)
                 }
-            }
-
-            item {
-                Spacer(modifier = Modifier.height(24.dp))
             }
         }
     }
 }
 
 @Composable
-fun AnalyticsCard(modifier: Modifier = Modifier, title: String, value: String) {
-    GlassCard(
-        modifier = modifier
+fun AnalyticsCard(
+    modifier: Modifier = Modifier,
+    title: String,
+    value: String,
+    accent: Color = V14AccentBright
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(16.dp),
+        color = V14CardSurface,
+        border = BorderStroke(1.dp, V14Border)
     ) {
-        Text(title, color = VelorixTextSecondary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(value, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(accent)
+                )
+                Text(
+                    text = title.uppercase(),
+                    color = V14TextMuted,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.6.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                text = value,
+                color = V14TextPrimary,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.ExtraBold,
+                fontFamily = FontFamily.Monospace
+            )
+        }
     }
 }
 
@@ -766,23 +250,24 @@ fun GlobalSettingsScreenContent(
         val rtdbRules = remember { repository.getProductionRtdbRules() }
         AlertDialog(
             onDismissRequest = { showRtdbRulesDialog = false },
-            containerColor = Color.Black,
+            containerColor = V14CardSurface,
+            shape = RoundedCornerShape(18.dp),
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Security, contentDescription = null, tint = VelorixAccent)
+                    Icon(Icons.Default.Security, contentDescription = null, tint = V14AccentBright)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Realtime Database Security Rules", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text("Realtime Database Security Rules", color = V14TextPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 }
             },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
                         "Paste this JSON into Firebase Console -> Realtime Database -> Rules. This protects slot locks and room details while giving admin full authority.",
-                        color = Color(0xFF94A3B8),
+                        color = V14TextSecondary,
                         fontSize = 12.sp,
                         lineHeight = 16.sp
                     )
-                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+                    HorizontalDivider(thickness = 0.5.dp, color = V14Border)
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -792,7 +277,7 @@ fun GlobalSettingsScreenContent(
                     ) {
                         Text(
                             text = rtdbRules,
-                            color = Color(0xFF38BDF8),
+                            color = V14TextPrimary,
                             fontSize = 11.sp,
                             fontFamily = FontFamily.Monospace
                         )
@@ -807,7 +292,8 @@ fun GlobalSettingsScreenContent(
                         Toast.makeText(context, "RTDB Rules copied to clipboard!", Toast.LENGTH_SHORT).show()
                         showRtdbRulesDialog = false
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent)
+                    colors = ButtonDefaults.buttonColors(containerColor = V14AccentPrimary),
+                    shape = RoundedCornerShape(10.dp)
                 ) {
                     Icon(Icons.Default.ContentCopy, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
@@ -816,7 +302,7 @@ fun GlobalSettingsScreenContent(
             },
             dismissButton = {
                 TextButton(onClick = { showRtdbRulesDialog = false }) {
-                    Text("Close", color = Color.White)
+                    Text("Close", color = V14TextSecondary)
                 }
             }
         )
@@ -826,23 +312,24 @@ fun GlobalSettingsScreenContent(
         val firestoreRules = remember { repository.getProductionFirestoreRules() }
         AlertDialog(
             onDismissRequest = { showFirestoreRulesDialog = false },
-            containerColor = Color.Black,
+            containerColor = V14CardSurface,
+            shape = RoundedCornerShape(18.dp),
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.LocalPolice, contentDescription = null, tint = Color(0xFF38BDF8))
+                    Icon(Icons.Default.LocalPolice, contentDescription = null, tint = VelorixEmerald)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Firestore Security Rules", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text("Firestore Security Rules", color = V14TextPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 }
             },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
                         "Paste this into Firebase Console -> Firestore Database -> Rules. Enforces Row-Level Security for wallets and user data.",
-                        color = Color(0xFF94A3B8),
+                        color = V14TextSecondary,
                         fontSize = 12.sp,
                         lineHeight = 16.sp
                     )
-                    HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+                    HorizontalDivider(thickness = 0.5.dp, color = V14Border)
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -852,7 +339,7 @@ fun GlobalSettingsScreenContent(
                     ) {
                         Text(
                             text = firestoreRules,
-                            color = Color(0xFF34D399),
+                            color = VelorixEmerald,
                             fontSize = 11.sp,
                             fontFamily = FontFamily.Monospace
                         )
@@ -867,16 +354,17 @@ fun GlobalSettingsScreenContent(
                         Toast.makeText(context, "Firestore Rules copied to clipboard!", Toast.LENGTH_SHORT).show()
                         showFirestoreRulesDialog = false
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF38BDF8))
+                    colors = ButtonDefaults.buttonColors(containerColor = V14AccentPrimary),
+                    shape = RoundedCornerShape(10.dp)
                 ) {
-                    Icon(Icons.Default.ContentCopy, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Default.ContentCopy, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Copy Rules", color = Color.Black, fontWeight = FontWeight.Bold)
+                    Text("Copy Rules", color = Color.White, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showFirestoreRulesDialog = false }) {
-                    Text("Close", color = Color.White)
+                    Text("Close", color = V14TextSecondary)
                 }
             }
         )
@@ -959,17 +447,20 @@ fun GlobalSettingsScreenContent(
         )
     }
 
+    val v14Crimson = Color(0xFFFF2E5B)
+    val resolvedAdminEmail = currentUserEmail?.takeIf { it.isNotBlank() } ?: "Authorized Administrator"
+
     LazyColumn(
         verticalArrangement = Arrangement.spacedBy(16.dp),
+        contentPadding = PaddingValues(top = 12.dp, bottom = 144.dp),
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF0B0F17))
+            .background(Color.Black)
             .padding(horizontal = 16.dp)
-            .padding(bottom = 120.dp)
     ) {
         // Page Header
         item {
-            Column(modifier = Modifier.padding(top = 16.dp, bottom = 4.dp)) {
+            Column(modifier = Modifier.padding(top = 4.dp, bottom = 4.dp)) {
                 Text(
                     text = "Settings",
                     color = Color.White,
@@ -978,8 +469,8 @@ fun GlobalSettingsScreenContent(
                 )
                 Spacer(modifier = Modifier.height(3.dp))
                 Text(
-                    text = "System preferences, audio feedback & admin control panel",
-                    color = Color(0xFF94A3B8),
+                    text = "Admin identity, match tools, audio & Firebase session",
+                    color = Color(0xFF9A9AA6),
                     fontSize = 12.5.sp
                 )
                 Spacer(modifier = Modifier.height(10.dp))
@@ -999,12 +490,12 @@ fun GlobalSettingsScreenContent(
                     Box(
                         modifier = Modifier
                             .size(42.dp)
-                            .background(Color(0xFF18181B), RoundedCornerShape(10.dp))
-                            .border(0.5.dp, Color(0xFF27272A), RoundedCornerShape(10.dp)),
+                            .background(v14Crimson.copy(alpha = 0.14f), RoundedCornerShape(10.dp))
+                            .border(0.75.dp, v14Crimson.copy(alpha = 0.45f), RoundedCornerShape(10.dp)),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = (currentUserEmail?.firstOrNull() ?: 'A').uppercase(),
+                            text = (resolvedAdminEmail.firstOrNull() ?: 'A').uppercase(),
                             color = Color.White,
                             fontSize = 17.sp,
                             fontWeight = FontWeight.Bold
@@ -1013,34 +504,34 @@ fun GlobalSettingsScreenContent(
                     Spacer(modifier = Modifier.width(14.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Super Administrator", color = Color(0xFFF4F4F5), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Super Administrator", color = Color(0xFFF5F5F7), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                             Spacer(modifier = Modifier.width(8.dp))
                             Box(modifier = Modifier.size(6.dp).background(Color(0xFF34D399), CircleShape))
                             Spacer(modifier = Modifier.width(5.dp))
                             Text(
                                 "VERIFIED",
-                                color = Color(0xFFA1A1AA),
+                                color = Color(0xFF34D399),
                                 fontSize = 9.5.sp,
                                 fontWeight = FontWeight.Bold,
                                 fontFamily = FontFamily.Monospace
                             )
                         }
                         Spacer(modifier = Modifier.height(2.dp))
-                        Text(currentUserEmail ?: "anantisback47@gmail.com", color = Color(0xFFA1A1AA), fontSize = 12.sp)
+                        Text(resolvedAdminEmail, color = Color(0xFFD4D4DC), fontSize = 12.sp)
                         Spacer(modifier = Modifier.height(2.dp))
-                        Text("Firebase RTDB & Firestore Connected", color = Color(0xFF71717A), fontSize = 10.5.sp)
+                        Text("Firebase RTDB & Cloud Firestore Live", color = Color(0xFF71717A), fontSize = 10.5.sp)
                     }
                 }
             }
         }
 
-        // Section 02: Competition & Content Studio
+        // Section 02: Competition & Content
         item {
-            SystemClassifiedSection(sectionTitle = "02 · Competition & Content Studio") {
+            SystemClassifiedSection(sectionTitle = "02 · Competition & Content") {
                 Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)) {
                     SettingsModuleRow(
                         title = "Rules & Match Specs",
-                        subtitle = "Gun bans, custom character & device limits",
+                        subtitle = "Free Fire room presets, bans & map rules",
                         icon = Icons.Default.MilitaryTech,
                         onClick = {
                             soundManager.playBeatTap()
@@ -1049,8 +540,8 @@ fun GlobalSettingsScreenContent(
                     )
                     HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
                     SettingsModuleRow(
-                        title = "Check-In PINs & Banners",
-                        subtitle = "Generate match PINs & announcement slides",
+                        title = "Banners & Check-In PINs",
+                        subtitle = "Manage home banners & match check-in PINs",
                         icon = Icons.Default.DashboardCustomize,
                         onClick = {
                             soundManager.playBeatTap()
@@ -1060,23 +551,33 @@ fun GlobalSettingsScreenContent(
                     HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
                     SettingsModuleRow(
                         title = "Player Leaderboards",
-                        subtitle = "Rankings, points tally & Hall of Fame",
+                        subtitle = "Live rankings, kills & Hall of Fame",
                         icon = Icons.Default.EmojiEvents,
                         onClick = {
                             soundManager.playBeatTap()
                             onNavigateTab?.invoke("leaderboard")
                         }
                     )
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
+                    SettingsModuleRow(
+                        title = "Authorized Admins",
+                        subtitle = "Inspect active admin roster & permissions",
+                        icon = Icons.Default.Shield,
+                        onClick = {
+                            soundManager.playBeatTap()
+                            onNavigateTab?.invoke("admins")
+                        }
+                    )
                 }
             }
         }
 
-        // Section 03: Interface & Acoustics
+        // Section 03: Interface Audio
         item {
             var sfxMuted by remember { mutableStateOf(soundManager.isMuted) }
             var sfxVol by remember { mutableFloatStateOf(soundManager.masterVolume) }
 
-            SystemClassifiedSection(sectionTitle = "03 · Interface & Acoustics") {
+            SystemClassifiedSection(sectionTitle = "03 · Interface Audio") {
                 Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)) {
                     Row(
                         modifier = Modifier
@@ -1086,11 +587,11 @@ fun GlobalSettingsScreenContent(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                            Icon(Icons.Default.VolumeUp, contentDescription = null, tint = Color(0xFFA1A1AA), modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.VolumeUp, contentDescription = null, tint = v14Crimson, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
-                                Text("System Acoustic Feedback", color = Color(0xFFF4F4F5), fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
-                                Text("Tactile button taps, snaps & alerts", color = Color(0xFF71717A), fontSize = 11.5.sp)
+                                Text("UI Sound Effects", color = Color(0xFFF5F5F7), fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+                                Text("Tactile taps & confirmation chimes", color = Color(0xFF71717A), fontSize = 11.5.sp)
                             }
                         }
                         Switch(
@@ -1102,7 +603,7 @@ fun GlobalSettingsScreenContent(
                             },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = Color.White,
-                                checkedTrackColor = Color(0xFF38BDF8),
+                                checkedTrackColor = v14Crimson,
                                 uncheckedTrackColor = Color(0xFF27272A)
                             )
                         )
@@ -1116,7 +617,7 @@ fun GlobalSettingsScreenContent(
                                 .fillMaxWidth()
                                 .padding(vertical = 6.dp)
                         ) {
-                            Text("Master Gain", color = Color(0xFFA1A1AA), fontSize = 12.sp)
+                            Text("Volume", color = Color(0xFFA1A1AA), fontSize = 12.sp)
                             Spacer(modifier = Modifier.width(12.dp))
                             Slider(
                                 value = sfxVol,
@@ -1128,7 +629,7 @@ fun GlobalSettingsScreenContent(
                                 modifier = Modifier.weight(1f),
                                 colors = SliderDefaults.colors(
                                     thumbColor = Color.White,
-                                    activeTrackColor = Color(0xFF38BDF8),
+                                    activeTrackColor = v14Crimson,
                                     inactiveTrackColor = Color(0xFF27272A)
                                 )
                             )
@@ -1136,175 +637,14 @@ fun GlobalSettingsScreenContent(
                             Text("${(sfxVol * 100).toInt()}%", color = Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
                         }
                     }
-
-                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                soundManager.playBeatTap()
-                                onOpenAudioLab?.invoke()
-                            }
-                            .padding(vertical = 12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Headphones, contentDescription = null, tint = Color(0xFFA1A1AA), modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Text("Acoustic Diagnostic Lab", color = Color(0xFFF4F4F5), fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                        }
-                        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = Color(0xFF71717A), modifier = Modifier.size(15.dp))
-                    }
-
-                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
-
-                    SettingsModuleRow(
-                        title = "Surface & Dock Optics",
-                        subtitle = "Configure dock blur, refraction & contrast parameters",
-                        icon = Icons.Default.Tune,
-                        onClick = {
-                            soundManager.playBeatTap()
-                            onNavigateTab?.invoke("glass_optics")
-                        }
-                    )
-
-                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
-
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 10.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text("System Accent Token", color = Color(0xFFF4F4F5), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                        Text("Restrained system accent for active indicators", color = Color(0xFF71717A), fontSize = 11.5.sp)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            com.example.ui.common.HyperOSTheme.values().forEach { theme ->
-                                val isSelected = currentTheme == theme
-                                Column(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clickable {
-                                            soundManager.playSnapPop()
-                                            onThemeSelect(theme)
-                                        }
-                                        .padding(vertical = 8.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(7.dp)
-                                                .clip(CircleShape)
-                                                .background(theme.primaryColor)
-                                        )
-                                        Text(
-                                            text = theme.themeName.substringAfter(" "),
-                                            color = if (isSelected) Color.White else Color(0xFF71717A),
-                                            fontSize = 11.sp,
-                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth(0.7f)
-                                            .height(1.5.dp)
-                                            .background(if (isSelected) theme.primaryColor else Color.Transparent)
-                                    )
-                                }
-                            }
-                        }
-                    }
                 }
             }
         }
 
-        // Section 04: Automation & Compliance Policies
+        // Section 04: Firebase Sync & Session
         item {
-            SystemClassifiedSection(sectionTitle = "04 · Automation & Compliance Policies") {
+            SystemClassifiedSection(sectionTitle = "04 · Firebase Sync & Session") {
                 Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)) {
-                    SettingsGroupedToggle(
-                        label = "Direct Player Registration",
-                        subtitle = "Players can join without prior admin check",
-                        initial = true,
-                        onSound = { soundManager.playSnapPop() }
-                    )
-                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
-                    SettingsGroupedToggle(
-                        label = "Require ID Verification",
-                        subtitle = "Mandatory KYC before cash withdrawals",
-                        initial = false,
-                        onSound = { soundManager.playSnapPop() }
-                    )
-                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
-                    SettingsGroupedToggle(
-                        label = "Auto-Approve Payouts",
-                        subtitle = "Instantly process UPI transfers below ₹1,000",
-                        initial = false,
-                        onSound = { soundManager.playSnapPop() }
-                    )
-                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
-                    SettingsGroupedToggle(
-                        label = "Match Countdown Alerts",
-                        subtitle = "Automated push notification 15m before start",
-                        initial = true,
-                        onSound = { soundManager.playSnapPop() }
-                    )
-                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
-                    SettingsGroupedToggle(
-                        label = "Support Dispute Notifications",
-                        subtitle = "Notify admins on incoming player disputes",
-                        initial = true,
-                        onSound = { soundManager.playSnapPop() }
-                    )
-                }
-            }
-        }
-
-        // Section 05: Security, RLS & Quotas
-        item {
-            SystemClassifiedSection(sectionTitle = "05 · Security, RLS & Quotas") {
-                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)) {
-                    SettingsModuleRow(
-                        title = "Staff & RBAC Permissions",
-                        subtitle = "Manage admin team access and roles",
-                        icon = Icons.Default.Shield,
-                        onClick = {
-                            soundManager.playBeatTap()
-                            onNavigateTab?.invoke("admins")
-                        }
-                    )
-                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
-                    SettingsModuleRow(
-                        title = "Rate Limiter & Quotas",
-                        subtitle = "Inspect flood prevention & token buckets",
-                        icon = Icons.Default.Speed,
-                        onClick = {
-                            soundManager.playBeatTap()
-                            onOpenRateLimiter?.invoke()
-                        }
-                    )
-                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
-                    SettingsModuleRow(
-                        title = "Automated Dispute Mediator Key",
-                        subtitle = "Configure engine key for bracket & rule mediation",
-                        icon = Icons.Default.Key,
-                        onClick = {
-                            soundManager.playBeatTap()
-                            onOpenApiKeyDialog?.invoke()
-                        }
-                    )
-                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
-
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1313,16 +653,16 @@ fun GlobalSettingsScreenContent(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.VpnKey, contentDescription = null, tint = Color(0xFFA1A1AA), modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.VpnKey, contentDescription = null, tint = v14Crimson, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
-                                Text("Database RLS Policies", color = Color(0xFFF4F4F5), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                                Text("Row-Level Security & Super Admin Auth", color = Color(0xFF71717A), fontSize = 11.sp)
+                                Text("Firebase Security Rules", color = Color(0xFFF5F5F7), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                Text("RTDB & Firestore admin access sync", color = Color(0xFF71717A), fontSize = 11.sp)
                             }
                         }
                         Text(
-                            "ACTIVE RLS",
-                            color = Color(0xFF38BDF8),
+                            "ALLOWLISTED",
+                            color = Color(0xFF34D399),
                             fontSize = 9.5.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace
@@ -1333,7 +673,7 @@ fun GlobalSettingsScreenContent(
                     if (feedback != null) {
                         Text(
                             text = feedback,
-                            color = Color(0xFFA1A1AA),
+                            color = Color(0xFF34D399),
                             fontSize = 11.5.sp,
                             fontWeight = FontWeight.Medium,
                             modifier = Modifier.padding(bottom = 8.dp)
@@ -1379,7 +719,7 @@ fun GlobalSettingsScreenContent(
                         ) {
                             Icon(Icons.Default.LocalPolice, contentDescription = null, tint = Color(0xFFE4E4E7), modifier = Modifier.size(14.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Firestore Rules", color = Color(0xFFE4E4E7), fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Firestore", color = Color(0xFFE4E4E7), fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
                         }
 
                         VerticalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
@@ -1391,11 +731,10 @@ fun GlobalSettingsScreenContent(
                                     coroutineScope.launch {
                                         soundManager.playBrassHit()
                                         isSyncingRls = true
-                                        rlsFeedbackMessage = "Syncing Admin RLS claims across Firebase..."
-                                        val target = currentUserEmail ?: "anantisback47@gmail.com"
-                                        val ok = repository.syncAdminPermissionsNow(target)
+                                        rlsFeedbackMessage = "Syncing Admin permissions across Firebase..."
+                                        val ok = repository.syncAdminPermissionsNow(resolvedAdminEmail)
                                         isSyncingRls = false
-                                        rlsFeedbackMessage = if (ok) "Super Admin RLS permissions synced for $target" else "Sync completed."
+                                        rlsFeedbackMessage = if (ok) "Admin permissions synced for $resolvedAdminEmail" else "Sign in with an authorized admin account to sync."
                                     }
                                 }
                                 .padding(vertical = 12.dp),
@@ -1403,41 +742,12 @@ fun GlobalSettingsScreenContent(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             if (isSyncingRls) {
-                                CircularProgressIndicator(color = Color(0xFF38BDF8), modifier = Modifier.size(13.dp), strokeWidth = 2.dp)
+                                CircularProgressIndicator(color = v14Crimson, modifier = Modifier.size(13.dp), strokeWidth = 2.dp)
                             } else {
-                                Icon(Icons.Default.Sync, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(14.dp))
+                                Icon(Icons.Default.Sync, contentDescription = null, tint = v14Crimson, modifier = Modifier.size(14.dp))
                             }
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Sync RLS", color = Color(0xFF38BDF8), fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
-                        }
-                    }
-                }
-            }
-        }
-
-        // Section 06: Session & Maintenance
-        item {
-            SystemClassifiedSection(sectionTitle = "06 · Session & Maintenance") {
-                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                soundManager.playSnapPop()
-                                showPurgeConfirmationDialog = true
-                            }
-                            .padding(vertical = 12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Reset Mock / Demo Data", color = Color(0xFFF4F4F5), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                            Text("Clean dummy test records from Firebase", color = Color(0xFF71717A), fontSize = 11.5.sp)
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.DeleteSweep, contentDescription = null, tint = Color(0xFFFF453A), modifier = Modifier.size(15.dp))
-                            Spacer(modifier = Modifier.width(5.dp))
-                            Text("Clean Data", color = Color(0xFFFF453A), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Sync Admin", color = v14Crimson, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
 
@@ -1450,18 +760,18 @@ fun GlobalSettingsScreenContent(
                                 soundManager.playSnapPop()
                                 showLogoutConfirmationDialog = true
                             }
-                            .padding(vertical = 12.dp),
+                            .padding(vertical = 13.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("Sign Out Session", color = Color(0xFFF4F4F5), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                            Text("Close admin session and return to login", color = Color(0xFF71717A), fontSize = 11.5.sp)
+                            Text("Sign Out Session", color = Color(0xFFF5F5F7), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            Text("End administrator session and return to login", color = Color(0xFF71717A), fontSize = 11.5.sp)
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.ExitToApp, contentDescription = null, tint = Color(0xFFFF453A), modifier = Modifier.size(15.dp))
+                            Icon(Icons.Default.ExitToApp, contentDescription = null, tint = Color(0xFFFF4D6D), modifier = Modifier.size(15.dp))
                             Spacer(modifier = Modifier.width(5.dp))
-                            Text("Sign Out", color = Color(0xFFFF453A), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Sign Out", color = Color(0xFFFF4D6D), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
@@ -1570,7 +880,10 @@ fun UsersManagementScreenContent(
     onDeleteUser: (UserProfile) -> Unit,
     onUpdateUser: (UserProfile) -> Unit = {},
     onRefreshUserData: (() -> Unit)? = null,
-    onUnbanGuestSessions: (() -> Unit)? = null
+    onUnbanGuestSessions: (() -> Unit)? = null,
+    banAppeals: List<com.example.domain.model.UnifiedAdminRequest> = emptyList(),
+    onApproveBanAppeal: ((com.example.domain.model.UnifiedAdminRequest, String) -> Unit)? = null,
+    onRejectBanAppeal: ((com.example.domain.model.UnifiedAdminRequest, String) -> Unit)? = null
 ) {
     val successState = uiState as? DashboardState.Success
     val usersList = successState?.users ?: emptyList()
@@ -1601,17 +914,48 @@ fun UsersManagementScreenContent(
         else usersList.find { it.id == selectedUserForFunds?.id } ?: selectedUserForFunds
     }
 
+    val pendingBanAppeals = remember(banAppeals) {
+        banAppeals.filter {
+            !it.status.equals("RESOLVED", true) && !it.status.equals("APPROVED", true) && !it.status.equals("REJECTED", true)
+        }
+    }
+
+    val filteredBanAppeals = remember(banAppeals, searchQuery) {
+        banAppeals.filter { req ->
+            searchQuery.isBlank() ||
+                req.id.contains(searchQuery, ignoreCase = true) ||
+                req.relatedId.contains(searchQuery, ignoreCase = true) ||
+                req.username.contains(searchQuery, ignoreCase = true) ||
+                req.inGameName.contains(searchQuery, ignoreCase = true) ||
+                req.userEmail.contains(searchQuery, ignoreCase = true) ||
+                req.userId.contains(searchQuery, ignoreCase = true) ||
+                req.description.contains(searchQuery, ignoreCase = true)
+        }.sortedWith(
+            compareBy<com.example.domain.model.UnifiedAdminRequest> {
+                when (it.status.uppercase()) {
+                    "PENDING" -> 0
+                    "IN_REVIEW", "INVESTIGATING" -> 1
+                    "REJECTED" -> 2
+                    else -> 3
+                }
+            }.thenByDescending { it.updatedAt }
+        )
+    }
+
     val filteredUsers = remember(usersList, searchQuery, selectedFilter, selectedTournamentFilterId, tournamentsList) {
         usersList.filter { u ->
             val emailLower = u.email.trim().lowercase()
             val isMock = emailLower.contains("@example.com") || emailLower.contains("mock.dummy")
             if (isMock || u.isGuestSession) return@filter false
 
-            val matchesQuery = searchQuery.isBlank() || 
+            val matchesQuery = searchQuery.isBlank() ||
                 u.username.contains(searchQuery, ignoreCase = true) ||
+                u.ign.contains(searchQuery, ignoreCase = true) ||
                 u.email.contains(searchQuery, ignoreCase = true) ||
                 u.gameId.contains(searchQuery, ignoreCase = true) ||
-                u.id.contains(searchQuery, ignoreCase = true)
+                u.id.contains(searchQuery, ignoreCase = true) ||
+                u.banCaseId.contains(searchQuery, ignoreCase = true) ||
+                u.activeAppealTicketId.contains(searchQuery, ignoreCase = true)
 
             val matchesFilter = when (selectedFilter) {
                 "BANNED" -> u.isBanned
@@ -1619,6 +963,7 @@ fun UsersManagementScreenContent(
                 "ADMIN" -> u.role.contains("admin", ignoreCase = true)
                 "JOINED_MATCH" -> u.totalMatchesJoined > 0 || u.matchHistory.isNotEmpty()
                 "NO_MATCH" -> u.totalMatchesJoined == 0 && u.matchHistory.isEmpty()
+                "BAN_APPEALS" -> u.isBanned || u.activeAppealTicketId.isNotBlank()
                 else -> true
             }
 
@@ -1670,9 +1015,9 @@ fun UsersManagementScreenContent(
                     OutlinedTextField(
                         value = newUserInitialDeposit,
                         onValueChange = { newUserInitialDeposit = it },
-                        label = { Text("1. Deposited Money (₹) [Non-Withdrawable]", color = Color(0xFF38BDF8), fontSize = 11.sp) },
+                        label = { Text("1. Deposited Money (₹) [Non-Withdrawable]", color = V14AccentBright, fontSize = 11.sp) },
                         singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = Color(0xFF38BDF8), unfocusedBorderColor = CardVerifyBorder),
+                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = V14AccentBright, unfocusedBorderColor = V14Border),
                         modifier = Modifier.fillMaxWidth()
                     )
                     OutlinedTextField(
@@ -1680,7 +1025,7 @@ fun UsersManagementScreenContent(
                         onValueChange = { newUserInitialWinning = it },
                         label = { Text("2. Winning Money (₹) [Withdrawable]", color = Color(0xFF34D399), fontSize = 11.sp) },
                         singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = Color(0xFF34D399), unfocusedBorderColor = CardVerifyBorder),
+                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = Color(0xFF34D399), unfocusedBorderColor = V14Border),
                         modifier = Modifier.fillMaxWidth()
                     )
                     OutlinedTextField(
@@ -1688,7 +1033,7 @@ fun UsersManagementScreenContent(
                         onValueChange = { newUserInitialReferralBonus = it },
                         label = { Text("3. Referral Bonus Money (₹) [Non-Withdrawable]", color = Color(0xFFFBBF24), fontSize = 11.sp) },
                         singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = Color(0xFFFBBF24), unfocusedBorderColor = CardVerifyBorder),
+                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = Color(0xFFFBBF24), unfocusedBorderColor = V14Border),
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
@@ -1735,17 +1080,19 @@ fun UsersManagementScreenContent(
                             newUserInitialReferralBonus = "0"
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent)
+                    colors = ButtonDefaults.buttonColors(containerColor = V14AccentPrimary),
+                    shape = RoundedCornerShape(10.dp)
                 ) {
-                    Text("Add Player to DB", color = Color.Black, fontWeight = FontWeight.Bold)
+                    Text("Add Player to DB", color = Color.White, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showAddUserDialog = false }) {
-                    Text("Cancel", color = Color.Gray)
+                    Text("Cancel", color = V14TextSecondary)
                 }
             },
-            containerColor = CardLiveBg
+            containerColor = V14CardSurface,
+            shape = RoundedCornerShape(18.dp)
         )
     }
 
@@ -1973,14 +1320,20 @@ fun UsersManagementScreenContent(
         ) {
             listOf(
                 Triple("ALL", "All Players", usersList.count { !it.isGuestSession }),
+                Triple("BANNED", "Banned", usersList.count { !it.isGuestSession && it.isBanned }),
+                Triple("BAN_APPEALS", "Ban Appeals", pendingBanAppeals.size.takeIf { it > 0 } ?: banAppeals.size),
+                Triple("ACTIVE", "Active", usersList.count { !it.isGuestSession && !it.isBanned }),
                 Triple("JOINED_MATCH", "Joined Match", usersList.count { !it.isGuestSession && (it.totalMatchesJoined > 0 || it.matchHistory.isNotEmpty()) }),
                 Triple("NO_MATCH", "No Match Yet", usersList.count { !it.isGuestSession && it.totalMatchesJoined == 0 && it.matchHistory.isEmpty() }),
-                Triple("ACTIVE", "Active", usersList.count { !it.isGuestSession && !it.isBanned }),
-                Triple("BANNED", "Banned", usersList.count { !it.isGuestSession && it.isBanned }),
                 Triple("ADMIN", "Staff", usersList.count { !it.isGuestSession && it.role.contains("admin", ignoreCase = true) })
             ).forEach { (key, label, count) ->
                 val isSel = selectedFilter == key
-                val textColor = if (isSel) Color.White else Color(0xFF71717A)
+                val isUrgentAppeals = key == "BAN_APPEALS" && pendingBanAppeals.isNotEmpty()
+                val textColor = when {
+                    isSel -> Color.White
+                    isUrgentAppeals -> Color(0xFFFFB300)
+                    else -> Color(0xFF71717A)
+                }
 
                 Column(
                     modifier = Modifier
@@ -1991,7 +1344,7 @@ fun UsersManagementScreenContent(
                     Text(
                         text = "$label ($count)",
                         fontSize = 12.sp,
-                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
+                        fontWeight = if (isSel || isUrgentAppeals) FontWeight.Bold else FontWeight.Medium,
                         color = textColor
                     )
                     Spacer(modifier = Modifier.height(4.dp))
@@ -1999,7 +1352,7 @@ fun UsersManagementScreenContent(
                         modifier = Modifier
                             .width(24.dp)
                             .height(1.5.dp)
-                            .background(if (isSel) VelorixAccent else Color.Transparent)
+                            .background(if (isSel) VelorixAccent else if (isUrgentAppeals) Color(0xFFFFB300).copy(alpha = 0.6f) else Color.Transparent)
                     )
                 }
             }
@@ -2101,7 +1454,202 @@ fun UsersManagementScreenContent(
             verticalArrangement = Arrangement.spacedBy(10.dp),
             contentPadding = PaddingValues(bottom = 100.dp)
         ) {
-            if (distinctUsers.isEmpty()) {
+            // Live Incoming Ban Appeals Banner when on ALL / BANNED tabs
+            if (selectedFilter != "BAN_APPEALS" && pendingBanAppeals.isNotEmpty()) {
+                item(key = "ban_appeals_alert_banner") {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF1A1006), RoundedCornerShape(12.dp))
+                            .border(0.75.dp, Color(0xFFFFB300).copy(alpha = 0.45f), RoundedCornerShape(12.dp))
+                            .clickable { selectedFilter = "BAN_APPEALS" }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.Gavel, contentDescription = "Pending Ban Appeals", tint = Color(0xFFFFB300), modifier = Modifier.size(18.dp))
+                            Column {
+                                Text(
+                                    text = "${pendingBanAppeals.size} Pending Ban Appeal${if (pendingBanAppeals.size > 1) "s" else ""} Caught Live",
+                                    color = Color(0xFFFFB300),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = pendingBanAppeals.take(2).joinToString(" • ") { "${it.username} (${it.id})" },
+                                    color = Color(0xFFA1A1AA),
+                                    fontSize = 10.5.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                        Text(
+                            text = "Review →",
+                            color = Color.White,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+
+            // Dedicated Ban Appeals Catcher Desk inside Players Repository
+            if (selectedFilter == "BAN_APPEALS") {
+                item(key = "ban_appeals_header") {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Text(
+                            text = "Live Ban Appeal Catcher (${filteredBanAppeals.size})",
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Catches appeals from /ban_appeals, /appeals, /admin_requests, /support_tickets, /reports & /banned_users. 1-tap Approve simultaneously unbans the player & resolves their ticket.",
+                            color = Color(0xFF94A3B8),
+                            fontSize = 10.5.sp
+                        )
+                    }
+                }
+                if (filteredBanAppeals.isEmpty()) {
+                    item(key = "no_ban_appeals") {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(28.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Icon(Icons.Default.VerifiedUser, contentDescription = null, tint = Color(0xFF34D399), modifier = Modifier.size(40.dp))
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text("No ban appeal tickets caught yet.", color = VelorixTextSecondary, fontSize = 13.sp)
+                            Text("Any VRX-XXXXXX appeal submitted from Velorix Player app appears here live.", color = Color.Gray, fontSize = 11.sp)
+                        }
+                    }
+                } else {
+                    items(filteredBanAppeals, key = { "appeal_${it.id}_${it.sourceNode}" }) { req ->
+                        val isPendingAppeal = !req.status.equals("RESOLVED", true) && !req.status.equals("APPROVED", true) && !req.status.equals("REJECTED", true)
+                        val stColor = when (req.status.uppercase()) {
+                            "RESOLVED", "APPROVED" -> Color(0xFF34D399)
+                            "REJECTED" -> Color(0xFFF87171)
+                            else -> Color(0xFFFFB300)
+                        }
+                        GlassCard(modifier = Modifier.fillMaxWidth(), onClick = null) {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "${req.username.ifBlank { req.inGameName.ifBlank { "Player" } }}${if (req.inGameName.isNotBlank() && !req.inGameName.equals(req.username, true)) " • IGN: ${req.inGameName}" else ""}",
+                                            color = Color.White,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = "Ticket: ${req.id}${if (req.relatedId.isNotBlank()) " • Sanction: ${req.relatedId}" else ""}",
+                                            color = Color(0xFFFFB300),
+                                            fontSize = 10.5.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                    }
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Box(modifier = Modifier.size(6.dp).background(stColor, CircleShape))
+                                        Spacer(modifier = Modifier.width(5.dp))
+                                        Text(req.status.uppercase(), color = stColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                                if (req.userId.isNotBlank() || req.userEmail.isNotBlank()) {
+                                    Text(
+                                        text = listOfNotNull(
+                                            req.userId.takeIf { it.isNotBlank() }?.let { "UID: $it" },
+                                            req.userEmail.takeIf { it.isNotBlank() }
+                                        ).joinToString(" • "),
+                                        color = Color(0xFFA1A1AA),
+                                        fontSize = 10.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                if (req.description.isNotBlank() || req.subject.isNotBlank()) {
+                                    Text(
+                                        text = req.description.ifBlank { req.subject },
+                                        color = Color.White.copy(alpha = 0.88f),
+                                        fontSize = 11.5.sp
+                                    )
+                                }
+                                Text(
+                                    text = "Source: /${req.sourceNode} • ${shortDateFmt.format(Date(req.createdAt))}",
+                                    color = Color(0xFF71717A),
+                                    fontSize = 9.5.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .background(Color(0xFF34D399).copy(alpha = 0.16f), RoundedCornerShape(10.dp))
+                                            .border(0.75.dp, Color(0xFF34D399).copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+                                            .clickable {
+                                                onApproveBanAppeal?.invoke(req, "Ban appeal approved by Admin. Account unbanned and restored to ACTIVE.")
+                                            }
+                                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                                        horizontalArrangement = Arrangement.Center,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(Icons.Default.CheckCircle, contentDescription = "Approve & Unban", tint = Color(0xFF34D399), modifier = Modifier.size(14.dp))
+                                        Spacer(modifier = Modifier.width(5.dp))
+                                        Text(
+                                            text = if (isPendingAppeal) "Approve & Unban" else "Re-Approve & Unban",
+                                            color = Color(0xFF34D399),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1
+                                        )
+                                    }
+                                    if (isPendingAppeal) {
+                                        Row(
+                                            modifier = Modifier
+                                                .weight(0.85f)
+                                                .background(Color(0xFFF87171).copy(alpha = 0.14f), RoundedCornerShape(10.dp))
+                                                .border(0.75.dp, Color(0xFFF87171).copy(alpha = 0.45f), RoundedCornerShape(10.dp))
+                                                .clickable {
+                                                    onRejectBanAppeal?.invoke(req, "Ban appeal rejected after Fair Play / Anti-Cheat review.")
+                                                }
+                                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                                            horizontalArrangement = Arrangement.Center,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(Icons.Default.Cancel, contentDescription = "Reject Appeal", tint = Color(0xFFF87171), modifier = Modifier.size(14.dp))
+                                            Spacer(modifier = Modifier.width(5.dp))
+                                            Text("Reject", color = Color(0xFFF87171), fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (selectedFilter != "BAN_APPEALS" && distinctUsers.isEmpty()) {
                 item {
                     Column(
                         modifier = Modifier.fillMaxWidth().padding(32.dp),
@@ -2113,7 +1661,17 @@ fun UsersManagementScreenContent(
                     }
                 }
             }
+            if (selectedFilter != "BAN_APPEALS") {
             items(distinctUsers, key = { "${it.id}_${it.email}_${distinctUsers.indexOf(it)}" }) { user ->
+                val matchingAppeal = remember(banAppeals, user) {
+                    banAppeals.firstOrNull { req ->
+                        (req.userId.isNotBlank() && req.userId.equals(user.id, true)) ||
+                            (user.activeAppealTicketId.isNotBlank() && req.id.equals(user.activeAppealTicketId, true)) ||
+                            (user.banCaseId.isNotBlank() && req.relatedId.equals(user.banCaseId, true)) ||
+                            (user.email.contains("@") && req.userEmail.equals(user.email, true)) ||
+                            (user.ign.isNotBlank() && req.inGameName.equals(user.ign, true))
+                    }
+                }
                 GlassCard(
                     modifier = Modifier.fillMaxWidth(),
                     onClick = null
@@ -2151,7 +1709,7 @@ fun UsersManagementScreenContent(
                                     )
                                     if (user.role.contains("admin", ignoreCase = true)) {
                                         Spacer(modifier = Modifier.width(6.dp))
-                                        val roleBadgeColor = if (user.role.contains("super", ignoreCase = true)) Color(0xFFFFB300) else Color(0xFF00E5FF)
+                                        val roleBadgeColor = if (user.role.contains("super", ignoreCase = true)) VelorixAmber else V14AccentBright
                                         Text(
                                             text = "• ${user.role.uppercase()}",
                                             color = roleBadgeColor,
@@ -2169,7 +1727,7 @@ fun UsersManagementScreenContent(
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
-                                    text = "UID: ${user.id}",
+                                    text = "UID: ${user.id}${if (user.ign.isNotBlank()) " • IGN: ${user.ign}" else ""}",
                                     color = Color.Gray,
                                     fontSize = 10.sp,
                                     fontFamily = FontFamily.Monospace,
@@ -2203,6 +1761,55 @@ fun UsersManagementScreenContent(
                         }
                     }
 
+                    // Inline Restriction & Active Ban Appeal Status Box
+                    if (user.isBanned || matchingAppeal != null || user.activeAppealTicketId.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        val ticketIdDisplay = matchingAppeal?.id ?: user.activeAppealTicketId
+                        val ticketStatusDisplay = (matchingAppeal?.status ?: user.activeAppealStatus).ifBlank { if (ticketIdDisplay.isNotBlank()) "PENDING" else "" }
+                        val sanctionIdDisplay = user.banCaseId.ifBlank { matchingAppeal?.relatedId.orEmpty() }
+                        val reasonDisplay = user.banReason.ifBlank { matchingAppeal?.description.orEmpty() }
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color(0xFF1A090C), RoundedCornerShape(8.dp))
+                                .border(0.6.dp, Color(0xFFFF1744).copy(alpha = 0.35f), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 10.dp, vertical = 7.dp),
+                            verticalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = if (sanctionIdDisplay.isNotBlank()) "Sanction: PERMANENT ($sanctionIdDisplay)" else "Sanction: PERMANENT",
+                                    color = Color(0xFFFF6B81),
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                if (ticketIdDisplay.isNotBlank()) {
+                                    Text(
+                                        text = "$ticketIdDisplay ($ticketStatusDisplay)",
+                                        color = if (ticketStatusDisplay.equals("RESOLVED", true)) Color(0xFF34D399) else Color(0xFFFFB300),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                            }
+                            if (reasonDisplay.isNotBlank()) {
+                                Text(
+                                    text = reasonDisplay,
+                                    color = Color(0xFFD4D4D8),
+                                    fontSize = 10.5.sp,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+
                     Spacer(modifier = Modifier.height(10.dp))
                     HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
                     Spacer(modifier = Modifier.height(8.dp))
@@ -2214,7 +1821,7 @@ fun UsersManagementScreenContent(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("Deposited", color = Color(0xFF38BDF8), fontSize = 9.5.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+                            Text("Deposited", color = V14AccentBright, fontSize = 9.5.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                             Text("₹${user.depositFunds.toInt()}", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, maxLines = 1, softWrap = false)
                         }
                         Column(modifier = Modifier.weight(1f)) {
@@ -2287,7 +1894,7 @@ fun UsersManagementScreenContent(
                                 .background(actionColor.copy(alpha = 0.14f), RoundedCornerShape(10.dp))
                                 .border(0.75.dp, actionColor.copy(alpha = 0.48f), RoundedCornerShape(10.dp))
                                 .clickable {
-                                    if (user.isGuestSession) {
+                                    if (!user.isBanned && user.isGuestSession) {
                                         Toast.makeText(ctx, "Guest sessions cannot be banned globally.", Toast.LENGTH_SHORT).show()
                                     } else {
                                         onToggleBan(user)
@@ -2312,8 +1919,26 @@ fun UsersManagementScreenContent(
                                 softWrap = false
                             )
                         }
+
+                        if (matchingAppeal != null && !matchingAppeal.status.equals("RESOLVED", true) && !matchingAppeal.status.equals("APPROVED", true)) {
+                            Row(
+                                modifier = Modifier
+                                    .background(Color(0xFFFFB300).copy(alpha = 0.16f), RoundedCornerShape(10.dp))
+                                    .border(0.75.dp, Color(0xFFFFB300).copy(alpha = 0.55f), RoundedCornerShape(10.dp))
+                                    .clickable {
+                                        onApproveBanAppeal?.invoke(matchingAppeal, "Ban appeal approved by Admin. Account unbanned.")
+                                    }
+                                    .padding(horizontal = 11.dp, vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Icon(Icons.Default.Gavel, contentDescription = "Approve Appeal & Unban", tint = Color(0xFFFFB300), modifier = Modifier.size(14.dp))
+                                Text("Approve Appeal", color = Color(0xFFFFB300), fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+                            }
+                        }
                     }
                 }
+            }
             }
         }
     }
@@ -2835,8 +2460,8 @@ fun UserDetailsInspectorDialog(
                     }
                     Row(
                         modifier = Modifier
-                            .background(Color(0xFF38BDF8).copy(alpha = 0.14f), RoundedCornerShape(10.dp))
-                            .border(0.75.dp, Color(0xFF38BDF8).copy(alpha = 0.48f), RoundedCornerShape(10.dp))
+                            .background(V14CardSurface, RoundedCornerShape(10.dp))
+                            .border(1.dp, V14Border, RoundedCornerShape(10.dp))
                             .clickable {
                                 val dpdpJson = """{"userId":"${user.id}","username":"${user.username}","email":"${user.email}","inGameName":"${user.effectiveIgn}","freeFireId":"${user.gameId}","depositBalance":${user.depositFunds},"winningsBalance":${user.winningFunds},"bonusBalance":${user.bonusFunds},"balance":${user.totalWalletBalance},"tokens":${user.tokens},"joinedMatchesCount":${unifiedMatchRecords.size},"version":${user.version},"exportedAt":${System.currentTimeMillis()}}"""
                                 clipboard.setText(AnnotatedString(dpdpJson))
@@ -2849,12 +2474,12 @@ fun UserDetailsInspectorDialog(
                         Icon(
                             Icons.Default.Code,
                             contentDescription = "Copy DPDP JSON",
-                            tint = Color(0xFF38BDF8),
+                            tint = V14TextPrimary,
                             modifier = Modifier.size(14.dp)
                         )
                         Text(
                             text = "Export JSON",
-                            color = Color(0xFF38BDF8),
+                            color = V14TextPrimary,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
@@ -3252,7 +2877,7 @@ fun UserDetailsInspectorDialog(
                                         Text("FEES PAID", color = Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                                         Text(
                                             text = "₹${"%.0f".format(maxOf(user.totalEntryFeesPaid, unifiedMatchRecords.sumOf { it.entryFeePaid }))}",
-                                            color = Color(0xFF38BDF8),
+                                            color = V14AccentBright,
                                             fontSize = 12.sp,
                                             fontWeight = FontWeight.Bold,
                                             fontFamily = FontFamily.Monospace
@@ -3313,7 +2938,7 @@ fun UserDetailsInspectorDialog(
                                         val joinTimeFormatted = if (record.joinedAt > 0L) dateFormat.format(Date(record.joinedAt)) else "Recorded in DB"
 
                                         Column(
-                                            modifier = Modifier.fillMaxWidth().background(Color(0xFF0B0F17)).padding(vertical = 8.dp),
+                                            modifier = Modifier.fillMaxWidth().background(V14Bg).padding(vertical = 8.dp),
                                             verticalArrangement = Arrangement.spacedBy(5.dp)
                                         ) {
                                             Row(
@@ -3364,7 +2989,7 @@ fun UserDetailsInspectorDialog(
                                                     Text("Entry Fee / Deposit Used:", color = Color.Gray, fontSize = 10.5.sp)
                                                     Text(
                                                         "₹${"%.0f".format(record.entryFeePaid)} (Dep: ₹${"%.0f".format(record.paidFromDeposit)} • Win: ₹${"%.0f".format(record.paidFromWinning)} • Bon: ₹${"%.0f".format(record.paidFromBonus)})",
-                                                        color = Color(0xFF38BDF8),
+                                                        color = V14AccentBright,
                                                         fontSize = 10.5.sp,
                                                         fontWeight = FontWeight.Bold
                                                     )
@@ -3480,14 +3105,14 @@ fun UserDetailsInspectorDialog(
                                         }
                                         Switch(
                                             checked = isBannedState,
-                                            onCheckedChange = { 
-                                                if (user.isGuestSession) {
+                                            onCheckedChange = {
+                                                if (it && user.isGuestSession) {
                                                     Toast.makeText(context, "Guest sessions cannot be banned globally.", Toast.LENGTH_SHORT).show()
                                                 } else {
                                                     isBannedState = it
                                                 }
                                             },
-                                            enabled = !user.isGuestSession,
+                                            enabled = isBannedState || !user.isGuestSession,
                                             colors = SwitchDefaults.colors(checkedThumbColor = Color.Red, checkedTrackColor = Color.Red.copy(alpha = 0.5f))
                                         )
                                     }
@@ -3617,12 +3242,13 @@ fun UserDetailsInspectorDialog(
                                             onUpdateUser(updated)
                                             Toast.makeText(context, "Access toggles successfully applied to Firebase!", Toast.LENGTH_SHORT).show()
                                         },
-                                        colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent),
-                                        modifier = Modifier.fillMaxWidth().height(40.dp)
+                                        colors = ButtonDefaults.buttonColors(containerColor = V14AccentPrimary),
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.fillMaxWidth().height(42.dp)
                                     ) {
-                                        Icon(Icons.Default.Save, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                                        Icon(Icons.Default.Save, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
                                         Spacer(modifier = Modifier.width(6.dp))
-                                        Text("APPLY ALL TOGGLES TO FIREBASE", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                        Text("APPLY ALL TOGGLES TO FIREBASE", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                     }
                                 }
 
@@ -3691,13 +3317,13 @@ fun UserDetailsInspectorDialog(
                                             onUpdateUser(updated)
                                             Toast.makeText(context, "Profile info updated successfully", Toast.LENGTH_SHORT).show()
                                         },
-                                        colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent),
+                                        colors = ButtonDefaults.buttonColors(containerColor = V14AccentPrimary),
                                         modifier = Modifier.fillMaxWidth().height(42.dp),
                                         shape = RoundedCornerShape(10.dp)
                                     ) {
-                                        Icon(Icons.Default.Save, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                                        Icon(Icons.Default.Save, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
                                         Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Save Contact & Profile Info", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                        Text("Save Contact & Profile Info", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                     }
                                 }
 
@@ -3790,10 +3416,12 @@ fun UserDetailsInspectorDialog(
                                             if (user.email.isNotBlank()) totalReset += UserRateLimiter.resetUserLimits(user.email)
                                             Toast.makeText(context, "Rate limits & cooldowns reset for ${user.username} ($totalReset cleared)", Toast.LENGTH_SHORT).show()
                                         },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E88E5)),
-                                        modifier = Modifier.fillMaxWidth().height(36.dp)
+                                        colors = ButtonDefaults.buttonColors(containerColor = V14CardElevated),
+                                        border = BorderStroke(1.dp, V14Border),
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.fillMaxWidth().height(40.dp)
                                     ) {
-                                        Icon(Icons.Default.RestartAlt, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                                        Icon(Icons.Default.RestartAlt, contentDescription = null, tint = V14AccentBright, modifier = Modifier.size(16.dp))
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Text("RESET ALL RATE LIMIT COOLDOWNS", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
                                     }
@@ -3843,10 +3471,11 @@ fun UserDetailsInspectorDialog(
                                             onUpdateUser(updated)
                                             Toast.makeText(context, "Player stats updated", Toast.LENGTH_SHORT).show()
                                         },
-                                        colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent),
-                                        modifier = Modifier.fillMaxWidth().height(38.dp)
+                                        colors = ButtonDefaults.buttonColors(containerColor = V14AccentPrimary),
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.fillMaxWidth().height(40.dp)
                                     ) {
-                                        Text("Save Stats", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                        Text("Save Stats", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                     }
                                 }
 
@@ -3931,7 +3560,7 @@ fun UserDetailsInspectorDialog(
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .background(Color(0xFF0B0F17))
+                                            .background(V14Bg)
                                             .padding(vertical = 8.dp),
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
@@ -3971,19 +3600,19 @@ fun DetailSectionCard(
     content: @Composable ColumnScope.() -> Unit
 ) {
     val sectionAccentColor = when {
-        title.contains("ESPORTS", ignoreCase = true) || title.contains("COMBAT", ignoreCase = true) -> Color(0xFF00E5FF)
-        title.contains("WALLET", ignoreCase = true) || title.contains("FINANCIAL", ignoreCase = true) -> Color(0xFF00E676)
-        title.contains("STREAK", ignoreCase = true) || title.contains("FIRE", ignoreCase = true) -> Color(0xFFFF6D00)
-        title.contains("KYC", ignoreCase = true) || title.contains("ELIGIBILITY", ignoreCase = true) -> Color(0xFFB388FF)
-        title.contains("SECURITY", ignoreCase = true) || title.contains("RESTRICTION", ignoreCase = true) -> Color(0xFFFF1744)
-        title.contains("LIFECYCLE", ignoreCase = true) || title.contains("TIMESTAMPS", ignoreCase = true) -> Color(0xFFFFD54F)
-        else -> VelorixAccent
+        title.contains("ESPORTS", ignoreCase = true) || title.contains("COMBAT", ignoreCase = true) -> V14AccentBright
+        title.contains("WALLET", ignoreCase = true) || title.contains("FINANCIAL", ignoreCase = true) -> VelorixEmerald
+        title.contains("STREAK", ignoreCase = true) || title.contains("FIRE", ignoreCase = true) -> VelorixAmber
+        title.contains("KYC", ignoreCase = true) || title.contains("ELIGIBILITY", ignoreCase = true) -> V14TextPrimary
+        title.contains("SECURITY", ignoreCase = true) || title.contains("RESTRICTION", ignoreCase = true) -> V14AccentBright
+        title.contains("LIFECYCLE", ignoreCase = true) || title.contains("TIMESTAMPS", ignoreCase = true) -> VelorixAmber
+        else -> V14AccentBright
     }
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color(0xFF0B0F17))
+            .background(V14Bg)
             .padding(vertical = 8.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -4093,7 +3722,7 @@ fun PayoutsManagementScreenContent(
         )
     }
 
-    Column(modifier = Modifier.fillMaxSize().background(Color(0xFF0B0F17)).padding(horizontal = 16.dp)) {
+    Column(modifier = Modifier.fillMaxSize().background(V14Bg).padding(horizontal = 16.dp)) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -4230,7 +3859,7 @@ fun PayoutsManagementScreenContent(
                             Text("₹${"%.2f".format(winningBal)}", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
                         }
                         Column(horizontalAlignment = Alignment.End) {
-                            Text("Deposited Money (Non-Withdrawable)", color = Color(0xFF38BDF8), fontSize = 9.5.sp, fontWeight = FontWeight.Bold)
+                            Text("Deposited Money (Non-Withdrawable)", color = V14AccentBright, fontSize = 9.5.sp, fontWeight = FontWeight.Bold)
                             Text("₹${"%.2f".format(depositBal)} (Locked)", color = Color.LightGray, fontSize = 12.sp, fontWeight = FontWeight.Medium, fontFamily = FontFamily.Monospace)
                         }
                     }
@@ -4319,7 +3948,7 @@ fun ThreeSectionWalletControlPanel(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text("1. Deposited", color = Color(0xFF38BDF8), fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+                Text("1. Deposited", color = Color(0xFFFF2E5B), fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                 Text(
                     "₹${"%.0f".format(user.depositFunds)}",
                     color = Color.White,
@@ -4387,7 +4016,7 @@ fun ThreeSectionWalletControlPanel(
             ) {
                 Text(
                     text = "1. Deposited Money",
-                    color = Color(0xFF38BDF8),
+                    color = Color(0xFFFF2E5B),
                     fontSize = 12.5.sp,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
@@ -4412,7 +4041,7 @@ fun ThreeSectionWalletControlPanel(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 listOf(50.0, 100.0, 500.0, -50.0, -100.0).forEach { delta ->
-                    val chipColor = if (delta > 0) Color(0xFF38BDF8) else Color(0xFFEF5350)
+                    val chipColor = if (delta > 0) Color(0xFFFF2E5B) else Color(0xFFFF4D6D)
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
@@ -4455,7 +4084,7 @@ fun ThreeSectionWalletControlPanel(
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = Color.White,
                         unfocusedTextColor = Color.White,
-                        focusedBorderColor = Color(0xFF38BDF8),
+                        focusedBorderColor = Color(0xFFFF2E5B),
                         unfocusedBorderColor = CardVerifyBorder
                     )
                 )
@@ -4474,7 +4103,7 @@ fun ThreeSectionWalletControlPanel(
                             Toast.makeText(context, "Enter an amount for Deposited Money", Toast.LENGTH_SHORT).show()
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF38BDF8)),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF2E5B)),
                     contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
                     modifier = Modifier.height(48.dp)
                 ) {
@@ -4869,10 +4498,10 @@ fun PlayerFundsTransferHubContent(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF0B0F17))
+            .background(Color.Black)
             .padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
-        contentPadding = PaddingValues(top = 12.dp, bottom = 100.dp)
+        contentPadding = PaddingValues(top = 12.dp, bottom = 148.dp)
     ) {
         item {
             Text(
@@ -4898,7 +4527,7 @@ fun PlayerFundsTransferHubContent(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("TOTAL DEPOSITED", color = Color(0xFF38BDF8), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    Text("TOTAL DEPOSITED", color = Color(0xFFFF2E5B), fontSize = 9.sp, fontWeight = FontWeight.Bold)
                     Text("₹${totalDepositedPool.toInt()}", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
                     Text("Locked / Entry Only", color = Color(0xFF71717A), fontSize = 8.5.sp)
                 }

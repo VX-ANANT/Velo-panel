@@ -179,12 +179,13 @@ fun CheckInAndAuthScreen(
                             placeholder = { Text("Enter PIN (e.g. VLX-8821)", color = Color(0xFF64748B), fontSize = 12.sp) },
                             modifier = Modifier.weight(1f),
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedBorderColor = VelorixAccent,
-                                unfocusedBorderColor = Color.White.copy(alpha = 0.14f),
-                                focusedContainerColor = Color.Black,
-                                unfocusedContainerColor = Color.Black
+                                focusedTextColor = V14TextPrimary,
+                                unfocusedTextColor = V14TextPrimary,
+                                focusedBorderColor = V14AccentBright,
+                                unfocusedBorderColor = V14Border,
+                                focusedContainerColor = Color(0xFF08080B),
+                                unfocusedContainerColor = Color(0xFF08080B),
+                                cursorColor = V14AccentBright
                             ),
                             singleLine = true
                         )
@@ -205,11 +206,11 @@ fun CheckInAndAuthScreen(
                                     verificationStatus = "success" to "VERIFIED: Check-in successful for ${match.playerUsername} (${match.gameAccountId})"
                                 }
                             },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF38BDF8)),
+                            colors = ButtonDefaults.buttonColors(containerColor = V14AccentPrimary),
                             shape = RoundedCornerShape(10.dp),
                             modifier = Modifier.height(52.dp)
                         ) {
-                            Text("Validate", color = Color.Black, fontWeight = FontWeight.Bold)
+                            Text("Validate", color = Color.White, fontWeight = FontWeight.Bold)
                         }
                     }
 

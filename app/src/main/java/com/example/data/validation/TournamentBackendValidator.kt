@@ -16,9 +16,23 @@ sealed class ValidationResult {
 object TournamentBackendValidator {
 
     /**
-     * Explicit Backend Permission Validation for Admin Write Operations
-     * Ensures rule modifications, cancellations, room credential updates, and deletions
-     * are strictly restricted to authorized administrative accounts.
+     * Strictly authorized Velorix Administrator emails.
+     * No other account is permitted to authenticate into or operate the Admin Console.
+     */
+    val ALLOWED_ADMIN_EMAILS: Set<String> = setOf(
+        "anantisback47@gmail.com",
+        "service.veloxyra@gmail.com",
+        "verlorix-test@gmail.com"
+    )
+
+    fun isAllowedAdminEmail(email: String?): Boolean {
+        val clean = email?.trim()?.lowercase() ?: return false
+        return clean.isNotBlank() && ALLOWED_ADMIN_EMAILS.contains(clean)
+    }
+
+    /**
+     * Explicit Backend Permission Validation for Admin Write Operations.
+     * Strictly restricted to the 3 authorized administrative accounts.
      */
     fun validateAdminPermission(
         adminEmail: String?,
@@ -29,55 +43,31 @@ object TournamentBackendValidator {
         val email = adminEmail?.trim()?.lowercase() ?: ""
         val uid = adminUid?.trim() ?: ""
 
-        if (email.isBlank() && uid.isBlank()) {
+        if (email.isBlank() || uid.isBlank()) {
             return ValidationResult.Invalid(
-                "Access Denied: Authentication required. You must be signed in with an administrative account to $actionDescription.",
+                "Access Denied: Verified Firebase Administrator session required to $actionDescription.",
                 "permission"
             )
         }
 
-        // Whitelisted root administrators and system emails
-        val authorizedSystemAdmins = setOf(
-            "admin@velorix.com",
-            "superadmin@velorix.com",
-            "anantisback47@gmail.com",
-            "velorixtest@gmail.com",
-            "velorixadmin@gmail.com",
-            "tournament@velorix.com",
-            "owner@velorix.com",
-            "moderator@velorix.com",
-            "staff@velorix.com"
-        )
-
-        if (authorizedSystemAdmins.contains(email) || email.endsWith("@velorix.com") || email.endsWith("@admin.com")) {
-            return ValidationResult.Valid
+        if (!isAllowedAdminEmail(email)) {
+            return ValidationResult.Invalid(
+                "Access Denied: Only authorized Velorix administrators may $actionDescription.",
+                "permission"
+            )
         }
 
-        // Check against dynamic registered staff list
         val foundAdmin = adminsList.firstOrNull {
-            (it.email.isNotBlank() && it.email.trim().equals(email, ignoreCase = true)) ||
-            (it.uid.isNotBlank() && it.uid == uid)
+            it.email.trim().equals(email, ignoreCase = true)
+        }
+        if (foundAdmin != null && !foundAdmin.active) {
+            return ValidationResult.Invalid(
+                "Access Denied: Administrative privileges for $email have been deactivated.",
+                "permission"
+            )
         }
 
-        if (foundAdmin != null) {
-            if (!foundAdmin.active) {
-                return ValidationResult.Invalid(
-                    "Access Denied: Administrative privileges for account $email have been deactivated.",
-                    "permission"
-                )
-            }
-            return ValidationResult.Valid
-        }
-
-        // Default permission pass for authenticated dashboard admins in applet environment
-        if (email.isNotBlank() || uid.isNotBlank()) {
-            return ValidationResult.Valid
-        }
-
-        return ValidationResult.Invalid(
-            "Access Denied: Account does not have administrative permissions to $actionDescription.",
-            "permission"
-        )
+        return ValidationResult.Valid
     }
 
     /**

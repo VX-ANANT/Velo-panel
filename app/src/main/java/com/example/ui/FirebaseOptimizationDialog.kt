@@ -561,7 +561,7 @@ fun FirebaseOptimizationDialog(
                                         )
                                         Text(
                                             remoteConfigState.lastFetchStatus,
-                                            color = Color(0xFF38BDF8),
+                                            color = V14AccentBright,
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.SemiBold
                                         )

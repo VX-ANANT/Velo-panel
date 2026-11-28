@@ -87,7 +87,7 @@ fun GlobalAnnouncementsBanner(
                 "URGENT" -> Color(0xFFEF4444)
                 "MAINTENANCE" -> Color(0xFFF59E0B)
                 "TOURNAMENT" -> VelorixAccent
-                else -> Color(0xFF38BDF8)
+                else -> V14TextPrimary
             }
 
             Row(

@@ -8,7 +8,9 @@ import com.google.firebase.database.*
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.SetOptions
+import com.google.firebase.functions.FirebaseFunctions
 import com.google.firebase.storage.FirebaseStorage
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -17,21 +19,11 @@ import kotlinx.coroutines.tasks.await
 import org.json.JSONArray
 import org.json.JSONObject
 
-/**
- * Authoritative Dual-Database (Firebase RTDB + Cloud Firestore) Integration Manager
- * implementing all 8 sections of the VeloRix Esports Admin Panel Integration Specification:
- * 1. 10 Dedicated Admin Channels & Inbox Routing (`/admin_channels/{type}` & `admin_channels/{type}/items`)
- * 2. DPDP Act 2023 Account Deletion & Data Export Archive (`#account-deletions` & `#data-exports`)
- * 3. User Avatar Reset (`avatar_1`), Versioned Profile Sync (`version + 1`), Tokens & Suspension
- * 4. Live Tournament Lobby Chat & Admin Moderation (`/tournament_chats/{id}` & `/tournaments/{id}/chat`)
- * 5. Manual UPI / SpacePay / Razorpay Deposit Queue, Referral Commission & Token Ledger / Missions
- * 6. Live `/system_config` & `system_config/global` (19 fields) & Promotional `/banners`
- * 7. Support Ticket Replies & Targeted / Global Push Notifications
- */
 class AdminIntegrationSyncManager(
     private val database: DatabaseReference,
     private val firestore: FirebaseFirestore,
-    private val auth: FirebaseAuth = FirebaseAuth.getInstance()
+    private val auth: FirebaseAuth = FirebaseAuth.getInstance(),
+    private val functions: FirebaseFunctions = FirebaseFunctions.getInstance()
 ) {
     private val TAG = "AdminIntegrationSync"
 
@@ -84,7 +76,7 @@ class AdminIntegrationSyncManager(
         }
 
         fun parseSnapToChannelItem(snap: DataSnapshot, chType: String): AdminChannelItem? {
-            if (!snap.exists()) return null
+            if (!snap.exists() || !snap.hasChildren() || snap.value !is Map<*, *>) return null
             val id = snap.child("id").value?.toString()
                 ?: snap.child("requestId").value?.toString()
                 ?: snap.child("exportId").value?.toString()
@@ -1161,19 +1153,28 @@ class AdminIntegrationSyncManager(
     }
 
     fun getMissionsStream(): Flow<List<MissionItem>> = callbackFlow {
-        val missionsMap = mutableMapOf<String, MissionItem>()
+        val rtdbMissions = mutableMapOf<String, MissionItem>()
+        val fsMissions = mutableMapOf<String, MissionItem>()
 
         fun emitMissions() {
-            trySend(missionsMap.values.sortedBy { it.id })
+            val merged = LinkedHashMap<String, MissionItem>()
+            if (fsMissions.isNotEmpty()) {
+                fsMissions.forEach { (k, v) -> merged[k] = v }
+            } else {
+                rtdbMissions.forEach { (k, v) -> merged[k] = v }
+            }
+            trySend(merged.values.sortedBy { it.id })
         }
 
         val ref = database.child("missions")
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                snapshot.children.forEach { c ->
+                rtdbMissions.clear()
+                for (c in snapshot.children) {
+                    if (!c.hasChildren() || c.value !is Map<*, *>) continue
                     val id = c.child("id").value?.toString() ?: c.key ?: ""
                     if (id.isNotBlank()) {
-                        missionsMap[id] = MissionItem(
+                        rtdbMissions[id] = MissionItem(
                             id = id,
                             title = c.child("title").value?.toString() ?: "Mission",
                             description = c.child("description").value?.toString() ?: "",
@@ -1195,8 +1196,9 @@ class AdminIntegrationSyncManager(
         val fsReg = try {
             firestore.collection("missions").addSnapshotListener { snap, err ->
                 if (err == null && snap != null) {
+                    fsMissions.clear()
                     snap.documents.forEach { doc ->
-                        missionsMap[doc.id] = MissionItem(
+                        fsMissions[doc.id] = MissionItem(
                             id = doc.id,
                             title = doc.getString("title") ?: "Mission",
                             description = doc.getString("description") ?: "",
@@ -1220,29 +1222,37 @@ class AdminIntegrationSyncManager(
     }
 
     suspend fun saveMission(mission: MissionItem) {
-        val now = System.currentTimeMillis()
-        val mId = mission.id.ifBlank { "mission_${now}" }
-        val payload = mapOf(
-            "id" to mId,
-            "title" to mission.title,
-            "description" to mission.description,
-            "rewardTokens" to mission.rewardTokens,
-            "rewardVt" to mission.rewardVt,
-            "targetProgress" to mission.targetProgress,
-            "category" to mission.category,
-            "isActive" to mission.isActive,
-            "updatedAt" to now
-        )
-        try { database.child("missions").child(mId).setValue(payload).await() } catch (_: Exception) {}
-        try { firestore.collection("missions").document(mId).set(payload).await() } catch (_: Exception) {}
-        GlobalErrorManager.emitSuccess("Mission '${mission.title}' synced to RTDB & Firestore!")
+        try {
+            val now = System.currentTimeMillis()
+            val mId = mission.id.ifBlank { "mission_${now}" }
+            val payload = mapOf(
+                "id" to mId,
+                "title" to mission.title,
+                "description" to mission.description,
+                "rewardTokens" to mission.rewardTokens,
+                "rewardVt" to mission.rewardVt,
+                "targetProgress" to mission.targetProgress,
+                "category" to mission.category,
+                "isActive" to mission.isActive,
+                "updatedAt" to now
+            )
+            // Primary write target: Firestore missions/{id} (Cloud Functions mirror RTDB & global_app_state)
+            firestore.collection("missions").document(mId).set(payload, SetOptions.merge()).await()
+            GlobalErrorManager.emitSuccess("Mission '${mission.title}' saved to Firestore & syncing live!")
+        } catch (e: Exception) {
+            GlobalErrorManager.emitError("Failed to save mission: ${e.message}")
+        }
     }
 
     suspend fun deleteMission(missionId: String) {
         if (missionId.isBlank()) return
-        try { database.child("missions").child(missionId).removeValue().await() } catch (_: Exception) {}
-        try { firestore.collection("missions").document(missionId).delete().await() } catch (_: Exception) {}
-        GlobalErrorManager.emitSuccess("Mission deleted.")
+        try {
+            // Primary delete target: Firestore missions/{id} (Cloud Functions clean RTDB mirror)
+            firestore.collection("missions").document(missionId).delete().await()
+            GlobalErrorManager.emitSuccess("Mission deleted from Firestore.")
+        } catch (e: Exception) {
+            GlobalErrorManager.emitError("Failed to delete mission: ${e.message}")
+        }
     }
 
     // =========================================================================
@@ -1406,7 +1416,6 @@ class AdminIntegrationSyncManager(
                 "updateChangelog" to config.updateChangelog,
                 "changelog" to config.updateChangelog,
                 "showBanners" to config.showBanners,
-                "showDeveloperModal" to config.showDeveloperModal,
                 "upiId" to config.upiId,
                 "merchantUpiId" to config.upiId,
                 "upiMerchantName" to config.upiMerchantName,
@@ -1420,56 +1429,22 @@ class AdminIntegrationSyncManager(
                 "discordUrl" to config.discordUrl,
                 "vpnBlockEnabled" to config.vpnBlockEnabled,
                 "vpnRestrictionEnabled" to config.vpnBlockEnabled,
-                "otaPatchVersion" to config.otaPatchVersion,
-                "otaReleaseNotes" to config.otaReleaseNotes,
-                "liveLobbyTicker" to config.liveLobbyTicker,
                 "featureFlags" to mergedFlags,
-                "feature_flags" to mergedFlags,
                 "updatedAt" to now,
                 "updatedBy" to adminEmail
             )
-            // 1. Write to RTDB /system_config, /app_config, /ota_live_config, and /maintenance
-            try { database.child("system_config").updateChildren(payload).await() } catch (_: Exception) {}
-            try { database.child("app_config").updateChildren(payload).await() } catch (_: Exception) {}
-            try { database.child("ota_live_config").updateChildren(payload).await() } catch (_: Exception) {}
-            try {
-                database.child("maintenance").updateChildren(
-                    mapOf(
-                        "enabled" to config.maintenanceMode,
-                        "isMaintenance" to config.maintenanceMode,
-                        "title" to config.maintenanceTitle,
-                        "message" to config.maintenanceMessage,
-                        "maintenanceUntil" to config.maintenanceEndTimeMillis,
-                        "updatedAt" to now
-                    )
-                ).await()
-            } catch (_: Exception) {}
-
-            // 2. Write to Firestore system_config/global, system_config/config, system_config/app_settings, app_config/global
-            try { firestore.collection("system_config").document("global").set(payload, SetOptions.merge()).await() } catch (_: Exception) {}
+            // Primary write target: Firestore system_config (Cloud Functions automatically mirror RTDB & global_app_state)
+            firestore.collection("system_config").document("global").set(payload, SetOptions.merge()).await()
             try { firestore.collection("system_config").document("config").set(payload, SetOptions.merge()).await() } catch (_: Exception) {}
-            try { firestore.collection("system_config").document("app_config").set(payload, SetOptions.merge()).await() } catch (_: Exception) {}
             try { firestore.collection("system_config").document("app_settings").set(payload, SetOptions.merge()).await() } catch (_: Exception) {}
-            try { firestore.collection("app_config").document("global").set(payload, SetOptions.merge()).await() } catch (_: Exception) {}
 
-            // 3. Push SYSTEM_CONFIG_UPDATED to /global_app_state
-            publishGlobalAppStateEvent(
-                eventType = "SYSTEM_CONFIG_UPDATED",
-                payload = mapOf(
-                    "isMaintenance" to config.maintenanceMode,
-                    "isForceUpdate" to config.forceUpdateRequired,
-                    "showBanners" to config.showBanners,
-                    "otaPatchVersion" to config.otaPatchVersion,
-                    "upiId" to config.upiId
-                )
-            )
             writeAuditLog(
                 action = "SYSTEM_CONFIG_UPDATED",
-                detail = "Live Config v${config.otaPatchVersion} • Maintenance=${config.maintenanceMode} • 6 Core Flags • UPI=${config.upiId}",
+                detail = "Live Config • Maintenance=${config.maintenanceMode} • 5 Core Flags • UPI=${config.upiId}",
                 adminEmail = adminEmail,
                 targetId = "global"
             )
-            GlobalErrorManager.emitSuccess("System Config v${config.otaPatchVersion}, 6 Core Feature Flags & UPI synced across RTDB & Firestore!")
+            GlobalErrorManager.emitSuccess("System Config, Feature Flags & UPI saved to Firestore & syncing live!")
         } catch (e: Exception) {
             GlobalErrorManager.emitError("Failed to save system config: ${e.message}")
         }
@@ -1501,15 +1476,12 @@ class AdminIntegrationSyncManager(
                 "active" to banner.isActive,
                 "priority" to banner.priority,
                 "order" to banner.priority,
-                "createdAt" to (if (banner.createdAt > 0L) banner.createdAt else now)
+                "createdAt" to (if (banner.createdAt > 0L) banner.createdAt else now),
+                "updatedAt" to now
             )
-            try { database.child("banners").child(bId).setValue(payload).await() } catch (_: Exception) {}
-            try { firestore.collection("banners").document(bId).set(payload).await() } catch (_: Exception) {}
-            publishGlobalAppStateEvent(
-                eventType = "BANNER_UPDATED",
-                payload = mapOf("bannerId" to bId, "title" to banner.title, "active" to banner.isActive)
-            )
-            GlobalErrorManager.emitSuccess("Promotional banner '${banner.title}' saved to /banners (RTDB & Firestore)!")
+            // Primary write target: Firestore banners/{id} (Cloud Functions mirror RTDB & global_app_state)
+            firestore.collection("banners").document(bId).set(payload, SetOptions.merge()).await()
+            GlobalErrorManager.emitSuccess("Promotional banner '${banner.title}' saved to Firestore & syncing live!")
         } catch (e: Exception) {
             GlobalErrorManager.emitError("Failed to save promotional banner: ${e.message}")
         }
@@ -1517,9 +1489,13 @@ class AdminIntegrationSyncManager(
 
     suspend fun deletePromotionalBanner(bannerId: String) {
         if (bannerId.isBlank()) return
-        try { database.child("banners").child(bannerId).removeValue().await() } catch (_: Exception) {}
-        try { firestore.collection("banners").document(bannerId).delete().await() } catch (_: Exception) {}
-        GlobalErrorManager.emitSuccess("Promotional banner deleted from RTDB & Firestore.")
+        try {
+            // Primary delete target: Firestore banners/{id} (Cloud Functions clean RTDB mirror)
+            firestore.collection("banners").document(bannerId).delete().await()
+            GlobalErrorManager.emitSuccess("Promotional banner deleted from Firestore.")
+        } catch (e: Exception) {
+            GlobalErrorManager.emitError("Failed to delete promotional banner: ${e.message}")
+        }
     }
 
     // =========================================================================
@@ -1594,8 +1570,221 @@ class AdminIntegrationSyncManager(
             "version" to now,
             "payload" to payload
         )
-        try { database.child("global_app_state").updateChildren(stateMap).await() } catch (_: Exception) {}
-        try { firestore.collection("global_app_state").document("current").set(stateMap, SetOptions.merge()).await() } catch (_: Exception) {}
+        // Cloud Functions own RTDB /global_app_state domain versions; record event primarily in Firestore
+        try { firestore.collection("global_app_state").document("latest").set(stateMap, SetOptions.merge()).await() } catch (_: Exception) {}
+    }
+
+    // =========================================================================
+    // MODULE 6: MANUAL NOTIFICATION STUDIO (CLOUD FUNCTION + LIVE HISTORY)
+    // =========================================================================
+
+    @Suppress("UNCHECKED_CAST")
+    suspend fun sendManualNotification(
+        title: String,
+        message: String,
+        type: String = "MANUAL",
+        targetType: String = "ALL",
+        targetUserId: String = "",
+        targetEmail: String = "",
+        targetUsername: String = "",
+        targetUserIds: List<String> = emptyList(),
+        tournamentId: String = "",
+        topic: String = "",
+        imageUrl: String = "",
+        roomId: String = "",
+        roomPassword: String = "",
+        adminEmail: String = ""
+    ): ManualNotificationResult {
+        val cleanTitle = title.trim().take(140)
+        val cleanMessage = message.trim().take(1000)
+        if (cleanTitle.isBlank() || cleanMessage.isBlank()) {
+            GlobalErrorManager.emitError("Notification title and message are required.")
+            return ManualNotificationResult(success = false, errorMessage = "Title and message are required.")
+        }
+
+        val cleanTargetType = targetType.trim().uppercase().ifBlank { "ALL" }
+        val cleanType = type.trim().uppercase().ifBlank { "MANUAL" }
+        val payload = hashMapOf<String, Any>(
+            "title" to cleanTitle,
+            "message" to cleanMessage,
+            "type" to cleanType,
+            "targetType" to cleanTargetType
+        )
+        if (targetUserId.isNotBlank()) payload["targetUserId"] = targetUserId.trim()
+        if (targetEmail.isNotBlank()) payload["targetEmail"] = targetEmail.trim()
+        if (targetUsername.isNotBlank()) payload["targetUsername"] = targetUsername.trim()
+        if (targetUserIds.isNotEmpty()) payload["targetUserIds"] = targetUserIds.map { it.trim() }.filter { it.isNotBlank() }
+        if (tournamentId.isNotBlank()) payload["tournamentId"] = tournamentId.trim()
+        if (topic.isNotBlank()) payload["topic"] = topic.trim()
+        if (imageUrl.isNotBlank()) payload["imageUrl"] = imageUrl.trim()
+        if (roomId.isNotBlank()) payload["roomId"] = roomId.trim()
+        if (roomPassword.isNotBlank()) payload["roomPassword"] = roomPassword.trim()
+
+        return try {
+            val callableResult = functions.getHttpsCallable("sendManualNotification").call(payload).await()
+            val dataMap = callableResult.getData() as? Map<String, Any?> ?: emptyMap()
+            val notifId = dataMap["notificationId"]?.toString().orEmpty()
+            val recipients = safeInt(dataMap["recipientCount"], 0)
+            val fcmOk = safeInt(dataMap["fcmSuccessCount"], 0)
+            val fcmFail = safeInt(dataMap["fcmFailureCount"], 0)
+            writeAuditLog(
+                action = "MANUAL_NOTIFICATION_SENT",
+                detail = "[$cleanType -> $cleanTargetType] \"$cleanTitle\" • Recipients=$recipients, FCM=$fcmOk/$fcmFail",
+                adminEmail = adminEmail.ifBlank { auth.currentUser?.email ?: "admin" },
+                targetId = notifId
+            )
+            GlobalErrorManager.emitSuccess("Notification sent ($cleanTargetType)! Recipients: $recipients • FCM Delivered: $fcmOk${if (fcmFail > 0) " ($fcmFail failed)" else ""}")
+            ManualNotificationResult(
+                success = true,
+                notificationId = notifId,
+                targetType = cleanTargetType,
+                recipientCount = recipients,
+                fcmSuccessCount = fcmOk,
+                fcmFailureCount = fcmFail,
+                viaFallback = false
+            )
+        } catch (callableErr: Exception) {
+            Log.w(TAG, "sendManualNotification callable failed, using Firestore trigger fallback: ${callableErr.message}")
+            try {
+                val now = System.currentTimeMillis()
+                val notifId = "manual_${now}_${(100..999).random()}"
+                val docData = payload.toMutableMap().apply {
+                    put("id", notifId)
+                    put("sentBy", adminEmail.ifBlank { auth.currentUser?.email ?: "admin" })
+                    put("timestamp", now)
+                    put("createdAt", now)
+                }
+                firestore.collection("manual_notifications").document(notifId).set(docData).await()
+                writeAuditLog(
+                    action = "MANUAL_NOTIFICATION_QUEUED",
+                    detail = "Queued via Firestore trigger [$cleanType -> $cleanTargetType] \"$cleanTitle\"",
+                    adminEmail = adminEmail.ifBlank { auth.currentUser?.email ?: "admin" },
+                    targetId = notifId
+                )
+                GlobalErrorManager.emitSuccess("Queued in manual_notifications/$notifId (server trigger active)!")
+                ManualNotificationResult(
+                    success = true,
+                    notificationId = notifId,
+                    targetType = cleanTargetType,
+                    viaFallback = true
+                )
+            } catch (fallbackErr: Exception) {
+                GlobalErrorManager.emitError("Notification dispatch failed: ${fallbackErr.message ?: callableErr.message}")
+                ManualNotificationResult(success = false, errorMessage = fallbackErr.message ?: callableErr.message)
+            }
+        }
+    }
+
+    fun getManualNotificationsStream(): Flow<List<ManualNotificationRecord>> = callbackFlow {
+        val reg = try {
+            firestore.collection("manual_notifications")
+                .orderBy("timestamp", Query.Direction.DESCENDING)
+                .limit(50)
+                .addSnapshotListener { snap, err ->
+                    if (err != null) {
+                        Log.w(TAG, "manual_notifications listener error: ${err.message}")
+                        return@addSnapshotListener
+                    }
+                    val list = snap?.documents?.map { d ->
+                        val rawIds = (d.get("targetUserIds") as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
+                        ManualNotificationRecord(
+                            id = d.getString("id") ?: d.id,
+                            title = d.getString("title") ?: "",
+                            message = d.getString("message") ?: "",
+                            type = d.getString("type") ?: "MANUAL",
+                            targetType = d.getString("targetType") ?: "ALL",
+                            targetUserId = d.getString("targetUserId") ?: "",
+                            targetEmail = d.getString("targetEmail") ?: "",
+                            targetUsername = d.getString("targetUsername") ?: "",
+                            targetUserIds = rawIds,
+                            tournamentId = d.getString("tournamentId") ?: "",
+                            topic = d.getString("topic") ?: "",
+                            imageUrl = d.getString("imageUrl") ?: "",
+                            roomId = d.getString("roomId") ?: "",
+                            roomPassword = d.getString("roomPassword") ?: "",
+                            recipientCount = safeInt(d.get("recipientCount"), 0),
+                            fcmSuccessCount = safeInt(d.get("fcmSuccessCount"), 0),
+                            fcmFailureCount = safeInt(d.get("fcmFailureCount"), 0),
+                            sentBy = d.getString("sentBy") ?: d.getString("adminEmail") ?: "Admin",
+                            timestamp = safeLong(d.get("timestamp") ?: d.get("createdAt"), System.currentTimeMillis())
+                        )
+                    } ?: emptyList()
+                    trySend(list)
+                }
+        } catch (e: Exception) {
+            Log.w(TAG, "manual_notifications stream failed: ${e.message}")
+            trySend(emptyList())
+            null
+        }
+        awaitClose { reg?.remove() }
+    }
+
+    // =========================================================================
+    // MODULE 7: 1-CLICK BACKEND RECONCILIATION & SECURITY AUDIT LOGS
+    // =========================================================================
+
+    private fun anyToJsonValue(value: Any?): Any = when (value) {
+        null -> JSONObject.NULL
+        is Map<*, *> -> JSONObject().apply {
+            value.forEach { (k, v) -> put(k?.toString() ?: "key", anyToJsonValue(v)) }
+        }
+        is Iterable<*> -> JSONArray().apply {
+            value.forEach { put(anyToJsonValue(it)) }
+        }
+        is Boolean, is Number, is String -> value
+        else -> value.toString()
+    }
+
+    suspend fun triggerBackendReconciliation(adminEmail: String): Result<String> {
+        return try {
+            val res = functions.getHttpsCallable("triggerBackendReconciliation").call().await()
+            val data = res.getData()
+            val formattedJson = when (val jv = anyToJsonValue(data)) {
+                is JSONObject -> jv.toString(2)
+                is JSONArray -> jv.toString(2)
+                else -> JSONObject().put("result", jv).toString(2)
+            }
+            writeAuditLog(
+                action = "BACKEND_RECONCILIATION_RUN",
+                detail = "Triggered triggerBackendReconciliation() from Admin Panel",
+                adminEmail = adminEmail,
+                targetId = "reconciliation"
+            )
+            GlobalErrorManager.emitSuccess("Backend reconciliation completed successfully!")
+            Result.success(formattedJson)
+        } catch (e: Exception) {
+            GlobalErrorManager.emitError("Backend reconciliation failed: ${e.message}")
+            Result.failure(e)
+        }
+    }
+
+    fun getSecurityAuditLogsStream(): Flow<List<AdminAuditLogItem>> = callbackFlow {
+        val reg = try {
+            firestore.collection("security_audit_logs")
+                .orderBy("timestamp", Query.Direction.DESCENDING)
+                .limit(100)
+                .addSnapshotListener { snap, err ->
+                    if (err != null) {
+                        Log.w(TAG, "security_audit_logs listener error: ${err.message}")
+                        return@addSnapshotListener
+                    }
+                    val list = snap?.documents?.map { d ->
+                        AdminAuditLogItem(
+                            id = d.id,
+                            action = d.getString("action") ?: d.getString("eventType") ?: d.getString("type") ?: "SECURITY_EVENT",
+                            detail = d.getString("detail") ?: d.getString("reason") ?: d.getString("message") ?: "",
+                            adminEmail = d.getString("adminEmail") ?: d.getString("actorEmail") ?: d.getString("userId") ?: "system",
+                            targetId = d.getString("targetId") ?: d.getString("uid") ?: d.getString("userId") ?: "",
+                            timestamp = safeLong(d.get("timestamp") ?: d.get("createdAt"), System.currentTimeMillis())
+                        )
+                    } ?: emptyList()
+                    trySend(list)
+                }
+        } catch (e: Exception) {
+            trySend(emptyList())
+            null
+        }
+        awaitClose { reg?.remove() }
     }
 
     suspend fun writeAuditLog(
@@ -1693,6 +1882,87 @@ class AdminIntegrationSyncManager(
             else -> 0.0
         }
 
+        // 0. PRIMARY AUTHORITATIVE SOURCE: Firestore admin_match_rosters/{tournamentId}/players
+        try {
+            val rosterDocs = firestore.collection("admin_match_rosters")
+                .document(tId)
+                .collection("players")
+                .get()
+                .await()
+            rosterDocs.documents.forEachIndexed { idx, doc ->
+                val uid = (doc.getString("userId") ?: doc.getString("uid") ?: doc.id).trim()
+                if (uid.isNotBlank()) {
+                    val matchedUser = allUsers.find { it.id == uid }
+                    val slot = safeInt(doc.get("slotNumber") ?: doc.get("slot"), idx + 1).coerceAtLeast(1)
+                    val rank = safeInt(doc.get("rank") ?: doc.get("position"), 0)
+                    val kills = safeInt(doc.get("kills"), 0)
+                    val uname = doc.getString("username")
+                        ?: matchedUser?.username
+                        ?: doc.getString("inGameName")
+                        ?: "Player #$slot"
+                    val ign = doc.getString("inGameName")
+                        ?: doc.getString("ign")
+                        ?: matchedUser?.ign?.ifBlank { uname }
+                        ?: uname
+                    val charId = doc.getString("characterId")
+                        ?: doc.getString("gameId")
+                        ?: doc.getString("freeFireId")
+                        ?: matchedUser?.gameId
+                        ?: ""
+                    val ticket = doc.getString("ticketCode") ?: doc.getString("ticketId") ?: ""
+                    val rPrize = safeDouble(doc.get("rankPrize"), if (rank > 0) defaultRankPrizeForRank(rank) else 0.0)
+                    val kPrize = safeDouble(doc.get("killPrize"), kills * perKillBounty)
+                    val pWon = safeDouble(doc.get("prizeWon"), rPrize + kPrize)
+                    entriesByUser[uid] = TournamentStandingEntry(
+                        rank = rank,
+                        userId = uid,
+                        username = uname,
+                        inGameName = ign,
+                        characterId = charId,
+                        teamName = doc.getString("teamName") ?: "",
+                        ticketCode = ticket,
+                        slotNumber = slot,
+                        kills = kills,
+                        rankPrize = rPrize,
+                        killPrize = kPrize,
+                        prizeWon = pWon,
+                        wonAnything = pWon > 0.0,
+                        payoutStatus = doc.getString("payoutStatus") ?: if (pWon > 0.0) "PAID" else "NO_PRIZE"
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "admin_match_rosters read error for $tId: ${e.message}")
+        }
+
+        // 0B. Merge Firestore tournaments/{tournamentId}.joinedPlayersMap if present
+        try {
+            val tourneyFsDoc = firestore.collection("tournaments").document(tId).get().await()
+            val joinedMap = tourneyFsDoc.get("joinedPlayersMap") as? Map<*, *>
+            joinedMap?.forEach { (k, v) ->
+                val uid = k?.toString()?.trim().orEmpty()
+                if (uid.isNotBlank() && !entriesByUser.containsKey(uid)) {
+                    val m = v as? Map<*, *>
+                    val slot = safeInt(m?.get("slotNumber") ?: m?.get("slot"), entriesByUser.size + 1)
+                    val matchedUser = allUsers.find { it.id == uid }
+                    val uname = m?.get("username")?.toString()?.ifBlank { null } ?: matchedUser?.username ?: "Player #$slot"
+                    val ign = m?.get("inGameName")?.toString()?.ifBlank { null } ?: m?.get("ign")?.toString()?.ifBlank { null } ?: matchedUser?.ign?.ifBlank { uname } ?: uname
+                    val charId = m?.get("characterId")?.toString()?.ifBlank { null } ?: m?.get("gameId")?.toString()?.ifBlank { null } ?: matchedUser?.gameId ?: ""
+                    entriesByUser[uid] = TournamentStandingEntry(
+                        rank = 0,
+                        userId = uid,
+                        username = uname,
+                        inGameName = ign,
+                        characterId = charId,
+                        teamName = m?.get("teamName")?.toString() ?: "",
+                        ticketCode = m?.get("ticketCode")?.toString() ?: "",
+                        slotNumber = slot,
+                        kills = 0
+                    )
+                }
+            }
+        } catch (_: Exception) {}
+
         // 1. Check if finalLeaderboard / standings already exist in RTDB
         try {
             val tourneySnap = database.child("tournaments").child(tId).get().await()
@@ -1704,27 +1974,30 @@ class AdminIntegrationSyncManager(
             }
             lbSnap?.children?.forEachIndexed { idx, c ->
                 val uid = c.child("userId").value?.toString() ?: c.child("uid").value?.toString() ?: c.key ?: "slot_${idx + 1}"
-                val rank = safeInt(c.child("rank").value ?: c.child("position").value, idx + 1).coerceAtLeast(1)
-                val kills = safeInt(c.child("kills").value, 0)
-                val rPrize = safeDouble(c.child("rankPrize").value, defaultRankPrizeForRank(rank))
-                val kPrize = safeDouble(c.child("killPrize").value, kills * perKillBounty)
-                val pWon = safeDouble(c.child("prizeWon").value, rPrize + kPrize)
-                entriesByUser[uid] = TournamentStandingEntry(
-                    rank = rank,
-                    userId = uid,
-                    username = c.child("username").value?.toString() ?: c.child("inGameName").value?.toString() ?: "Player",
-                    inGameName = c.child("inGameName").value?.toString() ?: c.child("username").value?.toString() ?: "Player",
-                    characterId = c.child("characterId").value?.toString() ?: c.child("freeFireId").value?.toString() ?: c.child("gameId").value?.toString() ?: "",
-                    teamName = c.child("teamName").value?.toString() ?: "",
-                    slotNumber = safeInt(c.child("slotNumber").value, idx + 1),
-                    kills = kills,
-                    points = kills * 2 + when (rank) { 1 -> 15; 2 -> 12; 3 -> 10; else -> 5 },
-                    rankPrize = rPrize,
-                    killPrize = kPrize,
-                    prizeWon = pWon,
-                    wonAnything = pWon > 0.0,
-                    payoutStatus = if (pWon > 0.0) "PAID" else "NO_PRIZE"
-                )
+                if (!entriesByUser.containsKey(uid)) {
+                    val rank = safeInt(c.child("rank").value ?: c.child("position").value, idx + 1).coerceAtLeast(0)
+                    val kills = safeInt(c.child("kills").value, 0)
+                    val rPrize = safeDouble(c.child("rankPrize").value, if (rank > 0) defaultRankPrizeForRank(rank) else 0.0)
+                    val kPrize = safeDouble(c.child("killPrize").value, kills * perKillBounty)
+                    val pWon = safeDouble(c.child("prizeWon").value, rPrize + kPrize)
+                    entriesByUser[uid] = TournamentStandingEntry(
+                        rank = rank,
+                        userId = uid,
+                        username = c.child("username").value?.toString() ?: c.child("inGameName").value?.toString() ?: "Player",
+                        inGameName = c.child("inGameName").value?.toString() ?: c.child("username").value?.toString() ?: "Player",
+                        characterId = c.child("characterId").value?.toString() ?: c.child("freeFireId").value?.toString() ?: c.child("gameId").value?.toString() ?: "",
+                        teamName = c.child("teamName").value?.toString() ?: "",
+                        ticketCode = c.child("ticketCode").value?.toString() ?: "",
+                        slotNumber = safeInt(c.child("slotNumber").value, idx + 1),
+                        kills = kills,
+                        points = kills * 2 + when (rank) { 1 -> 15; 2 -> 12; 3 -> 10; else -> 5 },
+                        rankPrize = rPrize,
+                        killPrize = kPrize,
+                        prizeWon = pWon,
+                        wonAnything = pWon > 0.0,
+                        payoutStatus = if (pWon > 0.0) "PAID" else "NO_PRIZE"
+                    )
+                }
             }
 
             // 2. Also read RTDB /tournaments/{id}/participants
@@ -1906,13 +2179,15 @@ class AdminIntegrationSyncManager(
             }
         }
 
-        return entriesByUser.values.sortedBy { it.rank }
+        return entriesByUser.values.sortedWith(compareBy<TournamentStandingEntry> { if (it.slotNumber > 0) it.slotNumber else Int.MAX_VALUE }.thenBy { if (it.rank > 0) it.rank else Int.MAX_VALUE })
     }
 
+    @Suppress("UNCHECKED_CAST")
     suspend fun publishTournamentStandingsAndPrizes(
         tournament: Tournament,
         rawStandings: List<TournamentStandingEntry>,
-        adminEmail: String
+        adminEmail: String,
+        tiePrizeMode: String = "SPLIT_TIED_POOL"
     ): Boolean {
         val tournamentId = tournament.id.trim()
         if (tournamentId.isBlank()) {
@@ -1924,6 +2199,67 @@ class AdminIntegrationSyncManager(
             return false
         }
 
+        // PRIMARY SERVER-AUTHORITATIVE EXECUTION: Cloud Function finalizeTournamentPayouts
+        val validAssignments = rawStandings
+            .filter { it.userId.isNotBlank() }
+            .map { p ->
+                hashMapOf<String, Any>(
+                    "userId" to p.userId.trim(),
+                    "rank" to p.rank.coerceAtLeast(0),
+                    "kills" to p.kills.coerceAtLeast(0)
+                )
+            }
+
+        if (validAssignments.isEmpty()) {
+            GlobalErrorManager.emitError("Every player row needs a valid User UID before calling finalizeTournamentPayouts.")
+            return false
+        }
+
+        return try {
+            val payload = hashMapOf<String, Any>(
+                "tournamentId" to tournamentId,
+                "payoutStatus" to "PAID",
+                "tiePrizeMode" to tiePrizeMode.ifBlank { "SPLIT_TIED_POOL" },
+                "positionAssignments" to validAssignments
+            )
+            val result = functions.getHttpsCallable("finalizeTournamentPayouts").call(payload).await()
+            val dataMap = result.getData() as? Map<String, Any?> ?: emptyMap()
+            val paidCount = safeInt(dataMap["winnersPaid"] ?: dataMap["paidCount"], validAssignments.count { safeInt(it["rank"]) > 0 })
+            val totalDisbursed = safeDouble(dataMap["totalDisbursed"] ?: dataMap["totalPrizeDisbursed"], rawStandings.sumOf { it.prizeWon })
+
+            publishGlobalAppStateEvent(
+                eventType = "TOURNAMENT_UPDATED",
+                tournamentId = tournamentId,
+                payload = mapOf(
+                    "status" to "COMPLETED",
+                    "payoutStatus" to "PAID",
+                    "tiePrizeMode" to tiePrizeMode,
+                    "winnersPaid" to paidCount
+                )
+            )
+            writeAuditLog(
+                action = "TOURNAMENT_PAYOUTS_FINALIZED",
+                detail = "Finalized $tournamentId via finalizeTournamentPayouts ($tiePrizeMode) • Paid=$paidCount, Total=₹${totalDisbursed.toInt()}",
+                adminEmail = adminEmail,
+                targetId = tournamentId
+            )
+            GlobalErrorManager.emitSuccess("Tournament payouts settled atomically via server! ($paidCount rewarded • Mode: $tiePrizeMode)")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "finalizeTournamentPayouts Cloud Function error: ${e.message}", e)
+            GlobalErrorManager.emitError("finalizeTournamentPayouts failed: ${e.message}")
+            false
+        }
+    }
+
+    @Suppress("unused")
+    private suspend fun legacyLocalStandingsUnused(
+        tournament: Tournament,
+        rawStandings: List<TournamentStandingEntry>,
+        adminEmail: String
+    ): Boolean {
+        val tournamentId = tournament.id.trim()
+        if (tournamentId.isBlank() || rawStandings.isEmpty()) return false
         try {
             val now = System.currentTimeMillis()
             val sortedEntries = rawStandings.sortedBy { it.rank.coerceAtLeast(1) }
@@ -2338,58 +2674,251 @@ class AdminIntegrationSyncManager(
         try {
             val now = System.currentTimeMillis()
             val nextVer = (user.version + 1).coerceAtLeast(1)
-            val userUpdates = mapOf<String, Any>(
+            val cleanReason = if (isBanned) reason.ifBlank { "Violation of Fair Play Terms / Anti-Cheat & Third-Party Tool Detection" } else ""
+            val resolvedCaseId = if (isBanned) {
+                user.banCaseId.ifBlank { "BAN-${user.id.take(6).uppercase()}" }
+            } else ""
+
+            val userUpdates = mutableMapOf<String, Any>(
                 "isBanned" to isBanned,
-                "banReason" to if (isBanned) reason else "",
+                "banned" to isBanned,
+                "banReason" to cleanReason,
+                "reason" to cleanReason,
                 "banType" to if (isBanned) "PERMANENT" else "",
+                "sanction" to if (isBanned) "PERMANENT" else "",
+                "sanctionType" to if (isBanned) "PERMANENT" else "",
+                "banCaseId" to resolvedCaseId,
+                "sanctionId" to resolvedCaseId,
                 "accountStatus" to if (isBanned) "BANNED" else "ACTIVE",
                 "status" to if (isBanned) "BANNED" else "ACTIVE",
+                "active" to !isBanned,
+                "isAuthorized" to !isBanned,
+                "walletFrozen" to isBanned,
+                "matchmakingLocked" to isBanned,
+                "withdrawalsLocked" to isBanned,
+                "bannedAt" to if (isBanned) now else 0L,
+                "bannedBy" to if (isBanned) adminEmail else "",
                 "version" to nextVer,
                 "updatedAt" to now
             )
-            try { database.child("users").child(user.id).updateChildren(userUpdates).await() } catch (_: Exception) {}
-            try { database.child("userProfiles").child(user.id).updateChildren(userUpdates).await() } catch (_: Exception) {}
-            try { firestore.collection("users").document(user.id).set(userUpdates, SetOptions.merge()).await() } catch (_: Exception) {}
-            try { firestore.collection("userProfiles").document(user.id).set(userUpdates, SetOptions.merge()).await() } catch (_: Exception) {}
-
-            if (isBanned) {
-                val banNode = mapOf<String, Any>(
-                    "uid" to user.id,
-                    "userId" to user.id,
-                    "username" to user.username,
-                    "email" to user.email,
-                    "reason" to reason,
-                    "banType" to "PERMANENT",
-                    "bannedAt" to now,
-                    "bannedBy" to adminEmail
-                )
-                try { database.child("banned_users").child(user.id).setValue(banNode).await() } catch (_: Exception) {}
-                try { firestore.collection("banned_users").document(user.id).set(banNode).await() } catch (_: Exception) {}
-            } else {
-                try { database.child("banned_users").child(user.id).removeValue().await() } catch (_: Exception) {}
-                try { firestore.collection("banned_users").document(user.id).delete().await() } catch (_: Exception) {}
+            if (!isBanned) {
+                userUpdates["isSuspended"] = false
+                userUpdates["suspendedUntil"] = 0L
+                userUpdates["suspensionEndTimeMillis"] = 0L
+                userUpdates["suspendReason"] = ""
+                userUpdates["suspensionReason"] = ""
+                userUpdates["activeAppealStatus"] = "RESOLVED"
+                userUpdates["appealStatus"] = "RESOLVED"
             }
 
-            publishGlobalAppStateEvent(
-                eventType = "USER_STATUS_CHANGED",
-                affectedUserId = user.id,
-                payload = mapOf(
-                    "newStatus" to if (isBanned) "BANNED" else "ACTIVE",
-                    "isBanned" to isBanned,
-                    "banReason" to reason
+            // Collect all matching UIDs for this account across RTDB & Firestore so no duplicate/sibling node stays out of sync
+            val targetUids = mutableSetOf(user.id.trim())
+            val emailLower = user.email.trim().lowercase()
+            val gameIdTrim = user.gameId.trim()
+            val ignLower = user.ign.trim().lowercase()
+            val nameLower = user.username.trim().lowercase()
+            val caseIdUpper = user.banCaseId.trim().uppercase()
+
+            fun matchesIdentity(
+                candId: String,
+                candEmail: String,
+                candGameId: String,
+                candIgn: String,
+                candName: String,
+                candCaseId: String
+            ): Boolean {
+                if (candId.equals(user.id.trim(), ignoreCase = true)) return true
+                if (emailLower.isNotBlank() && !emailLower.startsWith("no-email") && candEmail.equals(emailLower, ignoreCase = true)) return true
+                if (gameIdTrim.isNotBlank() && candGameId.equals(gameIdTrim, ignoreCase = true)) return true
+                if (caseIdUpper.isNotBlank() && candCaseId.equals(caseIdUpper, ignoreCase = true)) return true
+                if (ignLower.isNotBlank() && ignLower != "player" && ignLower != "unknown" &&
+                    (candIgn.equals(ignLower, ignoreCase = true) || candName.equals(ignLower, ignoreCase = true))
+                ) return true
+                if (nameLower.isNotBlank() && nameLower != "player" && nameLower != "unknown" &&
+                    (candName.equals(nameLower, ignoreCase = true) || candIgn.equals(nameLower, ignoreCase = true))
+                ) return true
+                return false
+            }
+
+            listOf("users", "userProfiles", "players").forEach { node ->
+                try {
+                    val snap = database.child(node).get().await()
+                    snap.children.forEach { c ->
+                        val cKey = c.key?.trim().orEmpty()
+                        val cId = c.child("id").value?.toString()?.trim() ?: c.child("uid").value?.toString()?.trim() ?: cKey
+                        val cEmail = (c.child("email").value ?: c.child("userEmail").value ?: c.child("profile").child("email").value)?.toString()?.trim().orEmpty()
+                        val cGameId = (c.child("gameId").value ?: c.child("freeFireId").value ?: c.child("profile").child("gameId").value)?.toString()?.trim().orEmpty()
+                        val cIgn = (c.child("ign").value ?: c.child("inGameName").value ?: c.child("profile").child("ign").value)?.toString()?.trim().orEmpty()
+                        val cName = (c.child("username").value ?: c.child("name").value ?: c.child("displayName").value ?: c.child("userName").value)?.toString()?.trim().orEmpty()
+                        val cCase = (c.child("banCaseId").value ?: c.child("sanctionId").value)?.toString()?.trim().orEmpty()
+                        if (matchesIdentity(cId, cEmail, cGameId, cIgn, cName, cCase)) {
+                            if (cKey.isNotBlank()) targetUids.add(cKey)
+                            if (cId.isNotBlank()) targetUids.add(cId)
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+
+            try {
+                val fsUsers = firestore.collection("users").get().await()
+                fsUsers.documents.forEach { d ->
+                    val dId = d.getString("id") ?: d.getString("uid") ?: d.id
+                    val dEmail = d.getString("email") ?: d.getString("userEmail") ?: ""
+                    val dGameId = d.getString("gameId") ?: d.getString("freeFireId") ?: ""
+                    val dIgn = d.getString("ign") ?: d.getString("inGameName") ?: ""
+                    val dName = d.getString("username") ?: d.getString("name") ?: d.getString("displayName") ?: ""
+                    val dCase = d.getString("banCaseId") ?: d.getString("sanctionId") ?: ""
+                    if (matchesIdentity(dId, dEmail, dGameId, dIgn, dName, dCase)) {
+                        targetUids.add(d.id)
+                        if (dId.isNotBlank()) targetUids.add(dId)
+                    }
+                }
+            } catch (_: Exception) {}
+
+            // Primary write target: Firestore users/{uid} (Cloud Functions mirror RTDB /users, /banned_users & global_app_state)
+            for (uid in targetUids) {
+                if (uid.isBlank()) continue
+                firestore.collection("users").document(uid).set(userUpdates, SetOptions.merge()).await()
+                try { firestore.collection("userProfiles").document(uid).set(userUpdates, SetOptions.merge()).await() } catch (_: Exception) {}
+
+                // Update secondary Firestore collections only if record already exists there
+                for (col in listOf("Users", "user_profiles", "players", "Players", "accounts")) {
+                    try {
+                        val doc = firestore.collection(col).document(uid).get().await()
+                        if (doc.exists()) {
+                            firestore.collection(col).document(uid).set(userUpdates, SetOptions.merge()).await()
+                        }
+                    } catch (_: Exception) {}
+                }
+            }
+
+            if (!isBanned) {
+                // Automatically resolve any open Ban Appeal tickets for this user in Firestore
+                resolveOpenBanAppealsForUser(
+                    targetUids = targetUids,
+                    emailLower = emailLower,
+                    gameIdTrim = gameIdTrim,
+                    ignLower = ignLower,
+                    nameLower = nameLower,
+                    caseIdUpper = caseIdUpper,
+                    explicitTicketId = user.activeAppealTicketId,
+                    adminReply = "Your ban appeal has been APPROVED by Admin ($adminEmail). Your account restriction has been lifted and your account is now ACTIVE.",
+                    adminEmail = adminEmail,
+                    now = now
                 )
-            )
+            }
+
             writeAuditLog(
                 action = if (isBanned) "USER_BANNED" else "USER_UNBANNED",
-                detail = "${if (isBanned) "Banned" else "Unbanned"} ${user.username} (${user.id}). Reason: $reason",
+                detail = "${if (isBanned) "Banned" else "Unbanned"} ${user.username} (${targetUids.joinToString(",")}). Reason: $cleanReason",
                 adminEmail = adminEmail,
                 targetId = user.id
             )
-            GlobalErrorManager.emitSuccess(if (isBanned) "User ${user.username} BANNED across RTDB, Firestore & /banned_users!" else "User ${user.username} UNBANNED!")
+            GlobalErrorManager.emitSuccess(
+                if (isBanned) "User ${user.username.ifBlank { user.id }} BANNED in Firestore & syncing live!"
+                else "User ${user.username.ifBlank { user.id }} UNBANNED in Firestore & syncing live!"
+            )
             return true
         } catch (e: Exception) {
             GlobalErrorManager.emitError("Failed to update ban status: ${e.message}")
             return false
+        }
+    }
+
+    private suspend fun resolveOpenBanAppealsForUser(
+        targetUids: Set<String>,
+        emailLower: String,
+        gameIdTrim: String,
+        ignLower: String,
+        nameLower: String,
+        caseIdUpper: String,
+        explicitTicketId: String,
+        adminReply: String,
+        adminEmail: String,
+        now: Long
+    ) {
+        val appealUpdates = mapOf<String, Any>(
+            "status" to "RESOLVED",
+            "adminReply" to adminReply,
+            "adminNote" to adminReply,
+            "processedBy" to adminEmail,
+            "updatedAt" to now
+        )
+        if (explicitTicketId.isNotBlank()) {
+            syncLinkedTicketAcrossAllPaths(
+                ticketId = explicitTicketId,
+                userId = targetUids.firstOrNull().orEmpty(),
+                status = "RESOLVED",
+                adminReply = adminReply,
+                deliveredRedeemCode = "",
+                adminEmail = adminEmail,
+                now = now,
+                channelNode = "ban_appeals"
+            )
+        }
+        val rtdbAppealNodes = listOf(
+            database.child("admin_requests").child("all"),
+            database.child("admin_requests").child("ban_appeals"),
+            database.child("admin_requests").child("account_issue"),
+            database.child("ban_appeals"),
+            database.child("appeals"),
+            database.child("support_tickets"),
+            database.child("reports")
+        )
+        for (ref in rtdbAppealNodes) {
+            try {
+                val snap = ref.get().await()
+                snap.children.forEach { c ->
+                    val tId = (c.child("id").value ?: c.child("ticketId").value ?: c.child("requestId").value ?: c.key)?.toString()?.trim().orEmpty()
+                    val tUid = (c.child("userId").value ?: c.child("uid").value)?.toString()?.trim().orEmpty()
+                    val tEmail = (c.child("userEmail").value ?: c.child("email").value ?: c.child("userContact").value)?.toString()?.trim()?.lowercase().orEmpty()
+                    val tIgn = (c.child("inGameName").value ?: c.child("ign").value)?.toString()?.trim()?.lowercase().orEmpty()
+                    val tName = (c.child("username").value ?: c.child("userName").value)?.toString()?.trim()?.lowercase().orEmpty()
+                    val tCase = (c.child("relatedId").value ?: c.child("banCaseId").value ?: c.child("sanctionId").value)?.toString()?.trim()?.uppercase().orEmpty()
+                    val matchedUser = (tUid.isNotBlank() && tUid in targetUids) ||
+                        (explicitTicketId.isNotBlank() && tId.equals(explicitTicketId, ignoreCase = true)) ||
+                        (emailLower.isNotBlank() && tEmail == emailLower) ||
+                        (caseIdUpper.isNotBlank() && tCase == caseIdUpper) ||
+                        (ignLower.isNotBlank() && ignLower != "player" && (tIgn == ignLower || tName == ignLower)) ||
+                        (nameLower.isNotBlank() && nameLower != "player" && (tName == nameLower || tIgn == nameLower))
+                    if (matchedUser) {
+                        try { c.ref.updateChildren(appealUpdates).await() } catch (_: Exception) {}
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+        for (uid in targetUids) {
+            if (uid.isBlank()) continue
+            for (sub in listOf("reports", "ban_appeals", "appeals", "tickets")) {
+                try {
+                    val subSnap = database.child("users").child(uid).child(sub).get().await()
+                    subSnap.children.forEach { c ->
+                        try { c.ref.updateChildren(appealUpdates).await() } catch (_: Exception) {}
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+        for (fsCol in listOf("admin_requests", "ban_appeals", "appeals", "support_tickets", "reports")) {
+            try {
+                val snap = firestore.collection(fsCol).get().await()
+                snap.documents.forEach { d ->
+                    val tId = (d.getString("id") ?: d.getString("ticketId") ?: d.id).trim()
+                    val tUid = (d.getString("userId") ?: d.getString("uid")).orEmpty().trim()
+                    val tEmail = (d.getString("userEmail") ?: d.getString("email") ?: d.getString("userContact")).orEmpty().trim().lowercase()
+                    val tIgn = (d.getString("inGameName") ?: d.getString("ign")).orEmpty().trim().lowercase()
+                    val tName = (d.getString("username") ?: d.getString("userName")).orEmpty().trim().lowercase()
+                    val tCase = (d.getString("relatedId") ?: d.getString("banCaseId") ?: d.getString("sanctionId")).orEmpty().trim().uppercase()
+                    val matchedUser = (tUid.isNotBlank() && tUid in targetUids) ||
+                        (explicitTicketId.isNotBlank() && tId.equals(explicitTicketId, ignoreCase = true)) ||
+                        (emailLower.isNotBlank() && tEmail == emailLower) ||
+                        (caseIdUpper.isNotBlank() && tCase == caseIdUpper) ||
+                        (ignLower.isNotBlank() && ignLower != "player" && (tIgn == ignLower || tName == ignLower)) ||
+                        (nameLower.isNotBlank() && nameLower != "player" && (tName == nameLower || tIgn == nameLower))
+                    if (matchedUser) {
+                        try { d.reference.set(appealUpdates, SetOptions.merge()).await() } catch (_: Exception) {}
+                    }
+                }
+            } catch (_: Exception) {}
         }
     }
 
@@ -2409,32 +2938,15 @@ class AdminIntegrationSyncManager(
                 "isSuspended" to isSuspended,
                 "suspendReason" to if (isSuspended) reason else "",
                 "suspensionReason" to if (isSuspended) reason else "",
+                "suspensionExpiresAt" to endTime,
                 "suspensionEndTimeMillis" to endTime,
                 "accountStatus" to if (isSuspended) "SUSPENDED" else "ACTIVE",
                 "version" to nextVer,
                 "updatedAt" to now
             )
+            try { firestore.collection("users").document(user.id).set(userUpdates, SetOptions.merge()).await() } catch (_: Exception) {}
             try { database.child("users").child(user.id).updateChildren(userUpdates).await() } catch (_: Exception) {}
             try { database.child("userProfiles").child(user.id).updateChildren(userUpdates).await() } catch (_: Exception) {}
-            try { firestore.collection("users").document(user.id).set(userUpdates, SetOptions.merge()).await() } catch (_: Exception) {}
-            try { firestore.collection("userProfiles").document(user.id).set(userUpdates, SetOptions.merge()).await() } catch (_: Exception) {}
-
-            if (isSuspended) {
-                val suspendNode = mapOf<String, Any>(
-                    "uid" to user.id,
-                    "userId" to user.id,
-                    "username" to user.username,
-                    "suspendReason" to reason,
-                    "suspensionEndTimeMillis" to endTime,
-                    "suspendedAt" to now,
-                    "suspendedBy" to adminEmail
-                )
-                try { database.child("suspended_users").child(user.id).setValue(suspendNode).await() } catch (_: Exception) {}
-                try { firestore.collection("suspended_users").document(user.id).set(suspendNode).await() } catch (_: Exception) {}
-            } else {
-                try { database.child("suspended_users").child(user.id).removeValue().await() } catch (_: Exception) {}
-                try { firestore.collection("suspended_users").document(user.id).delete().await() } catch (_: Exception) {}
-            }
 
             publishGlobalAppStateEvent(
                 eventType = "USER_STATUS_CHANGED",
@@ -2487,26 +2999,19 @@ class AdminIntegrationSyncManager(
             updates["deliveredRedeemCode"] = deliveredRedeemCode.trim()
         }
 
-        // RTDB 4 core ticket paths (+ optional channel node)
-        try { database.child("admin_requests").child("all").child(cleanId).updateChildren(updates).await() } catch (_: Exception) {}
-        try { database.child("support_tickets").child(cleanId).updateChildren(updates).await() } catch (_: Exception) {}
-        try { database.child("reports").child(cleanId).updateChildren(updates).await() } catch (_: Exception) {}
-        if (userId.isNotBlank()) {
-            try { database.child("users").child(userId).child("reports").child(cleanId).updateChildren(updates).await() } catch (_: Exception) {}
-        }
-        if (channelNode.isNotBlank() && channelNode != "all") {
-            try { database.child("admin_requests").child(channelNode).child(cleanId).updateChildren(updates).await() } catch (_: Exception) {}
-        }
-
-        // Firestore 4 core ticket paths
-        try { firestore.collection("admin_requests").document(cleanId).set(updates, SetOptions.merge()).await() } catch (_: Exception) {}
+        // Primary write target: Firestore ticket & appeal collections (Cloud Functions mirror RTDB & global_app_state)
         try { firestore.collection("support_tickets").document(cleanId).set(updates, SetOptions.merge()).await() } catch (_: Exception) {}
+        try { firestore.collection("admin_requests").document(cleanId).set(updates, SetOptions.merge()).await() } catch (_: Exception) {}
         try { firestore.collection("reports").document(cleanId).set(updates, SetOptions.merge()).await() } catch (_: Exception) {}
+        if (channelNode == "ban_appeals" || cleanId.startsWith("VRX-", ignoreCase = true)) {
+            try { firestore.collection("ban_appeals").document(cleanId).set(updates, SetOptions.merge()).await() } catch (_: Exception) {}
+            try { firestore.collection("appeals").document(cleanId).set(updates, SetOptions.merge()).await() } catch (_: Exception) {}
+        }
         if (userId.isNotBlank()) {
             try { firestore.collection("users").document(userId).collection("reports").document(cleanId).set(updates, SetOptions.merge()).await() } catch (_: Exception) {}
         }
 
-        // Send in-app notification to /users/{userId}/notifications/notif_ticket_{id}_{now}
+        // Send in-app notification primarily via Firestore users/{userId}/notifications
         if (userId.isNotBlank()) {
             val notifId = "notif_ticket_${cleanId}_${now}"
             val titleText = if (deliveredRedeemCode.isNotBlank()) {
@@ -2525,8 +3030,6 @@ class AdminIntegrationSyncManager(
                 "timestamp" to now,
                 "isRead" to false
             )
-            try { database.child("users").child(userId).child("notifications").child(notifId).setValue(notifPayload).await() } catch (_: Exception) {}
-            try { database.child("notifications").child(userId).child(notifId).setValue(notifPayload).await() } catch (_: Exception) {}
             try { firestore.collection("users").document(userId).collection("notifications").document(notifId).set(notifPayload).await() } catch (_: Exception) {}
         }
     }
@@ -2627,68 +3130,15 @@ class AdminIntegrationSyncManager(
         }
         return try {
             val now = System.currentTimeMillis()
-            val statusMap = mapOf<String, Any>(
-                "status" to "APPROVED",
-                "processedAt" to now,
-                "processedBy" to adminEmail,
-                "updatedAt" to now
-            )
-            try { database.child("deposit_requests").child(reqId).updateChildren(statusMap).await() } catch (_: Exception) {}
-            try { database.child("admin_channels").child("deposit_requests").child(reqId).updateChildren(statusMap).await() } catch (_: Exception) {}
-            try { firestore.collection("deposit_requests").document(reqId).set(statusMap, SetOptions.merge()).await() } catch (_: Exception) {}
-
-            val orderId = req.orderId.ifBlank { reqId }
-            val orderSuccessMap = mapOf<String, Any>("status" to "SUCCESS", "processedAt" to now, "processedBy" to adminEmail)
-            try { database.child("upi_payment_orders").child(orderId).updateChildren(orderSuccessMap).await() } catch (_: Exception) {}
-
-            // Increment user balance & depositBalance
-            val userSnap = try { database.child("users").child(uid).get().await() } catch (_: Exception) { null }
-            val curDep = safeDouble(userSnap?.child("depositBalance")?.value ?: userSnap?.child("depositFunds")?.value)
-            val curWin = safeDouble(userSnap?.child("winningsBalance")?.value ?: userSnap?.child("winningFunds")?.value)
-            val curBon = safeDouble(userSnap?.child("bonusBalance")?.value ?: userSnap?.child("bonusFunds")?.value)
-            val curBal = safeDouble(userSnap?.child("balance")?.value ?: userSnap?.child("funds")?.value, curDep + curWin + curBon)
-            val curVer = safeInt(userSnap?.child("version")?.value, 1)
-
-            val newDep = curDep + req.amount
-            val newBal = (curBal + req.amount).coerceAtLeast(newDep + curWin + curBon)
-            val userUpdates = mapOf<String, Any>(
-                "depositBalance" to newDep,
-                "depositFunds" to newDep,
-                "deposit_funds" to newDep,
-                "balance" to newBal,
-                "funds" to newBal,
-                "walletBalance" to newBal,
-                "version" to (curVer + 1),
-                "updatedAt" to now
-            )
-            try { database.child("users").child(uid).updateChildren(userUpdates).await() } catch (_: Exception) {}
-            try { database.child("userProfiles").child(uid).updateChildren(userUpdates).await() } catch (_: Exception) {}
-            try { firestore.collection("users").document(uid).set(userUpdates, SetOptions.merge()).await() } catch (_: Exception) {}
-
-            val txId = req.transactionId.ifBlank { "dep_${reqId}" }
-            val txPayload = mapOf<String, Any>(
-                "id" to txId,
-                "userId" to uid,
-                "uid" to uid,
-                "type" to "DEPOSIT",
-                "amount" to req.amount,
-                "status" to "SUCCESS",
-                "utrNumber" to req.utrNumber,
-                "detail" to "UPI Deposit Approved (UTR: ${req.utrNumber.ifBlank { reqId }})",
-                "description" to "UPI Deposit Approved (UTR: ${req.utrNumber.ifBlank { reqId }})",
-                "isPositive" to true,
-                "timestamp" to now
-            )
-            try { database.child("transactions").child(txId).setValue(txPayload).await() } catch (_: Exception) {}
-            try { database.child("users").child(uid).child("transactions").child(txId).setValue(txPayload).await() } catch (_: Exception) {}
-            try { firestore.collection("transactions").document(txId).set(txPayload, SetOptions.merge()).await() } catch (_: Exception) {}
-
-            if (req.utrNumber.isNotBlank()) {
-                try {
-                    database.child("verified_bank_deposits").child(req.utrNumber.trim())
-                        .updateChildren(mapOf("claimed" to true, "claimedBy" to uid, "updatedAt" to now)).await()
-                } catch (_: Exception) {}
-            }
+            val note = "Verified via bank statement by $adminEmail (UTR: ${req.utrNumber.ifBlank { reqId }})"
+            // SERVER-AUTHORITATIVE CALLABLE: never manually increment users/{uid}.balance on client!
+            functions.getHttpsCallable("processDepositDecision").call(
+                hashMapOf(
+                    "requestId" to reqId,
+                    "status" to "APPROVED",
+                    "adminNote" to note
+                )
+            ).await()
 
             syncLinkedTicketAcrossAllPaths(
                 ticketId = reqId,
@@ -2699,22 +3149,16 @@ class AdminIntegrationSyncManager(
                 adminEmail = adminEmail,
                 now = now
             )
-            sendTargetedUserNotification(
-                userId = uid,
-                title = "✅ Deposit Credited: +₹${req.amount.toInt()} VT",
-                message = "Your UPI deposit (UTR: ${req.utrNumber.ifBlank { reqId }}) has been approved!",
-                type = "WALLET"
-            )
             publishGlobalAppStateEvent(
                 eventType = "WALLET_UPDATED",
                 affectedUserId = uid,
                 payload = mapOf("depositId" to reqId, "amount" to req.amount, "status" to "APPROVED")
             )
-            writeAuditLog("DEPOSIT_APPROVED", "Approved deposit ₹${req.amount.toInt()} for $uid (UTR: ${req.utrNumber})", adminEmail, reqId)
-            GlobalErrorManager.emitSuccess("Deposit ₹${req.amount.toInt()} VT approved & credited!")
+            writeAuditLog("DEPOSIT_APPROVED", "Approved deposit ₹${req.amount.toInt()} via processDepositDecision for $uid (UTR: ${req.utrNumber})", adminEmail, reqId)
+            GlobalErrorManager.emitSuccess("Deposit ₹${req.amount.toInt()} VT approved atomically by server!")
             true
         } catch (e: Exception) {
-            GlobalErrorManager.emitError("Deposit approval failed: ${e.message}")
+            GlobalErrorManager.emitError("processDepositDecision failed: ${e.message}")
             false
         }
     }
@@ -2726,23 +3170,13 @@ class AdminIntegrationSyncManager(
         return try {
             val now = System.currentTimeMillis()
             val cleanReason = reason.ifBlank { "Invalid or unverifiable UTR reference" }
-            val statusMap = mapOf<String, Any>(
-                "status" to "REJECTED",
-                "adminNote" to cleanReason,
-                "rejectionReason" to cleanReason,
-                "processedAt" to now,
-                "processedBy" to adminEmail,
-                "updatedAt" to now
-            )
-            try { database.child("deposit_requests").child(reqId).updateChildren(statusMap).await() } catch (_: Exception) {}
-            try { database.child("admin_channels").child("deposit_requests").child(reqId).updateChildren(statusMap).await() } catch (_: Exception) {}
-            try { firestore.collection("deposit_requests").document(reqId).set(statusMap, SetOptions.merge()).await() } catch (_: Exception) {}
-            if (req.orderId.isNotBlank()) {
-                try { database.child("upi_payment_orders").child(req.orderId).updateChildren(mapOf("status" to "FAILED", "updatedAt" to now)).await() } catch (_: Exception) {}
-            }
-            if (req.transactionId.isNotBlank()) {
-                try { database.child("transactions").child(req.transactionId).updateChildren(mapOf("status" to "FAILED", "updatedAt" to now)).await() } catch (_: Exception) {}
-            }
+            functions.getHttpsCallable("processDepositDecision").call(
+                hashMapOf(
+                    "requestId" to reqId,
+                    "status" to "REJECTED",
+                    "adminNote" to cleanReason
+                )
+            ).await()
             syncLinkedTicketAcrossAllPaths(
                 ticketId = reqId,
                 userId = uid,
@@ -2752,14 +3186,11 @@ class AdminIntegrationSyncManager(
                 adminEmail = adminEmail,
                 now = now
             )
-            if (uid.isNotBlank()) {
-                sendTargetedUserNotification(uid, "Deposit Rejected", "Your deposit of ₹${req.amount.toInt()} was rejected: $cleanReason", "WALLET")
-            }
-            writeAuditLog("DEPOSIT_REJECTED", "Rejected deposit $reqId: $cleanReason", adminEmail, reqId)
-            GlobalErrorManager.emitSuccess("Deposit rejected.")
+            writeAuditLog("DEPOSIT_REJECTED", "Rejected deposit $reqId via processDepositDecision: $cleanReason", adminEmail, reqId)
+            GlobalErrorManager.emitSuccess("Deposit rejected by server.")
             true
         } catch (e: Exception) {
-            GlobalErrorManager.emitError("Deposit reject failed: ${e.message}")
+            GlobalErrorManager.emitError("processDepositDecision reject failed: ${e.message}")
             false
         }
     }
@@ -2886,27 +3317,15 @@ class AdminIntegrationSyncManager(
             val netAmt = req.effectiveNetAmount.toInt()
             val noteText = payoutUtrOrNote.trim().ifBlank { "Transferred to ${req.paymentId}" }
             val replyText = "UPI Payout Approved! Net ₹$netAmt (after 30% TDS) transferred. Ref/Note: $noteText"
-            val updates = mapOf<String, Any>(
-                "status" to "APPROVED",
-                "adminReply" to replyText,
-                "payoutNote" to noteText,
-                "processedAt" to now,
-                "processedBy" to adminEmail,
-                "updatedAt" to now
-            )
-            try { database.child("withdraw_requests").child(req.id).updateChildren(updates).await() } catch (_: Exception) {}
-            try { database.child("wallet_requests").child(req.id).updateChildren(updates).await() } catch (_: Exception) {}
-            try { database.child("payout_requests").child(req.id).updateChildren(updates).await() } catch (_: Exception) {}
-            try { firestore.collection("withdraw_requests").document(req.id).set(updates, SetOptions.merge()).await() } catch (_: Exception) {}
-            try { firestore.collection("payout_requests").document(req.id).set(updates, SetOptions.merge()).await() } catch (_: Exception) {}
 
-            val txId = req.transactionId.ifBlank { "wdr_${req.id}" }
-            val txUpdates = mapOf<String, Any>("status" to "SUCCESS", "updatedAt" to now, "detail" to replyText)
-            try { database.child("transactions").child(txId).updateChildren(txUpdates).await() } catch (_: Exception) {}
-            if (req.uid.isNotBlank()) {
-                try { database.child("users").child(req.uid).child("transactions").child(txId).updateChildren(txUpdates).await() } catch (_: Exception) {}
-            }
-            try { firestore.collection("transactions").document(txId).set(txUpdates, SetOptions.merge()).await() } catch (_: Exception) {}
+            functions.getHttpsCallable("processWithdrawalDecision").call(
+                hashMapOf(
+                    "requestId" to req.id,
+                    "status" to "APPROVED",
+                    "utrReference" to noteText,
+                    "adminNote" to replyText
+                )
+            ).await()
 
             syncLinkedTicketAcrossAllPaths(
                 ticketId = req.id,
@@ -2923,11 +3342,11 @@ class AdminIntegrationSyncManager(
                 affectedUserId = req.uid,
                 payload = mapOf("withdrawalId" to req.id, "method" to "UPI", "status" to "APPROVED", "netAmount" to req.effectiveNetAmount)
             )
-            writeAuditLog("WITHDRAWAL_UPI_APPROVED", "Approved UPI withdrawal ${req.id} (Net ₹$netAmt) for ${req.username}", adminEmail, req.id)
-            GlobalErrorManager.emitSuccess("UPI Payout (Net ₹$netAmt) approved & synced to My Tickets!")
+            writeAuditLog("WITHDRAWAL_UPI_APPROVED", "Approved UPI withdrawal ${req.id} (Net ₹$netAmt) via processWithdrawalDecision for ${req.username}", adminEmail, req.id)
+            GlobalErrorManager.emitSuccess("UPI Payout (Net ₹$netAmt) approved via server & synced to My Tickets!")
             true
         } catch (e: Exception) {
-            GlobalErrorManager.emitError("UPI payout failed: ${e.message}")
+            GlobalErrorManager.emitError("processWithdrawalDecision UPI payout failed: ${e.message}")
             false
         }
     }
@@ -2948,34 +3367,16 @@ class AdminIntegrationSyncManager(
             val spec = req.voucherSpec.ifBlank { req.paymentId.ifBlank { "Google Play" } }
             val replyText = "Your $spec Redeem Code (Net ₹$netAmt): $cleanCode"
 
-            val updates = mapOf<String, Any>(
-                "status" to "APPROVED",
-                "deliveredRedeemCode" to cleanCode,
-                "adminReply" to replyText,
-                "processedAt" to now,
-                "processedBy" to adminEmail,
-                "updatedAt" to now
-            )
-            try { database.child("withdraw_requests").child(req.id).updateChildren(updates).await() } catch (_: Exception) {}
-            try { database.child("wallet_requests").child(req.id).updateChildren(updates).await() } catch (_: Exception) {}
-            try { database.child("payout_requests").child(req.id).updateChildren(updates).await() } catch (_: Exception) {}
-            try { firestore.collection("withdraw_requests").document(req.id).set(updates, SetOptions.merge()).await() } catch (_: Exception) {}
-            try { firestore.collection("payout_requests").document(req.id).set(updates, SetOptions.merge()).await() } catch (_: Exception) {}
+            functions.getHttpsCallable("processWithdrawalDecision").call(
+                hashMapOf(
+                    "requestId" to req.id,
+                    "status" to "APPROVED",
+                    "utrReference" to cleanCode,
+                    "adminNote" to replyText
+                )
+            ).await()
 
-            val txId = req.transactionId.ifBlank { "wdr_${req.id}" }
-            val txUpdates = mapOf<String, Any>(
-                "status" to "SUCCESS",
-                "deliveredRedeemCode" to cleanCode,
-                "detail" to replyText,
-                "updatedAt" to now
-            )
-            try { database.child("transactions").child(txId).updateChildren(txUpdates).await() } catch (_: Exception) {}
-            if (req.uid.isNotBlank()) {
-                try { database.child("users").child(req.uid).child("transactions").child(txId).updateChildren(txUpdates).await() } catch (_: Exception) {}
-            }
-            try { firestore.collection("transactions").document(txId).set(txUpdates, SetOptions.merge()).await() } catch (_: Exception) {}
-
-            // Sync linked ticket (id == req.id) across all 8 RTDB + Firestore paths so My Tickets renders golden code card
+            // Sync linked ticket (id == req.id) across admin_requests, support_tickets, reports, users/{uid}/reports so My Tickets renders golden code card
             syncLinkedTicketAcrossAllPaths(
                 ticketId = req.id,
                 userId = req.uid,
@@ -2996,11 +3397,11 @@ class AdminIntegrationSyncManager(
                     "deliveredRedeemCode" to cleanCode
                 )
             )
-            writeAuditLog("VOUCHER_REDEEM_DELIVERED", "Delivered $spec voucher code for ${req.username} (Net ₹$netAmt)", adminEmail, req.id)
-            GlobalErrorManager.emitSuccess("$spec Redeem Code delivered & synced to user's My Tickets!")
+            writeAuditLog("VOUCHER_REDEEM_DELIVERED", "Delivered $spec voucher code via processWithdrawalDecision for ${req.username} (Net ₹$netAmt)", adminEmail, req.id)
+            GlobalErrorManager.emitSuccess("$spec Redeem Code delivered via server & synced to My Tickets!")
             true
         } catch (e: Exception) {
-            GlobalErrorManager.emitError("Voucher delivery failed: ${e.message}")
+            GlobalErrorManager.emitError("processWithdrawalDecision voucher delivery failed: ${e.message}")
             false
         }
     }
@@ -3016,66 +3417,15 @@ class AdminIntegrationSyncManager(
             val cleanReason = reason.ifBlank { "Invalid payout details — Amount refunded to wallet" }
             val replyText = "Withdrawal Rejected & Refunded ₹${req.vtAmount.toInt()} VT: $cleanReason"
 
-            val updates = mapOf<String, Any>(
-                "status" to "REJECTED",
-                "rejectionReason" to cleanReason,
-                "adminReply" to replyText,
-                "processedAt" to now,
-                "processedBy" to adminEmail,
-                "updatedAt" to now
-            )
-            try { database.child("withdraw_requests").child(req.id).updateChildren(updates).await() } catch (_: Exception) {}
-            try { database.child("wallet_requests").child(req.id).updateChildren(updates).await() } catch (_: Exception) {}
-            try { database.child("payout_requests").child(req.id).updateChildren(updates).await() } catch (_: Exception) {}
-            try { firestore.collection("withdraw_requests").document(req.id).set(updates, SetOptions.merge()).await() } catch (_: Exception) {}
-            try { firestore.collection("payout_requests").document(req.id).set(updates, SetOptions.merge()).await() } catch (_: Exception) {}
-
-            // Refund +amount VT back to user's winningsBalance & balance
-            if (req.uid.isNotBlank() && req.vtAmount > 0.0) {
-                val userSnap = try { database.child("users").child(req.uid).get().await() } catch (_: Exception) { null }
-                val curDep = safeDouble(userSnap?.child("depositBalance")?.value ?: userSnap?.child("depositFunds")?.value)
-                val curWin = safeDouble(userSnap?.child("winningsBalance")?.value ?: userSnap?.child("winningFunds")?.value)
-                val curBon = safeDouble(userSnap?.child("bonusBalance")?.value ?: userSnap?.child("bonusFunds")?.value)
-                val curBal = safeDouble(userSnap?.child("balance")?.value ?: userSnap?.child("funds")?.value, curDep + curWin + curBon)
-                val curVer = safeInt(userSnap?.child("version")?.value, 1)
-
-                val newWin = curWin + req.vtAmount
-                val newBal = (curBal + req.vtAmount).coerceAtLeast(curDep + newWin + curBon)
-                val userUpdates = mapOf<String, Any>(
-                    "winningsBalance" to newWin,
-                    "winningFunds" to newWin,
-                    "withdrawableBalance" to newWin,
-                    "balance" to newBal,
-                    "funds" to newBal,
-                    "walletBalance" to newBal,
-                    "version" to (curVer + 1),
-                    "updatedAt" to now
+            // SERVER-AUTHORITATIVE REJECT & AUTO-REFUND (never manually increment balance on client!)
+            functions.getHttpsCallable("processWithdrawalDecision").call(
+                hashMapOf(
+                    "requestId" to req.id,
+                    "status" to "REJECTED",
+                    "utrReference" to "",
+                    "adminNote" to cleanReason
                 )
-                try { database.child("users").child(req.uid).updateChildren(userUpdates).await() } catch (_: Exception) {}
-                try { database.child("userProfiles").child(req.uid).updateChildren(userUpdates).await() } catch (_: Exception) {}
-                try { firestore.collection("users").document(req.uid).set(userUpdates, SetOptions.merge()).await() } catch (_: Exception) {}
-
-                val refundTxId = "ref_wdr_${req.id}"
-                val refundTx = mapOf<String, Any>(
-                    "id" to refundTxId,
-                    "userId" to req.uid,
-                    "uid" to req.uid,
-                    "type" to "REFUND",
-                    "amount" to req.vtAmount,
-                    "status" to "SUCCESS",
-                    "detail" to replyText,
-                    "description" to replyText,
-                    "isPositive" to true,
-                    "timestamp" to now
-                )
-                try { database.child("transactions").child(refundTxId).setValue(refundTx).await() } catch (_: Exception) {}
-                try { database.child("users").child(req.uid).child("transactions").child(refundTxId).setValue(refundTx).await() } catch (_: Exception) {}
-                try { firestore.collection("transactions").document(refundTxId).set(refundTx).await() } catch (_: Exception) {}
-            }
-
-            if (req.transactionId.isNotBlank()) {
-                try { database.child("transactions").child(req.transactionId).updateChildren(mapOf("status" to "FAILED", "updatedAt" to now)).await() } catch (_: Exception) {}
-            }
+            ).await()
 
             syncLinkedTicketAcrossAllPaths(
                 ticketId = req.id,
@@ -3091,11 +3441,11 @@ class AdminIntegrationSyncManager(
                 affectedUserId = req.uid,
                 payload = mapOf("withdrawalId" to req.id, "status" to "REJECTED", "refundedAmount" to req.vtAmount)
             )
-            writeAuditLog("WITHDRAWAL_REJECTED_REFUNDED", "Rejected ${req.id} & refunded ₹${req.vtAmount.toInt()} to ${req.username}", adminEmail, req.id)
-            GlobalErrorManager.emitSuccess("Withdrawal rejected & ₹${req.vtAmount.toInt()} VT refunded to wallet!")
+            writeAuditLog("WITHDRAWAL_REJECTED_REFUNDED", "Rejected ${req.id} & server auto-refunded ₹${req.vtAmount.toInt()} to ${req.username}", adminEmail, req.id)
+            GlobalErrorManager.emitSuccess("Withdrawal rejected & ₹${req.vtAmount.toInt()} VT auto-refunded by server!")
             true
         } catch (e: Exception) {
-            GlobalErrorManager.emitError("Withdrawal reject failed: ${e.message}")
+            GlobalErrorManager.emitError("processWithdrawalDecision reject failed: ${e.message}")
             false
         }
     }
@@ -3105,18 +3455,28 @@ class AdminIntegrationSyncManager(
     // =========================================================================
 
     fun getRedeemCodesStream(): Flow<List<RedeemCodeItem>> = callbackFlow {
-        val map = mutableMapOf<String, RedeemCodeItem>()
-        fun emit() { trySend(map.values.sortedByDescending { it.updatedAt }) }
+        val rtdbMap = mutableMapOf<String, RedeemCodeItem>()
+        val fsMap = mutableMapOf<String, RedeemCodeItem>()
+        fun emit() {
+            val merged = LinkedHashMap<String, RedeemCodeItem>()
+            if (fsMap.isNotEmpty()) {
+                fsMap.forEach { (k, v) -> merged[k] = v }
+            } else {
+                rtdbMap.forEach { (k, v) -> merged[k] = v }
+            }
+            trySend(merged.values.sortedByDescending { it.updatedAt })
+        }
 
         val ref = database.child("redeem_codes")
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                map.clear()
-                snapshot.children.forEach { c ->
+                rtdbMap.clear()
+                for (c in snapshot.children) {
+                    if (!c.hasChildren() || c.value !is Map<*, *>) continue
                     val code = (c.child("code").value?.toString() ?: c.key ?: "").trim().uppercase()
                     if (code.isNotBlank()) {
                         val isActive = safeBool(c.child("active").value, c.child("status").value?.toString()?.equals("ACTIVE", true) != false)
-                        map[code] = RedeemCodeItem(
+                        rtdbMap[code] = RedeemCodeItem(
                             code = code,
                             title = c.child("title").value?.toString() ?: code,
                             active = isActive,
@@ -3141,10 +3501,11 @@ class AdminIntegrationSyncManager(
         val fsReg = try {
             firestore.collection("redeem_codes").addSnapshotListener { snap, err ->
                 if (err == null && snap != null) {
+                    fsMap.clear()
                     snap.documents.forEach { d ->
                         val code = (d.getString("code") ?: d.id).trim().uppercase()
                         val isActive = d.getBoolean("active") ?: (d.getString("status")?.equals("ACTIVE", true) != false)
-                        map[code] = RedeemCodeItem(
+                        fsMap[code] = RedeemCodeItem(
                             code = code,
                             title = d.getString("title") ?: code,
                             active = isActive,
@@ -3192,10 +3553,10 @@ class AdminIntegrationSyncManager(
                 "createdAt" to (if (item.createdAt > 0L) item.createdAt else now),
                 "updatedAt" to now
             )
-            try { database.child("redeem_codes").child(codeKey).setValue(payload).await() } catch (_: Exception) {}
-            try { firestore.collection("redeem_codes").document(codeKey).set(payload, SetOptions.merge()).await() } catch (_: Exception) {}
+            // Primary write target: Firestore redeem_codes/{codeKey} (Cloud Functions mirror RTDB & global_app_state)
+            firestore.collection("redeem_codes").document(codeKey).set(payload, SetOptions.merge()).await()
             writeAuditLog("REDEEM_CODE_SAVED", "Saved promo code $codeKey (VT=${item.rewardVt}, Tokens=${item.rewardTokens}, MaxUses=${item.maxUses})", adminEmail, codeKey)
-            GlobalErrorManager.emitSuccess("Redeem code '$codeKey' synced to RTDB & Firestore!")
+            GlobalErrorManager.emitSuccess("Redeem code '$codeKey' saved to Firestore & syncing live!")
             true
         } catch (e: Exception) {
             GlobalErrorManager.emitError("Failed to save redeem code: ${e.message}")
@@ -3206,24 +3567,32 @@ class AdminIntegrationSyncManager(
     suspend fun toggleRedeemCodeActive(code: String, active: Boolean, adminEmail: String) {
         val codeKey = code.trim().uppercase()
         if (codeKey.isBlank()) return
-        val updates = mapOf<String, Any>(
-            "active" to active,
-            "status" to if (active) "ACTIVE" else "DISABLED",
-            "updatedAt" to System.currentTimeMillis()
-        )
-        try { database.child("redeem_codes").child(codeKey).updateChildren(updates).await() } catch (_: Exception) {}
-        try { firestore.collection("redeem_codes").document(codeKey).set(updates, SetOptions.merge()).await() } catch (_: Exception) {}
-        writeAuditLog("REDEEM_CODE_TOGGLED", "Set $codeKey to ${if (active) "ACTIVE" else "DISABLED"}", adminEmail, codeKey)
-        GlobalErrorManager.emitSuccess("Code '$codeKey' is now ${if (active) "ACTIVE" else "DISABLED"}.")
+        try {
+            val updates = mapOf<String, Any>(
+                "active" to active,
+                "status" to if (active) "ACTIVE" else "DISABLED",
+                "updatedAt" to System.currentTimeMillis()
+            )
+            // Primary write target: Firestore redeem_codes/{codeKey}
+            firestore.collection("redeem_codes").document(codeKey).set(updates, SetOptions.merge()).await()
+            writeAuditLog("REDEEM_CODE_TOGGLED", "Set $codeKey to ${if (active) "ACTIVE" else "DISABLED"}", adminEmail, codeKey)
+            GlobalErrorManager.emitSuccess("Code '$codeKey' is now ${if (active) "ACTIVE" else "DISABLED"}.")
+        } catch (e: Exception) {
+            GlobalErrorManager.emitError("Failed to toggle redeem code: ${e.message}")
+        }
     }
 
     suspend fun deleteRedeemCode(code: String, adminEmail: String) {
         val codeKey = code.trim().uppercase()
         if (codeKey.isBlank()) return
-        try { database.child("redeem_codes").child(codeKey).removeValue().await() } catch (_: Exception) {}
-        try { firestore.collection("redeem_codes").document(codeKey).delete().await() } catch (_: Exception) {}
-        writeAuditLog("REDEEM_CODE_DELETED", "Deleted promo code $codeKey", adminEmail, codeKey)
-        GlobalErrorManager.emitSuccess("Redeem code '$codeKey' deleted.")
+        try {
+            // Primary delete target: Firestore redeem_codes/{codeKey} (Cloud Functions clean RTDB mirror)
+            firestore.collection("redeem_codes").document(codeKey).delete().await()
+            writeAuditLog("REDEEM_CODE_DELETED", "Deleted promo code $codeKey", adminEmail, codeKey)
+            GlobalErrorManager.emitSuccess("Redeem code '$codeKey' deleted from Firestore.")
+        } catch (e: Exception) {
+            GlobalErrorManager.emitError("Failed to delete redeem code: ${e.message}")
+        }
     }
 
     fun getRedeemClaimsStream(): Flow<List<RedeemClaimRecord>> = callbackFlow {
@@ -3233,7 +3602,8 @@ class AdminIntegrationSyncManager(
         val ref = database.child("redeem_claims")
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                snapshot.children.forEach { c ->
+                for (c in snapshot.children) {
+                    if (!c.hasChildren() || c.value !is Map<*, *>) continue
                     val id = c.child("id").value?.toString() ?: c.key ?: ""
                     if (id.isNotBlank()) {
                         map[id] = RedeemClaimRecord(
@@ -3286,42 +3656,76 @@ class AdminIntegrationSyncManager(
         val map = mutableMapOf<String, UnifiedAdminRequest>()
         fun emit() { trySend(map.values.sortedByDescending { it.updatedAt.coerceAtLeast(it.createdAt) }) }
 
-        fun parseSnap(snap: DataSnapshot, source: String): UnifiedAdminRequest? {
+        fun parseSnap(snap: DataSnapshot, source: String, fallbackUserId: String = "", fallbackUsername: String = "", fallbackIgn: String = "", fallbackEmail: String = ""): UnifiedAdminRequest? {
             if (!snap.exists()) return null
-            val id = snap.child("id").value?.toString()
-                ?: snap.child("requestId").value?.toString()
-                ?: snap.child("ticketId").value?.toString()
-                ?: snap.key ?: return null
+            // Skip plain primitives
+            if (snap.childrenCount == 0L) return null
+            val id = (snap.child("id").value
+                ?: snap.child("requestId").value
+                ?: snap.child("ticketId").value
+                ?: snap.child("appealId").value
+                ?: snap.child("activeAppealTicket").value
+                ?: snap.child("appealTicketId").value
+                ?: snap.key)?.toString()?.trim() ?: return null
             if (id.isBlank()) return null
-            val cat = snap.child("category").value?.toString()
-                ?: snap.child("issueCategory").value?.toString()
-                ?: snap.child("channelType").value?.toString() ?: ""
-            val ch = snap.child("channel").value?.toString()
-                ?: snap.child("channelLabel").value?.toString() ?: ""
+
+            val rawSubject = (snap.child("subject").value
+                ?: snap.child("title").value
+                ?: snap.child("reason").value
+                ?: snap.child("banReason").value
+                ?: snap.child("appealReason").value)?.toString()?.trim().orEmpty()
+            val rawDesc = (snap.child("description").value
+                ?: snap.child("details").value
+                ?: snap.child("message").value
+                ?: snap.child("appealMessage").value
+                ?: snap.child("banReason").value)?.toString()?.trim().orEmpty()
+            val related = (snap.child("relatedId").value
+                ?: snap.child("banCaseId").value
+                ?: snap.child("sanctionId").value
+                ?: snap.child("caseId").value)?.toString()?.trim().orEmpty()
+
+            // Guard against partial status-only ghost nodes
+            val hasUserOrContent = snap.hasChild("userId") || snap.hasChild("uid") ||
+                snap.hasChild("username") || snap.hasChild("userName") ||
+                snap.hasChild("subject") || snap.hasChild("description") ||
+                snap.hasChild("message") || snap.hasChild("reason") ||
+                snap.hasChild("category") || snap.hasChild("relatedId") ||
+                snap.hasChild("banCaseId") || id.startsWith("VRX-", ignoreCase = true) ||
+                fallbackUserId.isNotBlank()
+            if (!hasUserOrContent && rawSubject.isBlank() && rawDesc.isBlank()) return null
+
+            val catRaw = (snap.child("category").value
+                ?: snap.child("issueCategory").value
+                ?: snap.child("channelType").value
+                ?: snap.child("type").value)?.toString()?.trim().orEmpty()
+            val cat = if (catRaw.isBlank() && (related.startsWith("BAN-", ignoreCase = true) || source.contains("ban", ignoreCase = true) || source.contains("appeal", ignoreCase = true))) {
+                "BAN_APPEAL"
+            } else catRaw
+            val ch = (snap.child("channel").value
+                ?: snap.child("channelLabel").value)?.toString()?.trim().orEmpty()
             val matched = UnifiedRequestChannel.matchFromRaw(cat, ch, source)
-            val created = safeLong(snap.child("createdAt").value ?: snap.child("timestamp").value ?: snap.child("requestedAt").value, System.currentTimeMillis())
+            val created = safeLong(
+                snap.child("createdAt").value ?: snap.child("timestamp").value ?: snap.child("requestedAt").value ?: snap.child("bannedAt").value,
+                System.currentTimeMillis()
+            )
             return UnifiedAdminRequest(
                 id = id,
-                userId = snap.child("userId").value?.toString() ?: snap.child("uid").value?.toString() ?: "",
-                username = snap.child("username").value?.toString() ?: snap.child("userName").value?.toString() ?: snap.child("name").value?.toString() ?: "Player",
-                userEmail = snap.child("userEmail").value?.toString() ?: snap.child("email").value?.toString() ?: "",
-                inGameName = snap.child("inGameName").value?.toString() ?: snap.child("ign").value?.toString() ?: "",
-                freeFireId = snap.child("freeFireId").value?.toString() ?: snap.child("gameId").value?.toString() ?: "",
+                userId = (snap.child("userId").value ?: snap.child("uid").value)?.toString()?.trim().orEmpty().ifBlank { fallbackUserId },
+                username = (snap.child("username").value ?: snap.child("userName").value ?: snap.child("name").value ?: snap.child("accountName").value)?.toString()?.trim().orEmpty().ifBlank { fallbackUsername.ifBlank { "Player" } },
+                userEmail = (snap.child("userEmail").value ?: snap.child("email").value ?: snap.child("userContact").value)?.toString()?.trim().orEmpty().ifBlank { fallbackEmail },
+                inGameName = (snap.child("inGameName").value ?: snap.child("ign").value)?.toString()?.trim().orEmpty().ifBlank { fallbackIgn },
+                freeFireId = (snap.child("freeFireId").value ?: snap.child("gameId").value)?.toString()?.trim().orEmpty(),
                 category = cat.ifBlank { matched.categoryKey },
                 channel = ch.ifBlank { matched.channelTag },
-                subject = snap.child("subject").value?.toString()
-                    ?: snap.child("title").value?.toString()
-                    ?: snap.child("reason").value?.toString()
-                    ?: matched.label,
-                description = snap.child("description").value?.toString()
-                    ?: snap.child("details").value?.toString()
-                    ?: snap.child("message").value?.toString() ?: "",
+                subject = rawSubject.ifBlank { matched.label },
+                description = rawDesc,
+                relatedId = related,
                 amount = safeDouble(snap.child("amount").value ?: snap.child("vtAmount").value),
                 utrNumber = snap.child("utrNumber").value?.toString() ?: "",
                 paymentMethod = snap.child("paymentMethod").value?.toString() ?: "",
                 voucherSpec = snap.child("voucherSpec").value?.toString() ?: "",
-                status = snap.child("status").value?.toString()?.uppercase() ?: "PENDING",
-                adminReply = snap.child("adminReply").value?.toString() ?: snap.child("adminNote").value?.toString() ?: "",
+                status = (snap.child("status").value ?: snap.child("appealStatus").value)?.toString()?.uppercase() ?: "PENDING",
+                adminReply = (snap.child("adminReply").value ?: snap.child("adminNote").value)?.toString() ?: "",
                 deliveredRedeemCode = snap.child("deliveredRedeemCode").value?.toString() ?: "",
                 sourceNode = source,
                 createdAt = created,
@@ -3329,9 +3733,26 @@ class AdminIntegrationSyncManager(
             )
         }
 
+        fun upsertItem(item: UnifiedAdminRequest) {
+            val existing = map[item.id]
+            if (existing == null || item.updatedAt >= existing.updatedAt) {
+                map[item.id] = item
+            }
+        }
+
         val rtdbSources = listOf(
             "admin_requests/all" to database.child("admin_requests").child("all"),
+            "admin_requests/ban_appeals" to database.child("admin_requests").child("ban_appeals"),
+            "admin_requests/account_issue" to database.child("admin_requests").child("account_issue"),
+            "admin_requests/verification_requests" to database.child("admin_requests").child("verification_requests"),
+            "admin_requests/general_support_requests" to database.child("admin_requests").child("general_support_requests"),
+            "ban_appeals" to database.child("ban_appeals"),
+            "appeals" to database.child("appeals"),
+            "ban_appeal_requests" to database.child("ban_appeal_requests"),
+            "admin_channels/ban_appeals" to database.child("admin_channels").child("ban_appeals"),
+            "admin_channels/account_issue" to database.child("admin_channels").child("account_issue"),
             "support_tickets" to database.child("support_tickets"),
+            "tickets" to database.child("tickets"),
             "reports" to database.child("reports"),
             "banner_feedback" to database.child("banner_feedback")
         )
@@ -3339,13 +3760,9 @@ class AdminIntegrationSyncManager(
         rtdbSources.forEach { (srcName, ref) ->
             val l = object : ValueEventListener {
                 override fun onDataChange(snapshot: DataSnapshot) {
-                    snapshot.children.forEach { c ->
-                        parseSnap(c, srcName)?.let { item ->
-                            val existing = map[item.id]
-                            if (existing == null || item.updatedAt >= existing.updatedAt) {
-                                map[item.id] = item
-                            }
-                        }
+                    for (c in snapshot.children) {
+                        if (!c.hasChildren() || c.value !is Map<*, *>) continue
+                        parseSnap(c, srcName)?.let { upsertItem(it) }
                     }
                     emit()
                 }
@@ -3355,47 +3772,156 @@ class AdminIntegrationSyncManager(
             rtdbListeners.add(ref to l)
         }
 
+        // Also listen to /banned_users & /users in RTDB to catch embedded ban appeals or per-user reports/ban_appeals sub-nodes
+        val bannedAppealsRef = database.child("banned_users")
+        val bannedAppealsListener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                for (c in snapshot.children) {
+                    if (!c.hasChildren() || c.value !is Map<*, *>) continue
+                    val uid = (c.child("uid").value ?: c.child("userId").value ?: c.child("id").value ?: c.key)?.toString()?.trim().orEmpty()
+                    val uname = (c.child("username").value ?: c.child("userName").value ?: c.child("name").value)?.toString()?.trim().orEmpty()
+                    val uign = (c.child("inGameName").value ?: c.child("ign").value)?.toString()?.trim().orEmpty()
+                    val uemail = (c.child("email").value ?: c.child("userEmail").value)?.toString()?.trim().orEmpty()
+                    val ticketId = (c.child("activeAppealTicket").value ?: c.child("activeAppealTicketId").value ?: c.child("appealTicketId").value ?: c.child("ticketId").value)?.toString()?.trim().orEmpty()
+                    val caseId = (c.child("banCaseId").value ?: c.child("sanctionId").value ?: c.child("caseId").value)?.toString()?.trim().orEmpty()
+                    val reason = (c.child("banReason").value ?: c.child("reason").value ?: c.child("appealReason").value)?.toString()?.trim().orEmpty()
+                    val appealMsg = (c.child("appealMessage").value ?: c.child("appealDetails").value ?: c.child("message").value)?.toString()?.trim().orEmpty()
+                    if (ticketId.isNotBlank()) {
+                        val created = safeLong(c.child("appealCreatedAt").value ?: c.child("bannedAt").value ?: c.child("updatedAt").value, System.currentTimeMillis())
+                        upsertItem(
+                            UnifiedAdminRequest(
+                                id = ticketId,
+                                userId = uid,
+                                username = uname.ifBlank { uign.ifBlank { "Player" } },
+                                userEmail = uemail,
+                                inGameName = uign,
+                                freeFireId = (c.child("gameId").value ?: c.child("freeFireId").value)?.toString()?.trim().orEmpty(),
+                                category = "BAN_APPEAL",
+                                channel = "#ban-appeals",
+                                subject = "Ban Appeal ${if (caseId.isNotBlank()) "($caseId)" else ""}".trim(),
+                                description = appealMsg.ifBlank { reason.ifBlank { "Account restriction appeal submitted by player." } },
+                                relatedId = caseId,
+                                status = (c.child("appealStatus").value ?: c.child("activeAppealStatus").value)?.toString()?.uppercase() ?: "PENDING",
+                                sourceNode = "banned_users",
+                                createdAt = created,
+                                updatedAt = safeLong(c.child("updatedAt").value, created)
+                            )
+                        )
+                    }
+                    // Also check nested appeal objects inside /banned_users/{uid}
+                    for (subKey in listOf("banAppeal", "appeal", "activeAppeal")) {
+                        val sub = c.child(subKey)
+                        if (sub.exists()) {
+                            parseSnap(sub, "banned_users/$subKey", uid, uname, uign, uemail)?.let { upsertItem(it) }
+                        }
+                    }
+                }
+                emit()
+            }
+            override fun onCancelled(error: DatabaseError) { emit() }
+        }
+        bannedAppealsRef.addValueEventListener(bannedAppealsListener)
+        rtdbListeners.add(bannedAppealsRef to bannedAppealsListener)
+
+        val usersAppealsRef = database.child("users")
+        val usersAppealsListener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                snapshot.children.forEach { u ->
+                    val uid = (u.child("id").value ?: u.child("uid").value ?: u.key)?.toString()?.trim().orEmpty()
+                    val uname = (u.child("username").value ?: u.child("name").value ?: u.child("displayName").value)?.toString()?.trim().orEmpty()
+                    val uign = (u.child("ign").value ?: u.child("inGameName").value)?.toString()?.trim().orEmpty()
+                    val uemail = (u.child("email").value ?: u.child("userEmail").value)?.toString()?.trim().orEmpty()
+
+                    // Nested per-user ticket collections: /users/{uid}/reports, /users/{uid}/ban_appeals, /users/{uid}/appeals, /users/{uid}/tickets
+                    for (subCol in listOf("reports", "ban_appeals", "appeals", "tickets", "support_tickets")) {
+                        val colSnap = u.child(subCol)
+                        if (colSnap.exists()) {
+                            colSnap.children.forEach { tSnap ->
+                                parseSnap(tSnap, "users/$subCol", uid, uname, uign, uemail)?.let { upsertItem(it) }
+                            }
+                        }
+                    }
+                    // Direct activeAppealTicket field on /users/{uid}
+                    val ticketId = (u.child("activeAppealTicket").value ?: u.child("activeAppealTicketId").value ?: u.child("appealTicketId").value)?.toString()?.trim().orEmpty()
+                    if (ticketId.isNotBlank()) {
+                        val caseId = (u.child("banCaseId").value ?: u.child("sanctionId").value)?.toString()?.trim().orEmpty()
+                        val reason = (u.child("banReason").value ?: u.child("reason").value)?.toString()?.trim().orEmpty()
+                        val appealMsg = (u.child("appealMessage").value ?: u.child("appealReason").value)?.toString()?.trim().orEmpty()
+                        val created = safeLong(u.child("bannedAt").value ?: u.child("updatedAt").value, System.currentTimeMillis())
+                        upsertItem(
+                            UnifiedAdminRequest(
+                                id = ticketId,
+                                userId = uid,
+                                username = uname.ifBlank { uign.ifBlank { "Player" } },
+                                userEmail = uemail,
+                                inGameName = uign,
+                                freeFireId = (u.child("gameId").value ?: u.child("freeFireId").value)?.toString()?.trim().orEmpty(),
+                                category = "BAN_APPEAL",
+                                channel = "#ban-appeals",
+                                subject = "Ban Appeal ${if (caseId.isNotBlank()) "($caseId)" else ""}".trim(),
+                                description = appealMsg.ifBlank { reason.ifBlank { "Account restriction appeal." } },
+                                relatedId = caseId,
+                                status = (u.child("activeAppealStatus").value ?: u.child("appealStatus").value)?.toString()?.uppercase() ?: "PENDING",
+                                sourceNode = "users/activeAppealTicket",
+                                createdAt = created,
+                                updatedAt = safeLong(u.child("updatedAt").value, created)
+                            )
+                        )
+                    }
+                }
+                emit()
+            }
+            override fun onCancelled(error: DatabaseError) { emit() }
+        }
+        usersAppealsRef.addValueEventListener(usersAppealsListener)
+        rtdbListeners.add(usersAppealsRef to usersAppealsListener)
+
         val fsRegs = mutableListOf<ListenerRegistration>()
         listOf(
             "admin_requests" to firestore.collection("admin_requests"),
+            "ban_appeals" to firestore.collection("ban_appeals"),
+            "appeals" to firestore.collection("appeals"),
             "support_tickets" to firestore.collection("support_tickets"),
+            "tickets" to firestore.collection("tickets"),
             "reports" to firestore.collection("reports")
         ).forEach { (srcName, col) ->
             try {
                 fsRegs.add(col.addSnapshotListener { snap, err ->
                     if (err == null && snap != null) {
                         snap.documents.forEach { d ->
-                            val id = d.getString("id") ?: d.getString("requestId") ?: d.id
-                            val cat = d.getString("category") ?: d.getString("issueCategory") ?: ""
+                            val id = d.getString("id") ?: d.getString("requestId") ?: d.getString("ticketId") ?: d.id
+                            val related = d.getString("relatedId") ?: d.getString("banCaseId") ?: d.getString("sanctionId") ?: d.getString("caseId") ?: ""
+                            val catRaw = d.getString("category") ?: d.getString("issueCategory") ?: d.getString("type") ?: ""
+                            val cat = if (catRaw.isBlank() && (related.startsWith("BAN-", ignoreCase = true) || srcName.contains("ban", ignoreCase = true) || srcName.contains("appeal", ignoreCase = true))) {
+                                "BAN_APPEAL"
+                            } else catRaw
                             val ch = d.getString("channel") ?: d.getString("channelLabel") ?: ""
                             val matched = UnifiedRequestChannel.matchFromRaw(cat, ch, srcName)
                             val created = safeLong(d.get("createdAt") ?: d.get("timestamp"), System.currentTimeMillis())
                             val item = UnifiedAdminRequest(
                                 id = id,
                                 userId = d.getString("userId") ?: d.getString("uid") ?: "",
-                                username = d.getString("username") ?: d.getString("userName") ?: "Player",
-                                userEmail = d.getString("userEmail") ?: d.getString("email") ?: "",
+                                username = d.getString("username") ?: d.getString("userName") ?: d.getString("name") ?: "Player",
+                                userEmail = d.getString("userEmail") ?: d.getString("email") ?: d.getString("userContact") ?: "",
                                 inGameName = d.getString("inGameName") ?: d.getString("ign") ?: "",
                                 freeFireId = d.getString("freeFireId") ?: d.getString("gameId") ?: "",
                                 category = cat.ifBlank { matched.categoryKey },
                                 channel = ch.ifBlank { matched.channelTag },
                                 subject = d.getString("subject") ?: d.getString("title") ?: d.getString("reason") ?: matched.label,
                                 description = d.getString("description") ?: d.getString("details") ?: d.getString("message") ?: "",
+                                relatedId = related,
                                 amount = safeDouble(d.get("amount") ?: d.get("vtAmount")),
                                 utrNumber = d.getString("utrNumber") ?: "",
                                 paymentMethod = d.getString("paymentMethod") ?: "",
                                 voucherSpec = d.getString("voucherSpec") ?: "",
-                                status = d.getString("status")?.uppercase() ?: "PENDING",
+                                status = (d.getString("status") ?: d.getString("appealStatus"))?.uppercase() ?: "PENDING",
                                 adminReply = d.getString("adminReply") ?: d.getString("adminNote") ?: "",
                                 deliveredRedeemCode = d.getString("deliveredRedeemCode") ?: "",
                                 sourceNode = srcName,
                                 createdAt = created,
                                 updatedAt = safeLong(d.get("updatedAt"), created)
                             )
-                            val existing = map[item.id]
-                            if (existing == null || item.updatedAt >= existing.updatedAt) {
-                                map[item.id] = item
-                            }
+                            upsertItem(item)
                         }
                         emit()
                     }
@@ -3403,9 +3929,132 @@ class AdminIntegrationSyncManager(
             } catch (_: Exception) {}
         }
 
+        // Also check Firestore banned_users for embedded activeAppealTicket
+        try {
+            fsRegs.add(firestore.collection("banned_users").addSnapshotListener { snap, err ->
+                if (err == null && snap != null) {
+                    snap.documents.forEach { d ->
+                        val ticketId = (d.getString("activeAppealTicket") ?: d.getString("activeAppealTicketId") ?: d.getString("appealTicketId") ?: d.getString("ticketId")).orEmpty().trim()
+                        if (ticketId.isNotBlank()) {
+                            val uid = (d.getString("uid") ?: d.getString("userId") ?: d.getString("id") ?: d.id).trim()
+                            val uname = (d.getString("username") ?: d.getString("userName") ?: d.getString("name")).orEmpty().trim()
+                            val uign = (d.getString("inGameName") ?: d.getString("ign")).orEmpty().trim()
+                            val caseId = (d.getString("banCaseId") ?: d.getString("sanctionId")).orEmpty().trim()
+                            val reason = (d.getString("banReason") ?: d.getString("reason")).orEmpty().trim()
+                            val created = safeLong(d.get("bannedAt") ?: d.get("updatedAt"), System.currentTimeMillis())
+                            upsertItem(
+                                UnifiedAdminRequest(
+                                    id = ticketId,
+                                    userId = uid,
+                                    username = uname.ifBlank { uign.ifBlank { "Player" } },
+                                    userEmail = (d.getString("email") ?: d.getString("userEmail")).orEmpty().trim(),
+                                    inGameName = uign,
+                                    freeFireId = (d.getString("gameId") ?: d.getString("freeFireId")).orEmpty().trim(),
+                                    category = "BAN_APPEAL",
+                                    channel = "#ban-appeals",
+                                    subject = "Ban Appeal ${if (caseId.isNotBlank()) "($caseId)" else ""}".trim(),
+                                    description = (d.getString("appealMessage") ?: reason).ifBlank { "Account restriction appeal." },
+                                    relatedId = caseId,
+                                    status = (d.getString("appealStatus") ?: d.getString("activeAppealStatus"))?.uppercase() ?: "PENDING",
+                                    sourceNode = "fs_banned_users",
+                                    createdAt = created,
+                                    updatedAt = safeLong(d.get("updatedAt"), created)
+                                )
+                            )
+                        }
+                    }
+                    emit()
+                }
+            })
+        } catch (_: Exception) {}
+
         awaitClose {
             rtdbListeners.forEach { (r, l) -> r.removeEventListener(l) }
             fsRegs.forEach { it.remove() }
+        }
+    }
+
+    suspend fun approveBanAppealAndUnban(
+        req: UnifiedAdminRequest,
+        matchedUser: UserProfile?,
+        adminNote: String,
+        adminEmail: String
+    ): Boolean {
+        return try {
+            val replyText = adminNote.trim().ifBlank {
+                "Your ban appeal (#${req.id}) has been APPROVED by Admin. Your account restriction is lifted and your account is now ACTIVE."
+            }
+            val syntheticOrMatchedUser = matchedUser ?: UserProfile(
+                id = req.userId.ifBlank { req.id },
+                username = req.username.ifBlank { req.inGameName.ifBlank { "Player" } },
+                ign = req.inGameName.ifBlank { req.username },
+                email = req.userEmail,
+                gameId = req.freeFireId,
+                banCaseId = req.relatedId,
+                activeAppealTicketId = req.id,
+                isBanned = true,
+                status = "BANNED",
+                accountStatus = "BANNED"
+            )
+            // 1. Unban across all RTDB & Firestore user nodes and sweep /banned_users
+            setUserBanStatus(
+                user = syntheticOrMatchedUser.copy(
+                    banCaseId = syntheticOrMatchedUser.banCaseId.ifBlank { req.relatedId },
+                    activeAppealTicketId = req.id
+                ),
+                isBanned = false,
+                reason = "",
+                adminEmail = adminEmail
+            )
+            // 2. Mark the ticket RESOLVED across all ticket/appeal paths
+            if (req.id.isNotBlank()) {
+                replyAndUpdateUnifiedTicket(
+                    req = req,
+                    newStatus = "RESOLVED",
+                    adminReply = replyText,
+                    deliveredRedeemCode = "",
+                    adminEmail = adminEmail
+                )
+            }
+            GlobalErrorManager.emitSuccess("Appeal #${req.id} APPROVED & ${syntheticOrMatchedUser.username} UNBANNED!")
+            true
+        } catch (e: Exception) {
+            GlobalErrorManager.emitError("Failed to approve ban appeal: ${e.message}")
+            false
+        }
+    }
+
+    suspend fun rejectBanAppeal(
+        req: UnifiedAdminRequest,
+        adminNote: String,
+        adminEmail: String
+    ): Boolean {
+        return try {
+            val replyText = adminNote.trim().ifBlank {
+                "Your ban appeal (#${req.id}) was reviewed and REJECTED due to confirmed Fair Play / Anti-Cheat policy violations."
+            }
+            val ok = replyAndUpdateUnifiedTicket(
+                req = req,
+                newStatus = "REJECTED",
+                adminReply = replyText,
+                deliveredRedeemCode = "",
+                adminEmail = adminEmail
+            )
+            if (req.userId.isNotBlank()) {
+                val updates = mapOf<String, Any>(
+                    "activeAppealStatus" to "REJECTED",
+                    "appealStatus" to "REJECTED",
+                    "updatedAt" to System.currentTimeMillis()
+                )
+                try { database.child("users").child(req.userId).updateChildren(updates).await() } catch (_: Exception) {}
+                try { database.child("banned_users").child(req.userId).updateChildren(updates).await() } catch (_: Exception) {}
+                try { firestore.collection("users").document(req.userId).set(updates, SetOptions.merge()).await() } catch (_: Exception) {}
+                try { firestore.collection("banned_users").document(req.userId).set(updates, SetOptions.merge()).await() } catch (_: Exception) {}
+            }
+            ok
+        } catch (e: Exception) {
+            GlobalErrorManager.emitError("Failed to reject ban appeal: ${e.message}")
+            false
         }
     }
 
@@ -3431,7 +4080,7 @@ class AdminIntegrationSyncManager(
                 deliveredRedeemCode = cleanCode,
                 adminEmail = adminEmail,
                 now = now,
-                channelNode = req.resolvedChannel.rtdbNode
+                channelNode = if (req.isBanAppeal) "ban_appeals" else req.resolvedChannel.rtdbNode
             )
             publishGlobalAppStateEvent(
                 eventType = "SUPPORT_TICKET_UPDATED",
@@ -3447,6 +4096,50 @@ class AdminIntegrationSyncManager(
             true
         } catch (e: Exception) {
             GlobalErrorManager.emitError("Ticket reply failed: ${e.message}")
+            false
+        }
+    }
+
+    suspend fun approveAccountDeletionFromUnifiedTicket(
+        req: UnifiedAdminRequest,
+        adminNote: String,
+        adminEmail: String
+    ): Boolean {
+        val uid = req.userId.trim()
+        if (req.id.isBlank() || uid.isBlank()) {
+            GlobalErrorManager.emitError("Missing user ID on Account Deletion ticket.")
+            return false
+        }
+        return try {
+            val now = System.currentTimeMillis()
+            val replyText = adminNote.trim().ifBlank {
+                "Your Account Deletion request has been APPROVED and your user profile has been permanently erased."
+            }
+            // Delete users/{uid} in Firestore & RTDB
+            try { firestore.collection("users").document(uid).delete().await() } catch (_: Exception) {}
+            try { database.child("users").child(uid).removeValue().await() } catch (_: Exception) {}
+            try { database.child("userProfiles").child(uid).removeValue().await() } catch (_: Exception) {}
+
+            syncLinkedTicketAcrossAllPaths(
+                ticketId = req.id,
+                userId = uid,
+                status = "RESOLVED",
+                adminReply = replyText,
+                deliveredRedeemCode = "",
+                adminEmail = adminEmail,
+                now = now,
+                channelNode = "account_deletion_requests"
+            )
+            publishGlobalAppStateEvent(
+                eventType = "USER_STATUS_CHANGED",
+                affectedUserId = uid,
+                payload = mapOf("newStatus" to "DELETED", "ticketId" to req.id)
+            )
+            writeAuditLog("ACCOUNT_DELETED", "Deleted user $uid via ACCOUNT_DELETION ticket ${req.id}", adminEmail, uid)
+            GlobalErrorManager.emitSuccess("User $uid deleted & ticket ${req.id.takeLast(8)} resolved!")
+            true
+        } catch (e: Exception) {
+            GlobalErrorManager.emitError("Account deletion failed: ${e.message}")
             false
         }
     }

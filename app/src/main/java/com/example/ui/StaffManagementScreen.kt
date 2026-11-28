@@ -117,51 +117,61 @@ fun StaffManagementScreenContent(
     if (showGrantDialog) {
         AlertDialog(
             onDismissRequest = { showGrantDialog = false },
-            title = { Text("Grant Admin Staff Access", color = Color.White, fontWeight = FontWeight.Bold) },
+            title = { Text("Grant Admin Staff Access", color = V14TextPrimary, fontWeight = FontWeight.Bold) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Add staff credentials to RTDB /admins node.", color = Color.LightGray, fontSize = 12.sp)
+                    Text("Add staff credentials to RTDB /admins node.", color = V14TextSecondary, fontSize = 12.sp)
                     OutlinedTextField(
                         value = newEmail,
                         onValueChange = { newEmail = it },
-                        label = { Text("Email Address*", color = Color.Gray) },
-                        placeholder = { Text("admin@velorix.com") },
+                        label = { Text("Email Address*", color = V14TextMuted) },
+                        placeholder = { Text("admin@velorix.com", color = V14TextMuted) },
+                        shape = RoundedCornerShape(12.dp),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
-                            focusedBorderColor = VelorixAccent,
-                            unfocusedBorderColor = CardVerifyBorder
+                            focusedTextColor = V14TextPrimary,
+                            unfocusedTextColor = V14TextPrimary,
+                            focusedContainerColor = Color(0xFF08080B),
+                            unfocusedContainerColor = Color(0xFF08080B),
+                            focusedBorderColor = V14AccentBright,
+                            unfocusedBorderColor = V14Border,
+                            cursorColor = V14AccentBright
                         ),
                         modifier = Modifier.fillMaxWidth()
                     )
                     OutlinedTextField(
                         value = newName,
                         onValueChange = { newName = it },
-                        label = { Text("Display Name", color = Color.Gray) },
-                        placeholder = { Text("e.g. Lead Moderator") },
+                        label = { Text("Display Name", color = V14TextMuted) },
+                        placeholder = { Text("e.g. Lead Moderator", color = V14TextMuted) },
+                        shape = RoundedCornerShape(12.dp),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
-                            focusedBorderColor = VelorixAccent,
-                            unfocusedBorderColor = CardVerifyBorder
+                            focusedTextColor = V14TextPrimary,
+                            unfocusedTextColor = V14TextPrimary,
+                            focusedContainerColor = Color(0xFF08080B),
+                            unfocusedContainerColor = Color(0xFF08080B),
+                            focusedBorderColor = V14AccentBright,
+                            unfocusedBorderColor = V14Border,
+                            cursorColor = V14AccentBright
                         ),
                         modifier = Modifier.fillMaxWidth()
                     )
-                    Text("Select Role Level:", color = Color.Gray, fontSize = 11.sp)
+                    Text("Select Role Level:", color = V14TextMuted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf("super_admin", "tournament_admin", "support_admin").forEach { role ->
                             val isSel = selectedRole == role
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .background(if (isSel) VelorixAccent else CardLiveBg, RoundedCornerShape(8.dp))
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(if (isSel) V14AccentPrimary else V14CardElevated)
+                                    .border(1.dp, if (isSel) V14AccentBright else V14Border, RoundedCornerShape(10.dp))
                                     .clickable { selectedRole = role }
-                                    .padding(vertical = 8.dp),
+                                    .padding(vertical = 9.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
                                     role.replace("_", " ").uppercase(),
-                                    color = if (isSel) Color.Black else Color.LightGray,
+                                    color = if (isSel) Color.White else V14TextSecondary,
                                     fontSize = 9.sp,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -180,17 +190,19 @@ fun StaffManagementScreenContent(
                             newName = ""
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent)
+                    colors = ButtonDefaults.buttonColors(containerColor = V14AccentPrimary),
+                    shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text("Grant Access", color = Color.Black, fontWeight = FontWeight.Bold)
+                    Text("Grant Access", color = Color.White, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showGrantDialog = false }) {
-                    Text("Cancel", color = Color.Gray)
+                    Text("Cancel", color = V14TextSecondary)
                 }
             },
-            containerColor = CardLiveBg
+            containerColor = V14CardSurface,
+            shape = RoundedCornerShape(20.dp)
         )
     }
 
@@ -239,13 +251,13 @@ fun StaffManagementScreenContent(
                 Spacer(modifier = Modifier.width(8.dp))
                 Button(
                     onClick = { showGrantDialog = true },
-                    colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                    shape = RoundedCornerShape(8.dp)
+                    colors = ButtonDefaults.buttonColors(containerColor = V14AccentPrimary),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                    shape = RoundedCornerShape(12.dp)
                 ) {
-                    Icon(Icons.Default.Add, contentDescription = null, tint = Color.Black, modifier = Modifier.size(14.dp))
+                    Icon(Icons.Default.Add, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("+ Add Admin", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("Add Admin", color = Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                 }
             }
 
@@ -256,7 +268,7 @@ fun StaffManagementScreenContent(
             ) {
                 Text(
                     text = "Tap any admin to inspect details & edit credentials",
-                    color = VelorixAccent,
+                    color = V14TextSecondary,
                     fontSize = 11.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -265,13 +277,13 @@ fun StaffManagementScreenContent(
                 Spacer(modifier = Modifier.width(8.dp))
                 Box(
                     modifier = Modifier
-                        .background(VelorixAccent.copy(alpha = 0.18f), RoundedCornerShape(8.dp))
-                        .border(1.dp, VelorixAccent.copy(alpha = 0.35f), RoundedCornerShape(8.dp))
+                        .background(V14AccentPrimary.copy(alpha = 0.14f), RoundedCornerShape(8.dp))
+                        .border(1.dp, V14AccentBright.copy(alpha = 0.35f), RoundedCornerShape(8.dp))
                         .padding(horizontal = 10.dp, vertical = 5.dp)
                 ) {
                     Text(
                         text = "$activeAdminsCount / ${adminsList.size} Active",
-                        color = VelorixAccent,
+                        color = V14AccentBright,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1
@@ -280,19 +292,23 @@ fun StaffManagementScreenContent(
             }
         }
 
-        // Search Bar
+        // Recessed V14 Search Bar
         OutlinedTextField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
-            placeholder = { Text("Search admin by UID, Name, Email, Role...", color = Color.Gray, fontSize = 13.sp) },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search", tint = Color.Gray) },
+            placeholder = { Text("Search admin by UID, Name, Email, Role...", color = V14TextMuted, fontSize = 13.sp) },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search", tint = V14TextMuted) },
             singleLine = true,
+            shape = RoundedCornerShape(12.dp),
             modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
             colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color.White,
-                focusedBorderColor = VelorixAccent,
-                unfocusedBorderColor = CardVerifyBorder
+                focusedTextColor = V14TextPrimary,
+                unfocusedTextColor = V14TextPrimary,
+                focusedContainerColor = Color(0xFF08080B),
+                unfocusedContainerColor = Color(0xFF08080B),
+                focusedBorderColor = V14AccentBright,
+                unfocusedBorderColor = V14Border,
+                cursorColor = V14AccentBright
             )
         )
 
@@ -392,10 +408,10 @@ fun RealAdminCard(
     }
 
     val roleColor = when (admin.role.lowercase()) {
-        "super_admin" -> Color(0xFFFF9800)
-        "tournament_admin" -> VelorixAccent
-        "support_admin" -> Color(0xFF03A9F4)
-        else -> VelorixAccent
+        "super_admin" -> VelorixAmber
+        "tournament_admin" -> V14AccentBright
+        "support_admin" -> VelorixEmerald
+        else -> V14AccentBright
     }
 
     Column(
@@ -727,42 +743,54 @@ fun AdminDetailsInspectorDialog(
                                     OutlinedTextField(
                                         value = editName,
                                         onValueChange = { editName = it },
-                                        label = { Text("Display Name / Title", color = Color.Gray, fontSize = 11.sp) },
+                                        label = { Text("Display Name / Title", color = V14TextMuted, fontSize = 11.sp) },
                                         singleLine = true,
+                                        shape = RoundedCornerShape(12.dp),
                                         modifier = Modifier.fillMaxWidth(),
                                         colors = OutlinedTextFieldDefaults.colors(
-                                            focusedTextColor = Color.White,
-                                            unfocusedTextColor = Color.White,
-                                            focusedBorderColor = VelorixAccent,
-                                            unfocusedBorderColor = CardVerifyBorder
+                                            focusedTextColor = V14TextPrimary,
+                                            unfocusedTextColor = V14TextPrimary,
+                                            focusedContainerColor = Color(0xFF08080B),
+                                            unfocusedContainerColor = Color(0xFF08080B),
+                                            focusedBorderColor = V14AccentBright,
+                                            unfocusedBorderColor = V14Border,
+                                            cursorColor = V14AccentBright
                                         )
                                     )
                                     Spacer(modifier = Modifier.height(8.dp))
                                     OutlinedTextField(
                                         value = editEmail,
                                         onValueChange = { editEmail = it },
-                                        label = { Text("Admin Email", color = Color.Gray, fontSize = 11.sp) },
+                                        label = { Text("Admin Email", color = V14TextMuted, fontSize = 11.sp) },
                                         singleLine = true,
+                                        shape = RoundedCornerShape(12.dp),
                                         modifier = Modifier.fillMaxWidth(),
                                         colors = OutlinedTextFieldDefaults.colors(
-                                            focusedTextColor = Color.White,
-                                            unfocusedTextColor = Color.White,
-                                            focusedBorderColor = VelorixAccent,
-                                            unfocusedBorderColor = CardVerifyBorder
+                                            focusedTextColor = V14TextPrimary,
+                                            unfocusedTextColor = V14TextPrimary,
+                                            focusedContainerColor = Color(0xFF08080B),
+                                            unfocusedContainerColor = Color(0xFF08080B),
+                                            focusedBorderColor = V14AccentBright,
+                                            unfocusedBorderColor = V14Border,
+                                            cursorColor = V14AccentBright
                                         )
                                     )
                                     Spacer(modifier = Modifier.height(8.dp))
                                     OutlinedTextField(
                                         value = editGrantedBy,
                                         onValueChange = { editGrantedBy = it },
-                                        label = { Text("Granted By / Supervised By", color = Color.Gray, fontSize = 11.sp) },
+                                        label = { Text("Granted By / Supervised By", color = V14TextMuted, fontSize = 11.sp) },
                                         singleLine = true,
+                                        shape = RoundedCornerShape(12.dp),
                                         modifier = Modifier.fillMaxWidth(),
                                         colors = OutlinedTextFieldDefaults.colors(
-                                            focusedTextColor = Color.White,
-                                            unfocusedTextColor = Color.White,
-                                            focusedBorderColor = VelorixAccent,
-                                            unfocusedBorderColor = CardVerifyBorder
+                                            focusedTextColor = V14TextPrimary,
+                                            unfocusedTextColor = V14TextPrimary,
+                                            focusedContainerColor = Color(0xFF08080B),
+                                            unfocusedContainerColor = Color(0xFF08080B),
+                                            focusedBorderColor = V14AccentBright,
+                                            unfocusedBorderColor = V14Border,
+                                            cursorColor = V14AccentBright
                                         )
                                     )
                                     Spacer(modifier = Modifier.height(10.dp))
@@ -776,10 +804,11 @@ fun AdminDetailsInspectorDialog(
                                             onUpdateAdmin(updated)
                                             Toast.makeText(context, "Admin info updated successfully", Toast.LENGTH_SHORT).show()
                                         },
-                                        colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent),
-                                        modifier = Modifier.fillMaxWidth().height(38.dp)
+                                        colors = ButtonDefaults.buttonColors(containerColor = V14AccentPrimary),
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier.fillMaxWidth().height(42.dp)
                                     ) {
-                                        Text("Save Admin Info", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                        Text("Save Admin Info", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                     }
                                 }
 

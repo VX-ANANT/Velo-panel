@@ -46,48 +46,20 @@ object VelorixFcmManager {
     }
 
     fun initialize(context: Context) {
+        // Admin Panel dispatches notifications via Cloud Functions / Firestore / RTDB to User Panel apps
+        // and does not receive player FCM pushes. Avoid triggering FirebaseInstanceId token retrieval
+        // or topic syncs (which fail with TOO_MANY_REGISTRATIONS on emulators/devices at the GMS limit).
         try {
             val appidPrefs = context.getSharedPreferences("com.google.android.gms.appid", Context.MODE_PRIVATE)
-            if (appidPrefs.all.isNotEmpty()) {
-                appidPrefs.edit().clear().apply()
+            if (appidPrefs.contains("topic_operation_queue")) {
+                appidPrefs.edit().remove("topic_operation_queue").apply()
             }
         } catch (_: Exception) {}
 
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                // Ensure the Admin Panel unsubscribes from player topics so player pushes only hit the User Panel
-                val messaging = FirebaseMessaging.getInstance()
-                listOf("all_players", "user_panel", "tournaments", "velorix_players", "global_announcements").forEach { playerTopic ->
-                    try {
-                        messaging.unsubscribeFromTopic(playerTopic)
-                    } catch (_: Exception) {}
-                }
-
-                @Suppress("DEPRECATION")
-                messaging.token
-                    .addOnCompleteListener { task ->
-                        if (task.isSuccessful) {
-                            val token = task.result
-                            _fcmToken.value = token
-                            Log.d(TAG, "Admin Panel FCM Token retrieved: $token")
-                            if (!token.isNullOrBlank()) {
-                                saveTokenToFirebase(token)
-                            }
-                        } else {
-                            val err = task.exception
-                            val errMsg = err?.message ?: "Unknown error"
-                            Log.w(TAG, "FCM token registration skipped on this device: $errMsg")
-                            if (errMsg.contains("TOO_MANY_REGISTRATIONS", ignoreCase = true)) {
-                                try {
-                                    @Suppress("DEPRECATION")
-                                    messaging.deleteToken()
-                                } catch (_: Exception) {}
-                            }
-                        }
-                    }
-            } catch (e: Exception) {
-                Log.w(TAG, "FCM initialization handled safely: ${e.message}")
-            }
+        try {
+            FirebaseMessaging.getInstance().isAutoInitEnabled = false
+        } catch (e: Exception) {
+            Log.w(TAG, "FCM auto-init disable notice: ${e.message}")
         }
     }
 
@@ -97,10 +69,8 @@ object VelorixFcmManager {
     }
 
     fun unsubscribeFromTournamentTopic(tournamentId: String) {
-        val topic = "tournament_$tournamentId"
-        try {
-            FirebaseMessaging.getInstance().unsubscribeFromTopic(topic)
-        } catch (_: Exception) {}
+        // Admin panel never subscribes to player topics; skip topic sync to avoid FirebaseInstanceId registration calls
+        Log.d(TAG, "Skipped unsubscribing Admin Panel from player topic tournament_$tournamentId")
     }
 
     /**

@@ -32,6 +32,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.geometry.Offset
@@ -62,6 +63,7 @@ import com.example.domain.model.Tournament
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.Flow
 
@@ -176,49 +178,54 @@ fun TournamentApp(
                     if (hasNavigated) return
                     hasNavigated = true
                     try {
+                        splashStatusText = "Checking administrator session..."
+                        sessionProgress = 0.55f
+
+                        val currentUser = tournamentRepository.auth.currentUser
+                        val firebaseEmail = currentUser?.email?.trim()?.lowercase()
+                        val isAllowed = com.example.data.validation.TournamentBackendValidator.isAllowedAdminEmail(firebaseEmail)
                         val isExplicitLogout = bindingManager.isExplicitLogout()
-                        if (isExplicitLogout) {
-                            // User intentionally logged out previously; present manual login
+                        val isAutoLoginAllowed = bindingManager.isAutoLoginEligible()
+
+                        if (currentUser == null || !isAllowed || isExplicitLogout || !isAutoLoginAllowed) {
+                            // Sign out any unauthorized or legacy sync session so the Auth page always appears cleanly
+                            if (currentUser != null && !isAllowed) {
+                                try {
+                                    tournamentRepository.auth.signOut()
+                                } catch (_: Exception) {}
+                                bindingManager.clearAllRecordedAccounts()
+                                sharedPrefs.edit().remove("user_email").apply()
+                            }
+                            viewModel.setManualLoginEmail(null)
+                            splashStatusText = "Sign in required · Opening admin auth..."
+                            sessionProgress = 1.0f
+                            delay(180L)
                             navController.navigate("login") {
                                 popUpTo("splash") { inclusive = true }
                             }
                             return
                         }
 
-                        splashStatusText = "Restoring authenticated session..."
-                        sessionProgress = 0.6f
+                        val cleanEmail = firebaseEmail!!
+                        val username = currentUser.displayName?.ifBlank { null } ?: cleanEmail.substringBefore("@")
+                        val effectiveUid = currentUser.uid
 
-                        // Auto-detect active identity from Firebase Auth or local bound profile
-                        val currentUser = tournamentRepository.auth.currentUser
-                        val boundAccount = bindingManager.getBoundAccount()
-                        val savedEmail = sharedPrefs.getString("user_email", null)
-
-                        val activeIdentifier = currentUser?.email
-                            ?: currentUser?.phoneNumber
-                            ?: boundAccount?.email
-                            ?: savedEmail
-                            ?: bindingManager.getEffectiveActiveIdentity()
-
-                        val cleanEmail = activeIdentifier.trim().lowercase()
-                        val username = if (cleanEmail.contains("@")) cleanEmail.substringBefore("@") else cleanEmail
-                        val effectiveUid = currentUser?.uid ?: boundAccount?.uid ?: "ADM_${cleanEmail.replace("@", "_").replace(".", "_")}"
-
-                        // Bind account & store session state
                         bindingManager.bindAccount(cleanEmail, username, role = "super_admin", autoLogin = true, uid = effectiveUid)
                         tournamentRepository.recordAccountLocally(cleanEmail, username, role = "super_admin", uid = effectiveUid)
                         sharedPrefs.edit().putString("user_email", cleanEmail).apply()
                         viewModel.setManualLoginEmail(cleanEmail)
 
-                        // Trigger non-blocking async session sync
-                        coroutineScope.launch(Dispatchers.IO) {
+                        splashStatusText = "Syncing admin claims & token..."
+                        sessionProgress = 0.85f
+                        withContext(Dispatchers.IO) {
                             try {
                                 tournamentRepository.ensureAuthenticatedSession(cleanEmail)
                             } catch (_: Exception) {}
                         }
 
-                        splashStatusText = "Session restored · Launching console..."
+                        splashStatusText = "Admin verified · Launching console..."
                         sessionProgress = 1.0f
-                        delay(200L)
+                        delay(150L)
 
                         viewModel.fetchData()
                         navController.navigate("dashboard") {
@@ -226,17 +233,9 @@ fun TournamentApp(
                         }
                     } catch (e: Exception) {
                         e.printStackTrace()
-                        try {
-                            val fallbackEmail = "anantisback47@gmail.com"
-                            viewModel.setManualLoginEmail(fallbackEmail)
-                            viewModel.fetchData()
-                            navController.navigate("dashboard") {
-                                popUpTo("splash") { inclusive = true }
-                            }
-                        } catch (_: Exception) {
-                            navController.navigate("login") {
-                                popUpTo("splash") { inclusive = true }
-                            }
+                        viewModel.setManualLoginEmail(null)
+                        navController.navigate("login") {
+                            popUpTo("splash") { inclusive = true }
                         }
                     }
                 }
@@ -316,17 +315,27 @@ fun TournamentApp(
                     tournamentRepository = tournamentRepository,
                     incomingEmailLink = incomingEmailLink,
                     onEmailLinkHandled = onEmailLinkHandled,
-                    onLoginSuccess = { userEmail ->
+                    onLoginSuccess = { _ ->
                         coroutineScope.launch {
-                            val finalEmail = userEmail ?: bindingManager.getBoundAccount()?.email ?: "anantisback47@gmail.com"
-                            val cleanEmail = finalEmail.trim().lowercase()
-                            val username = cleanEmail.substringBefore("@")
+                            val firebaseUser = tournamentRepository.auth.currentUser
+                            val cleanEmail = firebaseUser?.email?.trim()?.lowercase()
+                            if (firebaseUser == null || !com.example.data.validation.TournamentBackendValidator.isAllowedAdminEmail(cleanEmail)) {
+                                try {
+                                    tournamentRepository.auth.signOut()
+                                } catch (_: Exception) {}
+                                bindingManager.clearAllRecordedAccounts()
+                                sharedPrefs.edit().remove("user_email").apply()
+                                viewModel.setManualLoginEmail(null)
+                                Toast.makeText(context, "Access Denied: Authorized Velorix Admin account required.", Toast.LENGTH_LONG).show()
+                                return@launch
+                            }
+                            val verifiedEmail = cleanEmail!!
+                            val username = firebaseUser.displayName?.ifBlank { null } ?: verifiedEmail.substringBefore("@")
                             bindingManager.setExplicitLogout(false)
-                            bindingManager.recordAccount(cleanEmail, username, role = "super_admin", autoLogin = true)
-                            tournamentRepository.recordAccountLocally(cleanEmail, username, role = "super_admin")
-                            tournamentRepository.ensureAuthenticatedSession(cleanEmail)
-                            viewModel.setManualLoginEmail(cleanEmail)
-                            sharedPrefs.edit().putString("user_email", cleanEmail).apply()
+                            tournamentRepository.recordAccountLocally(verifiedEmail, username, role = "super_admin", uid = firebaseUser.uid)
+                            tournamentRepository.ensureAuthenticatedSession(verifiedEmail)
+                            viewModel.setManualLoginEmail(verifiedEmail)
+                            sharedPrefs.edit().putString("user_email", verifiedEmail).apply()
                             viewModel.fetchData()
                             navController.navigate("dashboard") {
                                 popUpTo("login") { inclusive = true }
@@ -340,6 +349,32 @@ fun TournamentApp(
                 enterTransition = { fadeIn(tween(durationMillis = 280)) },
                 exitTransition = { fadeOut(tween(durationMillis = 220)) }
             ) {
+                // Real-time Firebase Auth guard: immediately eject any unauthenticated or non-allowlisted session
+                DisposableEffect(Unit) {
+                    val authInstance = tournamentRepository.auth
+                    val listener = com.google.firebase.auth.FirebaseAuth.AuthStateListener { firebaseAuth ->
+                        val activeUser = firebaseAuth.currentUser
+                        val activeEmail = activeUser?.email?.trim()?.lowercase()
+                        if (activeUser == null || !com.example.data.validation.TournamentBackendValidator.isAllowedAdminEmail(activeEmail)) {
+                            if (activeUser != null) {
+                                try { firebaseAuth.signOut() } catch (_: Exception) {}
+                            }
+                            bindingManager.clearAllRecordedAccounts()
+                            sharedPrefs.edit().remove("user_email").apply()
+                            viewModel.setManualLoginEmail(null)
+                            try {
+                                navController.navigate("login") {
+                                    popUpTo(0) { inclusive = true }
+                                }
+                            } catch (_: Exception) {}
+                        }
+                    }
+                    authInstance.addAuthStateListener(listener)
+                    onDispose {
+                        authInstance.removeAuthStateListener(listener)
+                    }
+                }
+
                 DashboardScreen(
                     uiState = uiState,
                     onTournamentClick = { tournamentId ->
@@ -566,61 +601,62 @@ fun TournamentApp(
                         viewModel = viewModel
                     )
                 } else {
-                    GlassBackgroundBox(accentColor = VelorixAccent) {
-                        Box(
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(V14Bg)
+                            .statusBarsPadding()
+                            .navigationBarsPadding()
+                            .padding(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
                             modifier = Modifier
-                                .fillMaxSize()
-                                .padding(24.dp),
-                            contentAlignment = Alignment.Center
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(V14CardSurface)
+                                .border(1.dp, V14Border, RoundedCornerShape(20.dp))
+                                .padding(24.dp)
                         ) {
-                            GlassCard(
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(20.dp),
-                                borderBrush = GlassTokens.GlassBorderGradient
+                            Box(
+                                modifier = Modifier
+                                    .size(56.dp)
+                                    .background(V14AccentPrimary.copy(alpha = 0.14f), CircleShape)
+                                    .border(1.dp, V14AccentBright.copy(alpha = 0.4f), CircleShape),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                                    modifier = Modifier.padding(16.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(56.dp)
-                                            .background(Color(0xFFEF4444).copy(alpha = 0.15f), CircleShape)
-                                            .border(1.dp, Color(0xFFEF4444).copy(alpha = 0.4f), CircleShape),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            Icons.Default.DeleteForever,
-                                            contentDescription = null,
-                                            tint = Color(0xFFEF4444),
-                                            modifier = Modifier.size(28.dp)
-                                        )
-                                    }
-                                    Text(
-                                        text = "Tournament Unavailable or Deleted",
-                                        color = Color.White,
-                                        fontSize = 17.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    Text(
-                                        text = "This tournament was permanently deleted or is no longer present in the database.",
-                                        color = Color(0xFFA1A1AA),
-                                        fontSize = 12.5.sp,
-                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                        lineHeight = 17.sp
-                                    )
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Button(
-                                        onClick = { navController.popBackStack() },
-                                        colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent),
-                                        shape = RoundedCornerShape(12.dp)
-                                    ) {
-                                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Return to Tournaments", color = Color.Black, fontWeight = FontWeight.Bold)
-                                    }
-                                }
+                                Icon(
+                                    Icons.Default.DeleteForever,
+                                    contentDescription = null,
+                                    tint = V14AccentBright,
+                                    modifier = Modifier.size(26.dp)
+                                )
+                            }
+                            Text(
+                                text = "Tournament Unavailable or Deleted",
+                                color = V14TextPrimary,
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "This tournament was permanently deleted or is no longer present in the database.",
+                                color = V14TextSecondary,
+                                fontSize = 12.5.sp,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                lineHeight = 18.sp
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Button(
+                                onClick = { navController.popBackStack() },
+                                colors = ButtonDefaults.buttonColors(containerColor = V14AccentPrimary),
+                                shape = RoundedCornerShape(14.dp),
+                                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)
+                            ) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Return to Tournaments", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                             }
                         }
                     }
@@ -766,31 +802,42 @@ fun TournamentApp(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(VelorixBg)
+                            .background(V14Bg)
+                            .statusBarsPadding()
+                            .navigationBarsPadding()
                             .padding(24.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                            verticalArrangement = Arrangement.spacedBy(14.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(V14CardSurface)
+                                .border(1.dp, V14Border, RoundedCornerShape(20.dp))
+                                .padding(24.dp)
                         ) {
-                            CircularProgressIndicator(color = VelorixAccent)
+                            CircularProgressIndicator(color = V14AccentBright, strokeWidth = 2.5.dp)
                             Text(
                                 text = "Tournament not found or loading...",
-                                color = VelorixTextPrimary,
+                                color = V14TextPrimary,
                                 fontSize = 14.sp,
-                                fontWeight = FontWeight.Medium
+                                fontWeight = FontWeight.SemiBold
                             )
-                            Spacer(modifier = Modifier.height(8.dp))
+                            Spacer(modifier = Modifier.height(4.dp))
                             OutlinedButton(
                                 onClick = { navController.popBackStack() },
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = VelorixAccent),
-                                border = BorderStroke(1.dp, VelorixAccent.copy(alpha = 0.5f)),
-                                shape = RoundedCornerShape(12.dp)
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    containerColor = V14CardElevated,
+                                    contentColor = V14TextPrimary
+                                ),
+                                border = BorderStroke(1.dp, V14Border),
+                                shape = RoundedCornerShape(14.dp)
                             ) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Return to Dashboard")
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, tint = V14AccentBright, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Return to Dashboard", color = V14TextPrimary, fontWeight = FontWeight.SemiBold)
                             }
                         }
                     }

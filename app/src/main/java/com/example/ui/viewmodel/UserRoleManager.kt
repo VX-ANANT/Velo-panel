@@ -317,14 +317,26 @@ class UserRoleManager(
             throw IllegalArgumentException("Guest/anonymous sessions cannot be banned.")
         }
         val now = System.currentTimeMillis()
-        val effectiveReason = if (isBanned) reason.ifBlank { "Banned by Admin Panel" } else ""
+        val effectiveReason = if (isBanned) reason.ifBlank { "Violation of Fair Play Terms / Anti-Cheat & Third-Party Tool Detection" } else ""
+        val resolvedCaseId = if (isBanned) {
+            user.banCaseId.ifBlank { "BAN-${user.id.take(6).uppercase()}" }
+        } else ""
         val updatedUser = user.copy(
             isBanned = isBanned,
+            status = if (isBanned) "BANNED" else "ACTIVE",
+            accountStatus = if (isBanned) "BANNED" else "ACTIVE",
             banReason = effectiveReason,
-            bannedAt = if (isBanned) now else 0L
+            banType = if (isBanned) "PERMANENT" else "",
+            banCaseId = resolvedCaseId,
+            bannedAt = if (isBanned) now else 0L,
+            isSuspended = if (!isBanned) false else user.isSuspended,
+            suspendedUntil = if (!isBanned) 0L else user.suspendedUntil,
+            activeAppealStatus = if (!isBanned) "RESOLVED" else user.activeAppealStatus,
+            version = (user.version + 1).coerceAtLeast(1),
+            updatedAt = now
         )
 
-        val userUpdates = mapOf<String, Any>(
+        val userUpdates = mutableMapOf<String, Any>(
             "id" to user.id,
             "uid" to user.id,
             "isBanned" to isBanned,
@@ -332,24 +344,54 @@ class UserRoleManager(
             "status" to if (isBanned) "BANNED" else "ACTIVE",
             "accountStatus" to if (isBanned) "BANNED" else "ACTIVE",
             "active" to !isBanned,
+            "isAuthorized" to !isBanned,
             "walletFrozen" to isBanned,
+            "matchmakingLocked" to isBanned,
+            "withdrawalsLocked" to isBanned,
             "banReason" to updatedUser.banReason,
+            "reason" to updatedUser.banReason,
+            "banType" to updatedUser.banType,
+            "sanction" to updatedUser.banType,
+            "banCaseId" to resolvedCaseId,
+            "sanctionId" to resolvedCaseId,
             "bannedAt" to updatedUser.bannedAt,
+            "bannedBy" to if (isBanned) bannedBy else "",
+            "version" to updatedUser.version,
             "updatedAt" to now
         )
+        if (!isBanned) {
+            userUpdates["isSuspended"] = false
+            userUpdates["suspendedUntil"] = 0L
+            userUpdates["suspensionEndTimeMillis"] = 0L
+            userUpdates["activeAppealStatus"] = "RESOLVED"
+            userUpdates["appealStatus"] = "RESOLVED"
+        }
 
         val banRecord = mapOf(
             "uid" to user.id,
             "id" to user.id,
             "userId" to user.id,
+            "username" to user.username.ifBlank { user.ign.ifBlank { "Player" } },
+            "ign" to user.ign.ifBlank { user.username },
+            "inGameName" to user.ign.ifBlank { user.username },
             "email" to user.email,
             "gameId" to user.gameId,
+            "freeFireId" to user.gameId,
             "reason" to updatedUser.banReason,
+            "banReason" to updatedUser.banReason,
+            "banType" to "PERMANENT",
+            "sanction" to "PERMANENT",
+            "banCaseId" to resolvedCaseId,
+            "sanctionId" to resolvedCaseId,
             "bannedBy" to bannedBy,
             "bannedAt" to now,
             "timestamp" to now,
+            "updatedAt" to now,
             "permanent" to true,
-            "status" to if (isBanned) "BANNED" else "UNBANNED"
+            "isBanned" to isBanned,
+            "banned" to isBanned,
+            "status" to if (isBanned) "BANNED" else "ACTIVE",
+            "accountStatus" to if (isBanned) "BANNED" else "ACTIVE"
         )
 
         var rtdbUpdated = false
@@ -380,11 +422,25 @@ class UserRoleManager(
             Log.w(TAG, "RTDB write players/${user.id}: ${e.message}")
         }
 
+        val emailLower = user.email.trim().lowercase()
+        val emailKeyUnderscore = emailLower.replace(".", "_")
+        val emailKeyComma = emailLower.replace(".", ",")
+
         try {
             if (isBanned) {
                 database.child("banned_users").child(user.id).setValue(banRecord).await()
             } else {
                 database.child("banned_users").child(user.id).removeValue().await()
+                if (emailKeyUnderscore.isNotBlank()) {
+                    try { database.child("banned_users").child(emailKeyUnderscore).removeValue().await() } catch (_: Exception) {}
+                }
+                if (emailKeyComma.isNotBlank()) {
+                    try { database.child("banned_users").child(emailKeyComma).removeValue().await() } catch (_: Exception) {}
+                }
+                if (user.gameId.isNotBlank()) {
+                    try { database.child("banned_users").child(user.gameId.trim()).removeValue().await() } catch (_: Exception) {}
+                }
+                try { database.child("suspended_users").child(user.id).removeValue().await() } catch (_: Exception) {}
             }
             rtdbUpdated = true
         } catch (e: Exception) {
@@ -402,6 +458,16 @@ class UserRoleManager(
                 firestore.collection("banned_users").document(user.id).set(banRecord, SetOptions.merge()).await()
             } else {
                 firestore.collection("banned_users").document(user.id).delete().await()
+                if (emailKeyUnderscore.isNotBlank()) {
+                    try { firestore.collection("banned_users").document(emailKeyUnderscore).delete().await() } catch (_: Exception) {}
+                }
+                if (emailKeyComma.isNotBlank()) {
+                    try { firestore.collection("banned_users").document(emailKeyComma).delete().await() } catch (_: Exception) {}
+                }
+                if (user.gameId.isNotBlank()) {
+                    try { firestore.collection("banned_users").document(user.gameId.trim()).delete().await() } catch (_: Exception) {}
+                }
+                try { firestore.collection("suspended_users").document(user.id).delete().await() } catch (_: Exception) {}
             }
             firestoreUpdated = true
         } catch (e: Exception) {

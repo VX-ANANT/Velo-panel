@@ -1,6 +1,7 @@
 package com.example.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.ui.platform.testTag
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -388,6 +389,8 @@ fun DashboardScreen(
                                 )
                             }
                             "users" -> {
+                                val allUnifiedReqs by (viewModel?.unifiedRequests?.collectAsState() ?: remember { mutableStateOf(emptyList()) })
+                                val liveBanAppeals = remember(allUnifiedReqs) { allUnifiedReqs.filter { it.isBanAppeal } }
                                 UsersManagementScreenContent(
                                     uiState = uiState,
                                     onToggleBan = onToggleUserBan,
@@ -397,7 +400,10 @@ fun DashboardScreen(
                                     onDeleteUser = onDeleteUser,
                                     onUpdateUser = { onUpdateUser?.invoke(it) },
                                     onRefreshUserData = onRefreshUserData,
-                                    onUnbanGuestSessions = onUnbanGuestSessions
+                                    onUnbanGuestSessions = onUnbanGuestSessions,
+                                    banAppeals = liveBanAppeals,
+                                    onApproveBanAppeal = { req, note -> viewModel?.approveBanAppealAndUnban(req, note) },
+                                    onRejectBanAppeal = { req, note -> viewModel?.rejectBanAppeal(req, note) }
                                 )
                             }
                             "complaints" -> {
@@ -419,6 +425,7 @@ fun DashboardScreen(
                             }
                             "payouts" -> {
                                 var financeSubTab by remember { mutableStateOf(0) }
+                                val v14Crimson = Color(0xFFFF2E5B)
                                 Column(
                                     modifier = Modifier
                                         .fillMaxSize()
@@ -434,12 +441,16 @@ fun DashboardScreen(
                                         val pendingUtrDeposits = viewModel?.depositRequests?.collectAsState()?.value?.count {
                                             it.status.equals("PENDING", ignoreCase = true)
                                         } ?: 0
-                                        data class FinanceTabItem(val idx: Int, val icon: ImageVector, val badge: Int, val desc: String)
+                                        val pendingUnifiedWithdrawals = viewModel?.unifiedWithdrawals?.collectAsState()?.value?.count {
+                                            !it.isDeposit && it.status.equals("PENDING", ignoreCase = true)
+                                        } ?: uiState.pendingCashoutsCount
+                                        val totalFinancePending = pendingUtrDeposits + pendingUnifiedWithdrawals
+
+                                        data class FinanceTabItem(val idx: Int, val icon: ImageVector, val label: String, val badge: Int)
                                         val financeTabs = listOf(
-                                            FinanceTabItem(0, Icons.Default.AccountBalanceWallet, 0, "Send Funds"),
-                                            FinanceTabItem(1, Icons.Default.Payments, uiState.pendingCashoutsCount, "Payouts"),
-                                            FinanceTabItem(2, Icons.Default.QrCodeScanner, pendingUtrDeposits, "UTR Queue"),
-                                            FinanceTabItem(3, Icons.AutoMirrored.Filled.TrendingUp, 0, "Revenue")
+                                            FinanceTabItem(0, Icons.Default.AccountBalanceWallet, "Funds", 0),
+                                            FinanceTabItem(1, Icons.Default.QrCodeScanner, "Payouts & UPI", totalFinancePending),
+                                            FinanceTabItem(2, Icons.AutoMirrored.Filled.TrendingUp, "Revenue", 0)
                                         )
                                         financeTabs.forEach { tab ->
                                             val selected = financeSubTab == tab.idx
@@ -447,34 +458,49 @@ fun DashboardScreen(
                                                 modifier = Modifier
                                                     .weight(1f)
                                                     .clickable { financeSubTab = tab.idx }
-                                                    .padding(top = 10.dp),
+                                                    .padding(top = 10.dp)
+                                                    .testTag("finance_subtab_${tab.idx}"),
                                                 horizontalAlignment = Alignment.CenterHorizontally
                                             ) {
                                                 Row(
                                                     verticalAlignment = Alignment.CenterVertically,
-                                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
                                                 ) {
                                                     Icon(
                                                         imageVector = tab.icon,
-                                                        contentDescription = tab.desc,
-                                                        tint = if (selected) Color.White else Color(0xFF71717A),
-                                                        modifier = Modifier.size(20.dp)
+                                                        contentDescription = tab.label,
+                                                        tint = if (selected) v14Crimson else Color(0xFF8A8A96),
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                    Text(
+                                                        text = tab.label,
+                                                        color = if (selected) Color.White else Color(0xFF8A8A96),
+                                                        fontSize = 11.5.sp,
+                                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                                        maxLines = 1,
+                                                        softWrap = false
                                                     )
                                                     if (tab.badge > 0) {
-                                                        Text(
-                                                            text = "${tab.badge}",
-                                                            fontSize = 10.sp,
-                                                            fontWeight = FontWeight.Bold,
-                                                            color = Color(0xFFFBBF24)
-                                                        )
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .background(Color(0xFFFBBF24).copy(alpha = 0.18f), RoundedCornerShape(999.dp))
+                                                                .padding(horizontal = 5.dp, vertical = 1.dp)
+                                                        ) {
+                                                            Text(
+                                                                text = "${tab.badge}",
+                                                                fontSize = 9.5.sp,
+                                                                fontWeight = FontWeight.Bold,
+                                                                color = Color(0xFFFBBF24)
+                                                            )
+                                                        }
                                                     }
                                                 }
-                                                Spacer(modifier = Modifier.height(7.dp))
+                                                Spacer(modifier = Modifier.height(8.dp))
                                                 Box(
                                                     modifier = Modifier
                                                         .height(2.dp)
-                                                        .width(36.dp)
-                                                        .background(if (selected) Color.White else Color.Transparent)
+                                                        .fillMaxWidth(0.72f)
+                                                        .background(if (selected) v14Crimson else Color.Transparent)
                                                 )
                                             }
                                         }
@@ -495,18 +521,17 @@ fun DashboardScreen(
                                                 )
                                             }
                                             1 -> {
-                                                PayoutsManagementScreenContent(
-                                                    uiState = uiState,
-                                                    onApprovePayout = { req -> onApprovePayout?.invoke(req) },
-                                                    onRejectPayout = { req, reason -> onRejectPayout?.invoke(req, reason) }
-                                                )
-                                            }
-                                            2 -> {
                                                 if (viewModel != null) {
                                                     val liveDeposits by viewModel.depositRequests.collectAsState()
                                                     DepositVerificationQueueSection(
                                                         viewModel = viewModel,
                                                         depositRequests = liveDeposits
+                                                    )
+                                                } else {
+                                                    PayoutsManagementScreenContent(
+                                                        uiState = uiState,
+                                                        onApprovePayout = { req -> onApprovePayout?.invoke(req) },
+                                                        onRejectPayout = { req, reason -> onRejectPayout?.invoke(req, reason) }
                                                     )
                                                 }
                                             }
@@ -516,6 +541,7 @@ fun DashboardScreen(
                                                     users = uiState.users,
                                                     payouts = uiState.payoutRequests,
                                                     onBack = { financeSubTab = 0 },
+                                                    embeddedInTab = true,
                                                     onTournamentClick = onTournamentClick,
                                                     onBroadcastRoomCredentials = { tourneyId, rId, rPass ->
                                                         val target = uiState.tournaments.find { it.id == tourneyId }
@@ -673,7 +699,9 @@ fun DashboardScreen(
     }
 
     if (showAdminProfileDialog) {
-        val currentEmail = (uiState as? DashboardState.Success)?.currentUserEmail ?: "anantisback47@gmail.com"
+        val currentEmail = (uiState as? DashboardState.Success)?.currentUserEmail
+            ?: com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.email
+            ?: "Authorized Admin"
         val successState = uiState as? DashboardState.Success
         AdminProfileDialog(
             email = currentEmail,
@@ -1999,6 +2027,8 @@ fun OperationsHubScreenContent(
         ) {
             when (selectedSection) {
                 0 -> {
+                    val allUnifiedReqs by (viewModel?.unifiedRequests?.collectAsState() ?: remember { mutableStateOf(emptyList()) })
+                    val liveBanAppeals = remember(allUnifiedReqs) { allUnifiedReqs.filter { it.isBanAppeal } }
                     UsersManagementScreenContent(
                         uiState = uiState,
                         onToggleBan = onToggleUserBan,
@@ -2008,7 +2038,10 @@ fun OperationsHubScreenContent(
                         onDeleteUser = onDeleteUser,
                         onUpdateUser = { onUpdateUser?.invoke(it) },
                         onRefreshUserData = onRefreshUserData,
-                        onUnbanGuestSessions = onUnbanGuestSessions
+                        onUnbanGuestSessions = onUnbanGuestSessions,
+                        banAppeals = liveBanAppeals,
+                        onApproveBanAppeal = { req, note -> viewModel?.approveBanAppealAndUnban(req, note) },
+                        onRejectBanAppeal = { req, note -> viewModel?.rejectBanAppeal(req, note) }
                     )
                 }
                 1 -> {
@@ -2733,10 +2766,10 @@ fun AdminProfileDialog(
 
                 HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
 
-                // Hairline-Divided 2x2 Match Hosting Metrics Grid (Zero Nested Boxes)
+                // Hairline-Divided 2x2 Match Hosting Metrics Grid (V14 AMOLED Palette)
                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f).padding(vertical = 10.dp)) {
-                        Text("HOSTED", color = Color(0xFFA78BFA), fontSize = 9.5.sp, fontWeight = FontWeight.Bold)
+                        Text("HOSTED", color = Color(0xFFFF2E5B), fontSize = 9.5.sp, fontWeight = FontWeight.Bold)
                         Text("$totalMatchesHosted", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
                         Text("Total Matches", color = Color(0xFF71717A), fontSize = 9.5.sp)
                     }
@@ -2758,7 +2791,7 @@ fun AdminProfileDialog(
                     }
                     Box(modifier = Modifier.width(0.5.dp).height(44.dp).background(Color.White.copy(alpha = 0.08f)))
                     Column(modifier = Modifier.weight(1f).padding(start = 12.dp, top = 10.dp, bottom = 10.dp)) {
-                        Text("PLAYERS", color = Color(0xFF38BDF8), fontSize = 9.5.sp, fontWeight = FontWeight.Bold)
+                        Text("PLAYERS", color = Color(0xFFE4E4E7), fontSize = 9.5.sp, fontWeight = FontWeight.Bold)
                         Text("$totalPlayersServed", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
                         Text("Live: $liveMatches • Up: $upcomingMatches", color = Color(0xFF71717A), fontSize = 9.5.sp)
                     }
@@ -2766,13 +2799,10 @@ fun AdminProfileDialog(
 
                 HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
 
-                // Quick Navigation Links (Flat Hairline Rows)
+                // Essential Operational Links Only
                 val navLinks = listOf(
-                    Triple("Tournaments & Matches Center", Icons.Default.EmojiEvents) { onNavigateTab("tournaments_list") },
-                    Triple("Staff & RBAC Roles", Icons.Default.Shield) { onNavigateTab("admins") },
-                    Triple("Rate Limiter & Quota Engine", UntitledIcons.Sliders) { onOpenRateLimiter() },
-                    Triple("SFX Audio Lab", Icons.Default.Headphones) { onOpenAudioLab() },
-                    Triple("Attributions & Tech Credits", Icons.Default.Info) { onOpenAttributions() }
+                    Triple("Tournaments & Matches", Icons.Default.EmojiEvents) { onNavigateTab("tournaments_list") },
+                    Triple("Authorized Admins", Icons.Default.Shield) { onNavigateTab("admins") }
                 )
 
                 navLinks.forEach { (title, icon, action) ->
@@ -2780,14 +2810,14 @@ fun AdminProfileDialog(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { action() }
-                            .padding(vertical = 11.dp),
+                            .padding(vertical = 12.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(icon, contentDescription = null, tint = Color(0xFFA1A1AA), modifier = Modifier.size(16.dp))
+                            Icon(icon, contentDescription = null, tint = Color(0xFFFF2E5B), modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(10.dp))
-                            Text(title, color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+                            Text(title, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                         }
                         Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = Color(0xFF52525B), modifier = Modifier.size(14.dp))
                     }
@@ -2798,11 +2828,11 @@ fun AdminProfileDialog(
 
                 TextButton(
                     onClick = onLogoutClick,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth().testTag("profile_logout_button")
                 ) {
-                    Icon(Icons.Default.ExitToApp, contentDescription = "Log Out", tint = Color(0xFFEF4444), modifier = Modifier.size(16.dp))
+                    Icon(Icons.Default.ExitToApp, contentDescription = "Log Out", tint = Color(0xFFFF4D6D), modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Log Out Administrator", color = Color(0xFFEF4444), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text("Log Out Administrator", color = Color(0xFFFF4D6D), fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 }
             }
         }

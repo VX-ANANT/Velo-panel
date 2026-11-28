@@ -79,61 +79,61 @@ object GlassTokens {
     // Pure AMOLED Pitch Black Base
     val DeepCanvas = Color(0xFF000000)
     
-    // Neutral dark system surfaces (zero blue tint)
+    // Neutral V14 AMOLED Bento surfaces (zero blue/slate tint)
     val GlassSurfacePrimary = Brush.linearGradient(
         colors = listOf(
-            Color(0xFF0A0A0D),
-            Color(0xFF0A0A0D)
+            Color(0xFF0C0C10),
+            Color(0xFF0C0C10)
         )
     )
 
     val GlassSurfaceBright = Brush.linearGradient(
         colors = listOf(
-            Color(0xFF121216),
-            Color(0xFF121216)
+            Color(0xFF14141B),
+            Color(0xFF14141B)
         )
     )
 
     val GlassSurfaceSubtle = Brush.linearGradient(
         colors = listOf(
-            Color(0xFF060608),
-            Color(0xFF060608)
+            Color(0xFF08080B),
+            Color(0xFF08080B)
         )
     )
 
-    // Subtle neutral hairline dividers (8% white, zero blue tint)
+    // Subtle neutral hairline dividers (V14Border, zero blue tint)
     val GlassBorderGradient = Brush.linearGradient(
         colors = listOf(
-            Color.White.copy(alpha = 0.08f),
-            Color.White.copy(alpha = 0.08f)
+            Color(0xFF1E1E27),
+            Color(0xFF1E1E27)
         )
     )
 
     val GlassBorderSubtle = Brush.linearGradient(
         colors = listOf(
-            Color.White.copy(alpha = 0.07f),
-            Color.White.copy(alpha = 0.07f)
+            Color(0xFF1E1E27),
+            Color(0xFF1E1E27)
         )
     )
 
     val GlassBorderActive = Brush.linearGradient(
         colors = listOf(
-            Color(0xFF38BDF8),
-            Color.White.copy(alpha = 0.14f)
+            Color(0xFFFF2E5B),
+            Color(0xFFFF0033).copy(alpha = 0.45f)
         )
     )
 
     val ActivePillGradient = Brush.horizontalGradient(
         colors = listOf(
-            Color(0xFFE6EDF3),
-            Color(0xFFD4D4D8)
+            Color(0xFFFF0033),
+            Color(0xFFFF2E5B)
         )
     )
 
     val FloatingOrbGradient = Brush.linearGradient(
         colors = listOf(
-            Color(0xFF0A0A0D),
-            Color(0xFF0A0A0D)
+            Color(0xFF0C0C10),
+            Color(0xFF0C0C10)
         )
     )
 }
@@ -224,7 +224,7 @@ fun GlassCard(
     val isDark = com.example.ui.theme.LocalIsDarkTheme.current
     val isActiveHighlight = borderBrush == GlassTokens.GlassBorderActive
     val strokeColor = if (isDark) {
-        if (isActiveHighlight) Color(0xFF38BDF8).copy(alpha = 0.45f) else Color.White.copy(alpha = 0.08f)
+        if (isActiveHighlight) Color(0xFFFF2E5B).copy(alpha = 0.55f) else Color(0xFF1E1E27)
     } else {
         Color(0xFFCBD5E1)
     }
@@ -240,8 +240,8 @@ fun GlassCard(
             .clip(shape)
             .then(clickModifier),
         shape = shape,
-        color = if (isDark) Color(0xFF0A0A0D) else Color.White,
-        border = BorderStroke(borderWidth, strokeColor)
+        color = if (isDark) Color(0xFF0C0C10) else Color.White,
+        border = BorderStroke(if (isActiveHighlight) 1.dp else borderWidth, strokeColor)
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp),
@@ -968,8 +968,9 @@ fun GlassOutlinedButton(
 ) {
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(8.dp))
-            .background(Color(0xFF1A2232))
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color(0xFF14141B))
+            .border(0.75.dp, if (borderColor == Color.Transparent) Color(0xFF1E1E27) else borderColor, RoundedCornerShape(10.dp))
             .bounceClick(scaleDown = 0.96f) { onClick() }
             .padding(horizontal = 12.dp, vertical = 9.dp),
         contentAlignment = Alignment.Center
@@ -1021,8 +1022,8 @@ fun ThemeToggleSwitch(
             .bounceClick(scaleDown = 0.92f) {
                 com.example.ui.theme.ThemeManager.toggleTheme(context)
             },
-        color = if (isDark) Color(0xFF131924) else Color(0xFFF1F5F9),
-        border = BorderStroke(1.dp, if (isDark) Color(0xFF222C3C) else Color(0xFFCBD5E1)),
+        color = if (isDark) Color(0xFF0C0C10) else Color(0xFFF1F5F9),
+        border = BorderStroke(1.dp, if (isDark) Color(0xFF1E1E27) else Color(0xFFCBD5E1)),
         shape = RoundedCornerShape(20.dp)
     ) {
         Row(
@@ -1033,7 +1034,7 @@ fun ThemeToggleSwitch(
             Icon(
                 imageVector = if (isDark) Icons.Default.DarkMode else Icons.Default.LightMode,
                 contentDescription = if (isDark) "Switch to Light Theme" else "Switch to Dark Theme",
-                tint = if (isDark) Color(0xFF818CF8) else Color(0xFFF59E0B),
+                tint = if (isDark) Color(0xFFFF2E5B) else Color(0xFFF59E0B),
                 modifier = Modifier
                     .size(15.dp)
                     .graphicsLayer(rotationZ = rotation)

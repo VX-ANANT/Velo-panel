@@ -32,7 +32,7 @@ fun FluidSwitch(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
-    accentColor: Color = Color(0xFF8B5CF6),
+    accentColor: Color = Color(0xFFFF0033),
     thumbIcon: ImageVector? = null,
     checkedThumbIcon: ImageVector? = null,
     uncheckedThumbIcon: ImageVector? = null
@@ -84,7 +84,7 @@ fun FluidSwitch(
                     .size(thumbSize)
                     .offset(x = thumbOffset),
                 shape = CircleShape,
-                color = if (checked) Color.Black else Color.White
+                color = Color.White
             ) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
@@ -119,7 +119,7 @@ fun <T> FluidSegmentedControl(
     selectedIndex: Int,
     onItemSelected: (Int) -> Unit,
     modifier: Modifier = Modifier,
-    accentColor: Color = Color(0xFF8B5CF6),
+    accentColor: Color = Color(0xFFFF0033),
     shape: Shape = RoundedCornerShape(0.dp),
     itemContent: @Composable (item: T, isSelected: Boolean) -> Unit
 ) {
@@ -183,7 +183,7 @@ fun FluidFloatingReviewBar(
     changesCount: Int,
     onDiscard: () -> Unit,
     onReview: () -> Unit,
-    accentColor: Color = Color(0xFF8B5CF6),
+    accentColor: Color = Color(0xFFFF0033),
     modifier: Modifier = Modifier
 ) {
     AnimatedVisibility(
@@ -300,7 +300,7 @@ fun FluidSettingsRow(
     title: String,
     subtitle: String? = null,
     icon: ImageVector? = null,
-    iconTint: Color = Color(0xFF8B5CF6),
+    iconTint: Color = Color(0xFFFF2E5B),
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {

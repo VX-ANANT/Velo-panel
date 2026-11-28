@@ -148,6 +148,10 @@ data class UserProfile(
     var banCaseId: String = "",
     @get:PropertyName("bannedAt") @set:PropertyName("bannedAt")
     var bannedAt: Long = 0L,
+    @get:PropertyName("activeAppealTicketId") @set:PropertyName("activeAppealTicketId")
+    var activeAppealTicketId: String = "",
+    @get:PropertyName("activeAppealStatus") @set:PropertyName("activeAppealStatus")
+    var activeAppealStatus: String = "",
     @get:PropertyName("isSuspended") @set:PropertyName("isSuspended")
     var isSuspended: Boolean = false,
     @get:PropertyName("suspendedUntil") @set:PropertyName("suspendedUntil")
@@ -214,6 +218,12 @@ data class UserProfile(
     var version: Int = 1,
     @get:PropertyName("updatedAt") @set:PropertyName("updatedAt")
     var updatedAt: Long = 0L,
+    @get:PropertyName("fcmToken") @set:PropertyName("fcmToken")
+    var fcmToken: String = "",
+    @get:PropertyName("isOnline") @set:PropertyName("isOnline")
+    var isOnline: Boolean = false,
+    @get:PropertyName("lastActiveAt") @set:PropertyName("lastActiveAt")
+    var lastActiveAt: Long = 0L,
     @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
     var rawAttributes: Map<String, String> = emptyMap()
 ) {
@@ -1574,14 +1584,13 @@ data class SystemConfig(
     var updatedAt: Long = System.currentTimeMillis()
 ) {
     companion object {
-        // Strictly the 6 Active Core Feature Flags (obsolete flags removed)
+        // Strictly the 5 Active Core Feature Flags (all legacy/obsolete flags removed)
         val ALL_FEATURE_FLAG_METADATA = listOf(
             Triple("tournament_join", "Tournament Joining", "Master switch for joining matches"),
             Triple("room_credentials_delivery", "Room ID Delivery", "Show Room ID & Password to joined players"),
             Triple("instant_withdrawals", "Instant Withdrawals", "Allow players to submit UPI & Voucher payouts"),
             Triple("token_conversion", "Token → VT Conversion", "10 Tokens = 1 VT in Wallet"),
-            Triple("daily_login_rewards", "Daily Login Streak", "7-Day Login Streak & Daily Missions"),
-            Triple("ai_sentinel_support", "AI Sentinel Support", "12-Channel Request Hub & My Tickets Desk")
+            Triple("daily_login_rewards", "Daily Login Streak", "7-Day Login Streak & Daily Missions")
         )
 
         fun defaultFeatureFlags(): Map<String, Boolean> =
@@ -1604,6 +1613,8 @@ data class TournamentStandingEntry(
     var characterId: String = "",
     @get:PropertyName("teamName") @set:PropertyName("teamName")
     var teamName: String = "",
+    @get:PropertyName("ticketCode") @set:PropertyName("ticketCode")
+    var ticketCode: String = "",
     @get:PropertyName("slotNumber") @set:PropertyName("slotNumber")
     var slotNumber: Int = 1,
     @get:PropertyName("kills") @set:PropertyName("kills")
@@ -1622,6 +1633,60 @@ data class TournamentStandingEntry(
     var payoutStatus: String = "NO_PRIZE",
     @get:PropertyName("updatedAt") @set:PropertyName("updatedAt")
     var updatedAt: Long = System.currentTimeMillis()
+)
+
+@IgnoreExtraProperties
+@Serializable
+data class ManualNotificationRecord(
+    @get:PropertyName("id") @set:PropertyName("id")
+    var id: String = "",
+    @get:PropertyName("title") @set:PropertyName("title")
+    var title: String = "",
+    @get:PropertyName("message") @set:PropertyName("message")
+    var message: String = "",
+    @get:PropertyName("type") @set:PropertyName("type")
+    var type: String = "MANUAL",
+    @get:PropertyName("targetType") @set:PropertyName("targetType")
+    var targetType: String = "ALL",
+    @get:PropertyName("targetUserId") @set:PropertyName("targetUserId")
+    var targetUserId: String = "",
+    @get:PropertyName("targetEmail") @set:PropertyName("targetEmail")
+    var targetEmail: String = "",
+    @get:PropertyName("targetUsername") @set:PropertyName("targetUsername")
+    var targetUsername: String = "",
+    @get:PropertyName("targetUserIds") @set:PropertyName("targetUserIds")
+    var targetUserIds: List<String> = emptyList(),
+    @get:PropertyName("tournamentId") @set:PropertyName("tournamentId")
+    var tournamentId: String = "",
+    @get:PropertyName("topic") @set:PropertyName("topic")
+    var topic: String = "",
+    @get:PropertyName("imageUrl") @set:PropertyName("imageUrl")
+    var imageUrl: String = "",
+    @get:PropertyName("roomId") @set:PropertyName("roomId")
+    var roomId: String = "",
+    @get:PropertyName("roomPassword") @set:PropertyName("roomPassword")
+    var roomPassword: String = "",
+    @get:PropertyName("recipientCount") @set:PropertyName("recipientCount")
+    var recipientCount: Int = 0,
+    @get:PropertyName("fcmSuccessCount") @set:PropertyName("fcmSuccessCount")
+    var fcmSuccessCount: Int = 0,
+    @get:PropertyName("fcmFailureCount") @set:PropertyName("fcmFailureCount")
+    var fcmFailureCount: Int = 0,
+    @get:PropertyName("sentBy") @set:PropertyName("sentBy")
+    var sentBy: String = "",
+    @get:PropertyName("timestamp") @set:PropertyName("timestamp")
+    var timestamp: Long = System.currentTimeMillis()
+)
+
+data class ManualNotificationResult(
+    val success: Boolean,
+    val notificationId: String = "",
+    val targetType: String = "ALL",
+    val recipientCount: Int = 0,
+    val fcmSuccessCount: Int = 0,
+    val fcmFailureCount: Int = 0,
+    val viaFallback: Boolean = false,
+    val errorMessage: String? = null
 )
 
 @IgnoreExtraProperties
@@ -1737,7 +1802,7 @@ enum class UnifiedRequestChannel(
                 cat.contains("DISPUTE") || cat.contains("RESULT") || src.contains("dispute") -> RESULT_DISPUTE
                 cat.contains("TOURNAMENT") || cat.contains("HOST") -> TOURNAMENT_REQUEST
                 cat.contains("BUG") || cat.contains("CRASH") -> APP_BUG_CRASH
-                cat.contains("BAN") -> BAN_APPEAL
+                cat.contains("BAN") || cat.contains("APPEAL") || cat.contains("ACCOUNT_ISSUE") || cat.contains("SANCTION") || cat.contains("RESTRICT") || src.contains("ban_appeal") || src.contains("appeal") || src.contains("account_issue") -> BAN_APPEAL
                 cat.contains("SUSPEND") || cat.contains("KYC") || cat.contains("VERIF") -> SUSPENSION_APPEAL
                 cat.contains("DELET") || cat.contains("DPDP") -> ACCOUNT_DELETION
                 else -> GENERAL_SUPPORT
@@ -1769,6 +1834,8 @@ data class UnifiedAdminRequest(
     var subject: String = "",
     @get:PropertyName("description") @set:PropertyName("description")
     var description: String = "",
+    @get:PropertyName("relatedId") @set:PropertyName("relatedId")
+    var relatedId: String = "",
     @get:PropertyName("amount") @set:PropertyName("amount")
     var amount: Double = 0.0,
     @get:PropertyName("utrNumber") @set:PropertyName("utrNumber")
@@ -1793,6 +1860,25 @@ data class UnifiedAdminRequest(
     @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
     val resolvedChannel: UnifiedRequestChannel
         get() = UnifiedRequestChannel.matchFromRaw(category, channel, sourceNode)
+
+    @get:com.google.firebase.database.Exclude @get:com.google.firebase.firestore.Exclude
+    val isBanAppeal: Boolean
+        get() = resolvedChannel == UnifiedRequestChannel.BAN_APPEAL ||
+            relatedId.startsWith("BAN-", ignoreCase = true) ||
+            category.contains("BAN", ignoreCase = true) ||
+            category.contains("APPEAL", ignoreCase = true) ||
+            category.contains("ACCOUNT_ISSUE", ignoreCase = true) ||
+            channel.contains("ban", ignoreCase = true) ||
+            channel.contains("appeal", ignoreCase = true) ||
+            sourceNode.contains("ban_appeal", ignoreCase = true) ||
+            sourceNode.contains("appeal", ignoreCase = true) ||
+            subject.contains("ban", ignoreCase = true) ||
+            subject.contains("appeal", ignoreCase = true) ||
+            subject.contains("restriction", ignoreCase = true) ||
+            subject.contains("unban", ignoreCase = true) ||
+            description.contains("BAN-", ignoreCase = true) ||
+            description.contains("ban appeal", ignoreCase = true) ||
+            description.contains("unban", ignoreCase = true)
 }
 
 // ============================================================================

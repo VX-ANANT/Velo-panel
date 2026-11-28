@@ -14,6 +14,15 @@ class VelorixApplication : Application() {
     override fun onCreate() {
         super.onCreate()
 
+        // Clear any stale FCM topic sync queue from previous installs so FirebaseMessaging
+        // never triggers unnecessary FirebaseInstanceId topic syncs on the Admin Panel
+        try {
+            val appidPrefs = getSharedPreferences("com.google.android.gms.appid", MODE_PRIVATE)
+            if (appidPrefs.contains("topic_operation_queue")) {
+                appidPrefs.edit().remove("topic_operation_queue").apply()
+            }
+        } catch (_: Exception) {}
+
         // Initialize Firebase Core, Crashlytics, RTDB 50MB disk persistence, and Firestore 100MB cache first
         try {
             com.example.firebase.VelorixFirebaseSuite.initializeCore(this)

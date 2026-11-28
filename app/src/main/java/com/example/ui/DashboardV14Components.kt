@@ -112,7 +112,7 @@ fun V14StaggeredEntrance(
 }
 
 @Composable
-private fun Modifier.v14PressScale(
+internal fun Modifier.v14PressScale(
     onClick: () -> Unit
 ): Modifier {
     val interactionSource = remember { MutableInteractionSource() }

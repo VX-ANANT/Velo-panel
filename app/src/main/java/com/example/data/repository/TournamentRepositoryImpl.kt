@@ -29,10 +29,13 @@ import com.google.firebase.firestore.Source
 import com.example.ui.common.GlobalErrorManager
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.SetOptions
 import com.google.firebase.database.FirebaseDatabase
+import com.google.firebase.database.DatabaseReference
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.ValueEventListener
+import com.google.firebase.functions.FirebaseFunctions
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlinx.coroutines.*
@@ -49,6 +52,7 @@ class TournamentRepositoryImpl(private val context: android.content.Context? = n
     private val TAG = "TournamentRepository"
     private val DB_URL = "https://velorix-tournaments-default-rtdb.asia-southeast1.firebasedatabase.app"
     val firestore: FirebaseFirestore by lazy { FirebaseFirestore.getInstance() }
+    val functions: FirebaseFunctions by lazy { FirebaseFunctions.getInstance() }
     val database: com.google.firebase.database.DatabaseReference by lazy {
         try {
             FirebaseDatabase.getInstance(DB_URL).reference
@@ -57,12 +61,50 @@ class TournamentRepositoryImpl(private val context: android.content.Context? = n
         }
     }
     val auth: FirebaseAuth get() = FirebaseAuth.getInstance()
+
+    private inline fun <reified T> DataSnapshot.safeGetObject(): T? {
+        if (!exists() || !hasChildren() || value !is Map<*, *>) return null
+        return try {
+            getValue(T::class.java)
+        } catch (e: Exception) {
+            Log.w(TAG, "Skipping malformed RTDB node key=$key expected=${T::class.java.simpleName}: ${e.message}")
+            null
+        }
+    }
+
+    suspend fun syncAdminCustomClaimsAndRefreshToken(forceRefresh: Boolean = true): Boolean {
+        val user = auth.currentUser ?: return false
+        val email = user.email?.trim()?.lowercase() ?: ""
+        if (!TournamentBackendValidator.isAllowedAdminEmail(email)) return false
+        return try {
+            withTimeoutOrNull(8_000L) {
+                functions.getHttpsCallable("syncAdminCustomClaims").call().await()
+            }
+            if (forceRefresh) {
+                withTimeoutOrNull(5_000L) {
+                    user.getIdToken(true).await()
+                }
+            }
+            Log.d(TAG, "syncAdminCustomClaims completed and ID token refreshed for $email")
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "syncAdminCustomClaims failed or timed out: ${e.message}")
+            if (forceRefresh) {
+                try {
+                    withTimeoutOrNull(4_000L) {
+                        user.getIdToken(true).await()
+                    }
+                } catch (_: Exception) {}
+            }
+            false
+        }
+    }
     val locallyDeletedUserIds: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
     val locallyDeletedTournamentIds: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
     val locallyCreatedTournaments: java.util.concurrent.ConcurrentHashMap<String, Tournament> = java.util.concurrent.ConcurrentHashMap()
     val lastExtractedUsers: java.util.concurrent.ConcurrentHashMap<String, UserProfile> = java.util.concurrent.ConcurrentHashMap()
     val recentAdminWalletOverrides: java.util.concurrent.ConcurrentHashMap<String, Pair<UserProfile, Long>> = java.util.concurrent.ConcurrentHashMap()
-    var activeAdminEmail: String = "anantisback47@gmail.com"
+    var activeAdminEmail: String = ""
     var activeAdminUid: String = ""
 
     private val deletedTournamentsPrefs by lazy {
@@ -232,20 +274,24 @@ class TournamentRepositoryImpl(private val context: android.content.Context? = n
         age: Int? = null,
         isUnder18: Boolean? = null
     ): AdminVerificationResult {
-        val cleanEmail = email.trim().lowercase().ifBlank { "admin@velorix.gg" }
+        val cleanEmail = email.trim().lowercase()
+        if (uid.isBlank() || !TournamentBackendValidator.isAllowedAdminEmail(cleanEmail)) {
+            return AdminVerificationResult(
+                isAuthorized = false,
+                role = "unauthorized",
+                errorMessage = "Access Denied: Only authorized Velorix administrators may access this console."
+            )
+        }
         val effectiveName = displayName?.ifBlank { null } ?: cleanEmail.substringBefore("@").ifBlank { "Admin" }
         val now = System.currentTimeMillis()
         val effectiveRole = "super_admin"
         val emailKey = cleanEmail.replace(".", "_")
 
-        val computedAge = if (age != null && age > 0) age else if (!dateOfBirth.isNullOrBlank()) com.example.data.validation.TournamentBackendValidator.calculateAgeFromDob(dateOfBirth) else 0
+        val computedAge = if (age != null && age > 0) age else if (!dateOfBirth.isNullOrBlank()) TournamentBackendValidator.calculateAgeFromDob(dateOfBirth) else 0
         val computedUnder18 = isUnder18 ?: if (computedAge > 0) (computedAge < 18) else false
         val cashEligible = !computedUnder18 && (computedAge >= 18 || computedAge <= 0)
 
-        val isInternalSyncAccount = cleanEmail.equals("velorix.admin.sync@velorix.com", ignoreCase = true)
-        if (!isInternalSyncAccount) {
-            recordAccountLocally(cleanEmail, effectiveName, effectiveRole, uid)
-        }
+        recordAccountLocally(cleanEmail, effectiveName, effectiveRole, uid)
 
         val adminPayload = mapOf<String, Any>(
             "uid" to uid,
@@ -294,30 +340,26 @@ class TournamentRepositoryImpl(private val context: android.content.Context? = n
             "ageConfirmed" to (computedAge > 0 || !dateOfBirth.isNullOrBlank())
         )
 
+        // Immediately sync admin custom claims via Cloud Function and force-refresh Firebase ID token
+        syncAdminCustomClaimsAndRefreshToken(forceRefresh = true)
+
         try {
-            kotlinx.coroutines.withTimeoutOrNull(3500L) {
-                database.child("admins").child(uid).updateChildren(adminPayload).await()
+            kotlinx.coroutines.withTimeoutOrNull(4000L) {
+                firestore.collection("admins").document(uid).set(adminPayload, SetOptions.merge()).await()
             }
         } catch (_: Exception) {}
 
-        // Asynchronously sync secondary admin & profile mirrors without overwriting balances
+        // Asynchronously sync secondary admin & profile records without overwriting balances
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                database.child("admins").child(uid).updateChildren(adminPayload)
-                if (!isInternalSyncAccount) {
-                    database.child("admins").child(emailKey).updateChildren(adminPayload)
-                    database.child("users").child(uid).updateChildren(userPayload)
-                    database.child("userProfiles").child(uid).updateChildren(userPayload)
-                }
+                firestore.collection("admins").document(cleanEmail).set(adminPayload, SetOptions.merge())
+                firestore.collection("users").document(uid).set(userPayload, SetOptions.merge())
+                firestore.collection("userProfiles").document(uid).set(userPayload, SetOptions.merge())
             } catch (_: Exception) {}
 
             try {
-                firestore.collection("admins").document(uid).set(adminPayload)
-                if (!isInternalSyncAccount) {
-                    firestore.collection("admins").document(cleanEmail).set(adminPayload)
-                    firestore.collection("users").document(uid).set(userPayload, com.google.firebase.firestore.SetOptions.merge())
-                    firestore.collection("userProfiles").document(uid).set(userPayload, com.google.firebase.firestore.SetOptions.merge())
-                }
+                database.child("admins").child(uid).updateChildren(adminPayload)
+                database.child("admins").child(emailKey).updateChildren(adminPayload)
             } catch (_: Exception) {}
         }
 
@@ -327,13 +369,14 @@ class TournamentRepositoryImpl(private val context: android.content.Context? = n
         )
     }
 
-    suspend fun syncAdminPermissionsNow(targetEmail: String = "anantisback47@gmail.com"): Boolean {
+    suspend fun syncAdminPermissionsNow(targetEmail: String = ""): Boolean {
         return try {
-            val user = auth.currentUser
-            val uid = user?.uid ?: activeAdminUid.ifBlank { "admin_master_uid" }
-            val email = if (!user?.email.isNullOrBlank()) user!!.email!! else targetEmail
-            val name = user?.displayName ?: email.substringBefore("@")
-            val res = verifyAndRegisterAdmin(uid, email, name)
+            val user = auth.currentUser ?: return false
+            val email = user.email?.trim()?.lowercase() ?: ""
+            if (!TournamentBackendValidator.isAllowedAdminEmail(email)) return false
+            syncAdminCustomClaimsAndRefreshToken(forceRefresh = true)
+            val name = user.displayName ?: email.substringBefore("@")
+            val res = verifyAndRegisterAdmin(user.uid, email, name)
             res.isAuthorized
         } catch (_: Exception) {
             false
@@ -377,8 +420,8 @@ service cloud.firestore {
     function isAdmin() {
       return request.auth != null && (
         request.auth.token.email == 'anantisback47@gmail.com' ||
-        exists(/databases/${'$'}(database)/documents/admins/${'$'}(request.auth.uid)) ||
-        get(/databases/${'$'}(database)/documents/users/${'$'}(request.auth.uid)).data.role == 'super_admin'
+        request.auth.token.email == 'service.veloxyra@gmail.com' ||
+        request.auth.token.email == 'verlorix-test@gmail.com'
       );
     }
 
@@ -435,56 +478,36 @@ service cloud.firestore {
     @Volatile
     private var lastSyncSignInAttemptMs: Long = 0L
 
-    suspend fun ensureAuthenticatedSession(targetEmail: String = "anantisback47@gmail.com"): Boolean {
-        val effectiveEmail = targetEmail.ifBlank { "anantisback47@gmail.com" }.trim().lowercase()
-        activeAdminEmail = effectiveEmail
-
-        var current = auth.currentUser
-        if (current == null) {
-            authSessionMutex.withLock {
-                current = auth.currentUser
-                val now = System.currentTimeMillis()
-                if (current == null && (now - lastSyncSignInAttemptMs) > 10_000L) {
-                    lastSyncSignInAttemptMs = now
-                    val syncEmail = "velorix.admin.sync@velorix.com"
-                    val syncPass = "VelorixAdmin#2026"
-                    try {
-                        kotlinx.coroutines.withTimeoutOrNull(5000L) {
-                            auth.signInWithEmailAndPassword(syncEmail, syncPass).await()
-                        }
-                        current = auth.currentUser
-                    } catch (_: Exception) {
-                        // Account already exists in Firebase Auth; never call createUserWithEmailAndPassword
-                        // or signInAnonymously on fallback to avoid RecaptchaAction(action=signUpPassword) errors.
-                    }
-                }
+    suspend fun ensureAuthenticatedSession(targetEmail: String = ""): Boolean {
+        val current = auth.currentUser
+        val authEmail = current?.email?.trim()?.lowercase() ?: ""
+        if (current == null || !TournamentBackendValidator.isAllowedAdminEmail(authEmail)) {
+            if (current != null) {
+                try {
+                    auth.signOut()
+                } catch (_: Exception) {}
             }
+            activeAdminEmail = ""
+            activeAdminUid = ""
+            return false
         }
 
-        val resolvedUid = current?.uid?.takeIf { it.isNotBlank() }
-            ?: "Iear3NKqlpchN13HQt2JG07K0VW2"
-        activeAdminUid = resolvedUid
-        val currentAuthEmail = current?.email?.lowercase() ?: ""
-        val displayEmail = if (currentAuthEmail.isBlank() || currentAuthEmail == "velorix.admin.sync@velorix.com") {
-            effectiveEmail
-        } else {
-            effectiveEmail.ifBlank { currentAuthEmail }
-        }
-        activeAdminEmail = displayEmail
-        val name = current?.displayName?.ifBlank { null } ?: activeAdminEmail.substringBefore("@")
+        activeAdminUid = current.uid
+        activeAdminEmail = authEmail
+        val name = current.displayName?.ifBlank { null } ?: authEmail.substringBefore("@")
 
         try {
-            kotlinx.coroutines.withTimeoutOrNull(4000L) {
-                verifyAndRegisterAdmin(resolvedUid, currentAuthEmail.ifBlank { activeAdminEmail }, name)
+            kotlinx.coroutines.withTimeoutOrNull(8000L) {
+                verifyAndRegisterAdmin(current.uid, authEmail, name)
             }
         } catch (_: Exception) {
             CoroutineScope(Dispatchers.IO).launch {
                 try {
-                    verifyAndRegisterAdmin(resolvedUid, currentAuthEmail.ifBlank { activeAdminEmail }, name)
+                    verifyAndRegisterAdmin(current.uid, authEmail, name)
                 } catch (_: Exception) {}
             }
         }
-        return auth.currentUser != null
+        return true
     }
 
     private fun safeDouble(value: Any?, default: Double = 0.0): Double {
@@ -711,17 +734,34 @@ service cloud.firestore {
             depositFunds = funds
         }
 
-        val isBanned = (child("isBanned").value as? Boolean)
-            ?: (child("banned").value as? Boolean)
-            ?: (child("profile").child("isBanned").value as? Boolean)
-            ?: (child("profile").child("banned").value as? Boolean)
-            ?: (child("status").value?.toString()?.equals("banned", ignoreCase = true) == true)
-            ?: (child("accountStatus").value?.toString()?.equals("BANNED", ignoreCase = true) == true)
-            ?: false
+        fun parseExplicitBool(v: Any?): Boolean? = when (v) {
+            is Boolean -> v
+            is String -> when {
+                v.trim().equals("true", ignoreCase = true) -> true
+                v.trim().equals("false", ignoreCase = true) -> false
+                else -> null
+            }
+            is Number -> v.toInt() != 0
+            else -> null
+        }
 
+        val explicitBanBool = parseExplicitBool(child("isBanned").value)
+            ?: parseExplicitBool(child("banned").value)
+            ?: parseExplicitBool(child("profile").child("isBanned").value)
+            ?: parseExplicitBool(child("profile").child("banned").value)
+        val rawStatusStr = (findString("accountStatus", "status", "userStatus") ?: "").trim().uppercase()
         val banReason = findString("banReason", "ban_reason", "reason") ?: ""
-        val banCaseId = findString("banCaseId", "ban_case_id", "caseId") ?: ""
+        val banCaseId = findString("banCaseId", "ban_case_id", "sanctionId", "sanction_id", "caseId") ?: ""
         val bannedAt = safeLong(child("bannedAt").value ?: child("banned_at").value, 0L)
+        val activeAppealTicketId = findString("activeAppealTicketId", "activeAppealTicket", "appealTicketId", "ticketId") ?: ""
+        val activeAppealStatus = findString("activeAppealStatus", "appealStatus") ?: ""
+        val isBanned = when {
+            explicitBanBool == false && (rawStatusStr == "ACTIVE" || rawStatusStr == "UNBANNED" || rawStatusStr.isEmpty()) -> false
+            explicitBanBool == true -> true
+            rawStatusStr == "BANNED" || rawStatusStr == "RESTRICTED" || rawStatusStr == "PERMANENT_BAN" -> true
+            explicitBanBool == null && banCaseId.startsWith("BAN-", ignoreCase = true) && rawStatusStr != "ACTIVE" && rawStatusStr != "UNBANNED" -> true
+            else -> false
+        }
 
         val isSuspended = (child("isSuspended").value as? Boolean)
             ?: (child("suspended").value as? Boolean)
@@ -961,6 +1001,8 @@ service cloud.firestore {
             banReason = banReason,
             banCaseId = banCaseId,
             bannedAt = bannedAt,
+            activeAppealTicketId = activeAppealTicketId,
+            activeAppealStatus = activeAppealStatus,
             isSuspended = isSuspended,
             suspendedUntil = suspendedUntil,
             suspensionReason = suspensionReason,
@@ -984,6 +1026,10 @@ service cloud.firestore {
             eligibleForCashTournaments = eligibleForCashTournaments,
             ageConfirmed = ageConfirmed,
             lastActive = lastActive,
+            lastActiveAt = safeLong(child("lastActiveAt").value, lastActive),
+            isOnline = (child("isOnline").value as? Boolean)
+                ?: (child("isOnline").value?.toString()?.equals("true", ignoreCase = true) == true),
+            fcmToken = (child("fcmToken").value ?: child("messagingToken").value ?: child("pushToken").value)?.toString()?.trim() ?: "",
             createdAt = if (createdAt > 0L) createdAt else firstAppJoinAt,
             firstAppJoinAt = firstAppJoinAt,
             firstMatchJoinedAt = firstMatchJoinedAt,
@@ -1919,17 +1965,37 @@ service cloud.firestore {
             depositFunds = funds
         }
 
-        val isBanned = getBoolean("isBanned")
-            ?: getBoolean("banned")
-            ?: ((get("profile") as? Map<*, *>)?.get("isBanned") as? Boolean)
-            ?: ((get("profile") as? Map<*, *>)?.get("banned") as? Boolean)
-            ?: (findString("status")?.equals("banned", ignoreCase = true) == true)
-            ?: (findString("accountStatus")?.equals("BANNED", ignoreCase = true) == true)
-            ?: false
-
+        fun parseDocBool(keyName: String): Boolean? {
+            val raw = get(keyName) ?: dataMap.entries.find { it.key.equals(keyName, ignoreCase = true) }?.value
+            return when (raw) {
+                is Boolean -> raw
+                is String -> when {
+                    raw.trim().equals("true", ignoreCase = true) -> true
+                    raw.trim().equals("false", ignoreCase = true) -> false
+                    else -> null
+                }
+                is Number -> raw.toInt() != 0
+                else -> null
+            }
+        }
+        val profileMap = get("profile") as? Map<*, *>
+        val explicitBanBool = parseDocBool("isBanned")
+            ?: parseDocBool("banned")
+            ?: (profileMap?.get("isBanned") as? Boolean)
+            ?: (profileMap?.get("banned") as? Boolean)
+        val rawStatusStr = (findString("accountStatus", "status", "userStatus") ?: "").trim().uppercase()
         val banReason = findString("banReason", "ban_reason", "reason") ?: ""
-        val banCaseId = findString("banCaseId", "ban_case_id", "caseId") ?: ""
+        val banCaseId = findString("banCaseId", "ban_case_id", "sanctionId", "sanction_id", "caseId") ?: ""
         val bannedAt = safeLong(get("bannedAt") ?: get("banned_at"), 0L)
+        val activeAppealTicketId = findString("activeAppealTicketId", "activeAppealTicket", "appealTicketId", "ticketId") ?: ""
+        val activeAppealStatus = findString("activeAppealStatus", "appealStatus") ?: ""
+        val isBanned = when {
+            explicitBanBool == false && (rawStatusStr == "ACTIVE" || rawStatusStr == "UNBANNED" || rawStatusStr.isEmpty()) -> false
+            explicitBanBool == true -> true
+            rawStatusStr == "BANNED" || rawStatusStr == "RESTRICTED" || rawStatusStr == "PERMANENT_BAN" -> true
+            explicitBanBool == null && banCaseId.startsWith("BAN-", ignoreCase = true) && rawStatusStr != "ACTIVE" && rawStatusStr != "UNBANNED" -> true
+            else -> false
+        }
 
         val isSuspended = getBoolean("isSuspended")
             ?: getBoolean("suspended")
@@ -2064,6 +2130,8 @@ service cloud.firestore {
             banReason = banReason,
             banCaseId = banCaseId,
             bannedAt = bannedAt,
+            activeAppealTicketId = activeAppealTicketId,
+            activeAppealStatus = activeAppealStatus,
             isSuspended = isSuspended,
             suspendedUntil = suspendedUntil,
             suspensionReason = suspensionReason,
@@ -2087,6 +2155,9 @@ service cloud.firestore {
             eligibleForCashTournaments = eligibleForCashTournaments,
             ageConfirmed = ageConfirmed,
             lastActive = lastActive,
+            lastActiveAt = safeLong(get("lastActiveAt"), lastActive),
+            isOnline = safeBool("isOnline"),
+            fcmToken = (getString("fcmToken") ?: getString("messagingToken") ?: getString("pushToken")).orEmpty().trim(),
             createdAt = if (createdAt > 0L) createdAt else firstAppJoinAt,
             firstAppJoinAt = firstAppJoinAt,
             firstMatchJoinedAt = firstMatchJoinedAt,
@@ -2169,7 +2240,11 @@ service cloud.firestore {
                                 ign = prefIgn,
                                 gameId = prefGameId,
                                 funds = prefFunds,
-                                isBanned = ex.isBanned || u.isBanned
+                                isBanned = when {
+                                    u.updatedAt > ex.updatedAt && u.updatedAt > 0L -> u.isBanned
+                                    ex.updatedAt > u.updatedAt && ex.updatedAt > 0L -> ex.isBanned
+                                    else -> ex.isBanned || u.isBanned
+                                }
                             )
                         }
                     }
@@ -2408,6 +2483,15 @@ service cloud.firestore {
 
                     val mergedRaw = (existing.rawAttributes + user.rawAttributes).toMutableMap()
 
+                    val resolvedIsBanned = when {
+                        user.updatedAt > existing.updatedAt && user.updatedAt > 0L -> user.isBanned
+                        existing.updatedAt > user.updatedAt && existing.updatedAt > 0L -> existing.isBanned
+                        else -> user.isBanned || existing.isBanned
+                    }
+                    val preferredAppealTicketId = if (user.activeAppealTicketId.isNotBlank()) user.activeAppealTicketId else existing.activeAppealTicketId
+                    val preferredAppealStatus = if (user.activeAppealStatus.isNotBlank()) user.activeAppealStatus else existing.activeAppealStatus
+                    val preferredUpdatedAt = maxOf(user.updatedAt, existing.updatedAt)
+
                     val updatedUser = existing.copy(
                         id = preferredId,
                         username = preferredUsername,
@@ -2437,10 +2521,12 @@ service cloud.firestore {
                         referralBonusEarned = preferredReferralBonus,
                         age = preferredAge,
                         dateOfBirth = preferredDob,
-                        isBanned = user.isBanned || existing.isBanned,
-                        banReason = preferredBanReason,
-                        banCaseId = preferredBanCaseId,
-                        bannedAt = preferredBannedAt,
+                        isBanned = resolvedIsBanned,
+                        banReason = if (resolvedIsBanned) preferredBanReason else "",
+                        banCaseId = if (resolvedIsBanned) preferredBanCaseId else preferredBanCaseId,
+                        bannedAt = if (resolvedIsBanned) preferredBannedAt else 0L,
+                        activeAppealTicketId = preferredAppealTicketId,
+                        activeAppealStatus = preferredAppealStatus,
                         isSuspended = preferredIsSuspended,
                         suspendedUntil = preferredSuspendedUntil,
                         suspensionReason = preferredSuspensionReason,
@@ -2458,6 +2544,7 @@ service cloud.firestore {
                         joinedMatchIds = mergedJoinedIds,
                         matchHistory = mergedMatchHistory,
                         lastActive = preferredLastActive,
+                        updatedAt = preferredUpdatedAt,
                         rawAttributes = mergedRaw
                     )
                     mergedList[existingIndex] = updatedUser
@@ -2470,19 +2557,11 @@ service cloud.firestore {
                 }
             }
 
-            // 3. Auto sync active administrator profile if signed in with real Firebase Auth
+            // 3. Auto sync active administrator profile ONLY if signed in with allowlisted real Firebase Auth
             val currentFirebaseUser = auth.currentUser
-            val rawAuthEmail = currentFirebaseUser?.email?.ifBlank { null }
-            val currentEmail = if (rawAuthEmail.isNullOrBlank() || rawAuthEmail.equals("velorix.admin.sync@velorix.com", ignoreCase = true)) {
-                activeAdminEmail
-            } else {
-                rawAuthEmail
-            }
-            val currentUid = if (rawAuthEmail.equals("velorix.admin.sync@velorix.com", ignoreCase = true)) {
-                "Iear3NKqlpchN13HQt2JG07K0VW2"
-            } else {
-                currentFirebaseUser?.uid?.ifBlank { null } ?: activeAdminUid.takeIf { it.isNotBlank() && !it.startsWith("admin_") && !it.startsWith("acc_") }
-            }
+            val rawAuthEmail = currentFirebaseUser?.email?.trim()?.lowercase()
+            val currentEmail = rawAuthEmail?.takeIf { TournamentBackendValidator.isAllowedAdminEmail(it) }
+            val currentUid = currentFirebaseUser?.uid?.takeIf { it.isNotBlank() && currentEmail != null }
             if (!currentEmail.isNullOrBlank() && !currentUid.isNullOrBlank() && !locallyDeletedUserIds.contains(currentUid)) {
                 val cleanEmail = currentEmail.trim().lowercase()
                 val existingIndex = mergedList.indexOfFirst { existing ->
@@ -2522,19 +2601,10 @@ service cloud.firestore {
             val isMockUser: (UserProfile) -> Boolean = { u ->
                 val emailLower = u.email.trim().lowercase()
                 val idLower = u.id.trim().lowercase()
-                val nameLower = u.username.trim().lowercase()
                 emailLower.contains("@example.com") ||
                 emailLower == "velorix.admin.sync@velorix.com" ||
-                idLower == "avdrsl6az2m0mgpdc83itxf5hec2" ||
                 emailLower.contains("mock.dummy") ||
-                emailLower.startsWith("demo@") ||
-                emailLower.startsWith("test@") ||
-                idLower.startsWith("mock_") ||
-                idLower.startsWith("demo_") ||
-                idLower.startsWith("test_") ||
-                nameLower.contains("mock") ||
-                nameLower.contains("demo user") ||
-                nameLower.contains("test player")
+                idLower.startsWith("mock_")
             }
             val cleanList = reconciledList.filter { !isMockUser(it) && !it.isGuestSession }
 
@@ -2552,33 +2622,150 @@ service cloud.firestore {
 
         emitCombinedUsers()
 
-        // Realtime listener for banned_users node
+        // Realtime listener for banned_users node (both tracks active ban IDs AND synthesizes UserProfile entries for banned accounts)
         val bannedUsersListener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 bannedUids.clear()
                 bannedEmails.clear()
                 bannedGameIds.clear()
+                val bannedSourceMap = mutableMapOf<String, UserProfile>()
                 snapshot.children.forEach { child ->
+                    val explicitBool = child.child("isBanned").value
+                    val statusVal = (child.child("status").value ?: child.child("accountStatus").value)?.toString()?.trim()?.uppercase().orEmpty()
+                    val isActivelyBanned = explicitBool != false &&
+                        !explicitBool.toString().equals("false", ignoreCase = true) &&
+                        statusVal != "UNBANNED" &&
+                        statusVal != "ACTIVE"
+                    if (!isActivelyBanned) return@forEach
+
                     val k = child.key?.trim() ?: ""
+                    val uid = (child.child("uid").value ?: child.child("userId").value ?: child.child("id").value)?.toString()?.trim().orEmpty().ifBlank { k }
+                    val email = (child.child("email").value ?: child.child("userEmail").value)?.toString()?.trim()?.lowercase().orEmpty()
+                    val gameId = (child.child("gameId").value ?: child.child("freeFireId").value)?.toString()?.trim().orEmpty()
+                    val ign = (child.child("ign").value ?: child.child("inGameName").value)?.toString()?.trim().orEmpty()
+                    val uname = (child.child("username").value ?: child.child("userName").value ?: child.child("name").value ?: child.child("accountName").value)?.toString()?.trim().orEmpty()
+                    val reason = (child.child("banReason").value ?: child.child("reason").value)?.toString()?.trim().orEmpty()
+                    val caseId = (child.child("banCaseId").value ?: child.child("sanctionId").value ?: child.child("caseId").value)?.toString()?.trim().orEmpty()
+                    val appealTicket = (child.child("activeAppealTicketId").value ?: child.child("activeAppealTicket").value ?: child.child("appealTicketId").value ?: child.child("ticketId").value)?.toString()?.trim().orEmpty()
+                    val appealStatus = (child.child("activeAppealStatus").value ?: child.child("appealStatus").value)?.toString()?.trim().orEmpty()
+                    val bannedAtTs = safeLong(child.child("bannedAt").value ?: child.child("timestamp").value, System.currentTimeMillis())
+
                     if (k.isNotBlank()) {
-                        bannedUids.add(k)
-                        if (k.contains("@") || k.contains("_")) {
-                            bannedEmails.add(k.replace("_", ".").lowercase())
+                        if (!k.contains("@") && !k.contains(",")) bannedUids.add(k)
+                        if (k.contains("@") || k.contains("_") || k.contains(",")) {
+                            bannedEmails.add(k.replace(",", ".").replace("_", ".").lowercase())
                         }
                     }
-                    val uid = child.child("uid").value?.toString()?.trim() ?: ""
                     if (uid.isNotBlank()) bannedUids.add(uid)
-                    val email = child.child("email").value?.toString()?.trim()?.lowercase() ?: ""
                     if (email.isNotBlank()) bannedEmails.add(email)
-                    val gameId = child.child("gameId").value?.toString()?.trim() ?: ""
                     if (gameId.isNotBlank()) bannedGameIds.add(gameId)
+
+                    // Synthesize UserProfile so accounts present in /banned_users (e.g. Velorix Test) always appear in Players list
+                    val profileId = uid.ifBlank { k }
+                    if (profileId.isNotBlank() && !locallyDeletedUserIds.contains(profileId)) {
+                        val parsed = child.toUserProfile()
+                        val displayName = uname.ifBlank { ign.ifBlank { parsed?.username?.takeIf { it != "Player" }.orEmpty() } }.ifBlank {
+                            if (email.contains("@")) email.substringBefore("@") else "Player (${profileId.take(6)})"
+                        }
+                        bannedSourceMap[profileId] = (parsed ?: UserProfile(id = profileId)).copy(
+                            id = profileId,
+                            username = displayName,
+                            ign = ign.ifBlank { parsed?.ign.orEmpty() },
+                            email = email.ifBlank { parsed?.email.orEmpty() },
+                            gameId = gameId.ifBlank { parsed?.gameId.orEmpty() },
+                            isBanned = true,
+                            status = "BANNED",
+                            accountStatus = "BANNED",
+                            banReason = reason.ifBlank { parsed?.banReason.orEmpty().ifBlank { "Violation of Fair Play Terms / Anti-Cheat & Third-Party Tool Detection" } },
+                            banCaseId = caseId.ifBlank { parsed?.banCaseId.orEmpty() },
+                            activeAppealTicketId = appealTicket.ifBlank { parsed?.activeAppealTicketId.orEmpty() },
+                            activeAppealStatus = appealStatus.ifBlank { parsed?.activeAppealStatus.orEmpty() },
+                            bannedAt = bannedAtTs
+                        )
+                    }
                 }
+                usersSources["rtdb_banned_users"] = bannedSourceMap
                 scheduleEmitUsers()
             }
             override fun onCancelled(error: DatabaseError) {}
         }
         val bannedUsersRef = database.child("banned_users")
         bannedUsersRef.addValueEventListener(bannedUsersListener)
+
+        // Realtime listener for ban appeals & support tickets to synthesize/enrich any banned player who submitted an appeal (e.g. Velorix Test • VRX-772B81 • BAN-RDKIT1)
+        val appealUserNodes = listOf(
+            "appeal_ban_appeals" to database.child("ban_appeals"),
+            "appeal_appeals" to database.child("appeals"),
+            "appeal_admin_all" to database.child("admin_requests").child("all"),
+            "appeal_admin_ban" to database.child("admin_requests").child("ban_appeals"),
+            "appeal_admin_acc" to database.child("admin_requests").child("account_issue"),
+            "appeal_support_tickets" to database.child("support_tickets"),
+            "appeal_reports" to database.child("reports")
+        )
+        val appealListeners = mutableListOf<Pair<DatabaseReference, ValueEventListener>>()
+        appealUserNodes.forEach { (srcKey, ref) ->
+            val l = object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    val map = mutableMapOf<String, UserProfile>()
+                    snapshot.children.forEach { c ->
+                        val cat = (c.child("category").value ?: c.child("issueCategory").value ?: c.child("type").value)?.toString()?.trim()?.uppercase().orEmpty()
+                        val ch = (c.child("channel").value ?: c.child("channelLabel").value)?.toString()?.trim()?.lowercase().orEmpty()
+                        val related = (c.child("relatedId").value ?: c.child("banCaseId").value ?: c.child("sanctionId").value ?: c.child("caseId").value)?.toString()?.trim().orEmpty()
+                        val subj = (c.child("subject").value ?: c.child("title").value ?: c.child("reason").value)?.toString()?.trim().orEmpty()
+                        val desc = (c.child("description").value ?: c.child("message").value ?: c.child("details").value)?.toString()?.trim().orEmpty()
+                        val isAppeal = srcKey.contains("ban") || srcKey.contains("appeal") ||
+                            cat.contains("BAN") || cat.contains("APPEAL") || cat.contains("ACCOUNT_ISSUE") ||
+                            ch.contains("ban") || ch.contains("appeal") ||
+                            related.startsWith("BAN-", ignoreCase = true) ||
+                            subj.contains("ban", ignoreCase = true) || subj.contains("appeal", ignoreCase = true) ||
+                            desc.contains("BAN-", ignoreCase = true)
+                        if (!isAppeal) return@forEach
+
+                        val ticketId = (c.child("id").value ?: c.child("ticketId").value ?: c.child("requestId").value ?: c.key)?.toString()?.trim().orEmpty()
+                        val ticketStatus = (c.child("status").value ?: c.child("appealStatus").value)?.toString()?.trim()?.uppercase().orEmpty().ifBlank { "PENDING" }
+                        val uid = (c.child("userId").value ?: c.child("uid").value)?.toString()?.trim().orEmpty()
+                        val uname = (c.child("username").value ?: c.child("userName").value ?: c.child("name").value ?: c.child("accountName").value)?.toString()?.trim().orEmpty()
+                        val ign = (c.child("inGameName").value ?: c.child("ign").value)?.toString()?.trim().orEmpty()
+                        val email = (c.child("userEmail").value ?: c.child("email").value ?: c.child("userContact").value)?.toString()?.trim().orEmpty()
+                        val gameId = (c.child("freeFireId").value ?: c.child("gameId").value)?.toString()?.trim().orEmpty()
+                        val created = safeLong(c.child("createdAt").value ?: c.child("timestamp").value, System.currentTimeMillis())
+
+                        val syntheticId = uid.ifBlank {
+                            if (related.isNotBlank()) "appeal_${related.lowercase()}"
+                            else if (ticketId.isNotBlank()) "appeal_${ticketId.lowercase()}"
+                            else ""
+                        }
+                        if (syntheticId.isNotBlank() && !locallyDeletedUserIds.contains(syntheticId)) {
+                            val isStillBanned = ticketStatus != "RESOLVED" && ticketStatus != "APPROVED" && ticketStatus != "UNBANNED"
+                            val displayName = uname.ifBlank { ign.ifBlank { if (email.contains("@")) email.substringBefore("@") else "Player (${syntheticId.take(6)})" } }
+                            map[syntheticId] = UserProfile(
+                                id = syntheticId,
+                                username = displayName,
+                                ign = ign.ifBlank { displayName },
+                                email = if (email.contains("@")) email else "",
+                                phone = if (!email.contains("@") && email.any { it.isDigit() }) email else "",
+                                gameId = gameId,
+                                isBanned = isStillBanned,
+                                status = if (isStillBanned) "BANNED" else "ACTIVE",
+                                accountStatus = if (isStillBanned) "BANNED" else "ACTIVE",
+                                banReason = desc.ifBlank { subj.ifBlank { "Violation of Fair Play Terms / Anti-Cheat & Third-Party Tool Detection" } },
+                                banCaseId = related,
+                                activeAppealTicketId = ticketId,
+                                activeAppealStatus = ticketStatus,
+                                bannedAt = created,
+                                createdAt = created,
+                                lastActive = created
+                            )
+                        }
+                    }
+                    usersSources[srcKey] = map
+                    scheduleEmitUsers()
+                }
+                override fun onCancelled(error: DatabaseError) {}
+            }
+            ref.addValueEventListener(l)
+            appealListeners.add(ref to l)
+        }
 
         try {
             ensureAuthenticatedSession(activeAdminEmail)
@@ -2592,7 +2779,15 @@ service cloud.firestore {
                     val emailLower = user.email.trim().lowercase()
                     if (!emailLower.contains("@example.com")) {
                         sourceMap[user.id] = user
+                        lastExtractedUsers[user.id] = user
                     }
+                }
+            }
+            if (sourceKey == "users" && sourceMap.isNotEmpty()) {
+                val cached = usersSources["extracted_cache"]?.toMutableMap()
+                if (cached != null) {
+                    sourceMap.keys.forEach { cached.remove(it) }
+                    usersSources["extracted_cache"] = cached
                 }
             }
             usersSources[sourceKey] = sourceMap
@@ -2763,6 +2958,14 @@ service cloud.firestore {
                         snapshot.documents.mapNotNull { it.toUserProfile() }.forEach { user ->
                             if (user.id.isNotBlank() && !locallyDeletedUserIds.contains(user.id) && !user.email.contains("@example.com")) {
                                 sourceMap[user.id] = user
+                                lastExtractedUsers[user.id] = user
+                            }
+                        }
+                        if (collName == "users" && sourceMap.isNotEmpty()) {
+                            val cached = usersSources["extracted_cache"]?.toMutableMap()
+                            if (cached != null) {
+                                sourceMap.keys.forEach { cached.remove(it) }
+                                usersSources["extracted_cache"] = cached
                             }
                         }
                         usersSources["fs_$collName"] = sourceMap
@@ -2775,11 +2978,57 @@ service cloud.firestore {
             }
         }
 
+        // Also listen to Firestore banned_users & ban_appeals collections
+        try {
+            val fsBannedListener = firestore.collection("banned_users").addSnapshotListener { snapshot, error ->
+                if (error == null && snapshot != null) {
+                    val map = mutableMapOf<String, UserProfile>()
+                    snapshot.documents.forEach { d ->
+                        val isBannedField = d.getBoolean("isBanned")
+                        val statusVal = (d.getString("status") ?: d.getString("accountStatus")).orEmpty().trim().uppercase()
+                        if (isBannedField == false || statusVal == "UNBANNED" || statusVal == "ACTIVE") return@forEach
+
+                        val uid = (d.getString("uid") ?: d.getString("userId") ?: d.getString("id") ?: d.id).trim()
+                        val email = (d.getString("email") ?: d.getString("userEmail")).orEmpty().trim().lowercase()
+                        val gameId = (d.getString("gameId") ?: d.getString("freeFireId")).orEmpty().trim()
+                        val ign = (d.getString("ign") ?: d.getString("inGameName")).orEmpty().trim()
+                        val uname = (d.getString("username") ?: d.getString("userName") ?: d.getString("name")).orEmpty().trim()
+                        val reason = (d.getString("banReason") ?: d.getString("reason")).orEmpty().trim()
+                        val caseId = (d.getString("banCaseId") ?: d.getString("sanctionId")).orEmpty().trim()
+                        val appealTicket = (d.getString("activeAppealTicketId") ?: d.getString("activeAppealTicket") ?: d.getString("appealTicketId")).orEmpty().trim()
+                        if (uid.isNotBlank() && !locallyDeletedUserIds.contains(uid)) {
+                            bannedUids.add(uid)
+                            if (email.isNotBlank()) bannedEmails.add(email)
+                            if (gameId.isNotBlank()) bannedGameIds.add(gameId)
+                            val displayName = uname.ifBlank { ign.ifBlank { if (email.contains("@")) email.substringBefore("@") else "Player (${uid.take(6)})" } }
+                            map[uid] = (d.toUserProfile() ?: UserProfile(id = uid)).copy(
+                                id = uid,
+                                username = displayName,
+                                ign = ign.ifBlank { displayName },
+                                email = email,
+                                gameId = gameId,
+                                isBanned = true,
+                                status = "BANNED",
+                                accountStatus = "BANNED",
+                                banReason = reason.ifBlank { "Violation of Fair Play Terms / Anti-Cheat & Third-Party Tool Detection" },
+                                banCaseId = caseId,
+                                activeAppealTicketId = appealTicket
+                            )
+                        }
+                    }
+                    usersSources["fs_banned_users"] = map
+                    scheduleEmitUsers()
+                }
+            }
+            fsListeners.add(fsBannedListener)
+        } catch (_: Exception) {}
+
         awaitClose {
             emitJob?.cancel()
             userNodes.forEach { (key, ref) ->
                 listenersMap[key]?.let { ref.removeEventListener(it) }
             }
+            appealListeners.forEach { (r, l) -> r.removeEventListener(l) }
             bannedUsersRef.removeEventListener(bannedUsersListener)
             adminsRef.removeEventListener(adminsListener)
             regRef.removeEventListener(regListener)
@@ -2828,18 +3077,27 @@ service cloud.firestore {
             override fun onDataChange(snapshot: DataSnapshot) {
                 if (!snapshot.exists()) return
                 snapshot.children.forEach { child ->
+                    if (child.value is Boolean) return@forEach
                     val key = child.key ?: return@forEach
-                    val id = child.child("id").getValue(String::class.java) ?: key
-                    val name = child.child("name").getValue(String::class.java)
-                        ?: child.child("label").getValue(String::class.java)
-                        ?: child.getValue(String::class.java)
-                        ?: key
-                    val label = child.child("label").getValue(String::class.java) ?: name
-                    val desc = child.child("description").getValue(String::class.java) ?: ""
-                    val banner = child.child("bannerUrl").getValue(String::class.java)
-                        ?: child.child("imageUrl").getValue(String::class.java) ?: ""
-                    val icon = child.child("iconUrl").getValue(String::class.java) ?: ""
-                    val maxPlayers = (child.child("maxPlayers").getValue(Long::class.java) ?: child.child("defaultMaxPlayers").getValue(Long::class.java))?.toInt() ?: 48
+                    val isMapNode = child.hasChildren() && child.value is Map<*, *>
+                    val id = if (isMapNode) (child.child("id").value?.toString() ?: key) else key
+                    val name = if (isMapNode) {
+                        child.child("name").value?.toString()
+                            ?: child.child("label").value?.toString()
+                            ?: key
+                    } else {
+                        (child.value as? String)?.takeIf { it.isNotBlank() } ?: return@forEach
+                    }
+                    val label = if (isMapNode) (child.child("label").value?.toString() ?: name) else name
+                    val desc = if (isMapNode) (child.child("description").value?.toString() ?: "") else ""
+                    val banner = if (isMapNode) {
+                        child.child("bannerUrl").value?.toString()
+                            ?: child.child("imageUrl").value?.toString() ?: ""
+                    } else ""
+                    val icon = if (isMapNode) (child.child("iconUrl").value?.toString() ?: "") else ""
+                    val maxPlayers = if (isMapNode) {
+                        safeInt(child.child("maxPlayers").value ?: child.child("defaultMaxPlayers").value, 48)
+                    } else 48
 
                     val existing = categoriesMap[id.uppercase()]
                     categoriesMap[id.uppercase()] = TournamentCategory(
@@ -3424,14 +3682,46 @@ service cloud.firestore {
                 }
             }
 
-            // 7. Check Banned Users status from RTDB
+            // 7. Check Banned Users status from RTDB & Firestore and synthesize any missing banned accounts
             try {
                 val banSnap = database.child("banned_users").get().await()
-                val bannedIds = banSnap.children.mapNotNull { it.key }.toSet()
-                if (bannedIds.isNotEmpty()) {
-                    extractedUsers.values.forEach { u ->
-                        if (bannedIds.contains(u.id) || (u.email.isNotBlank() && bannedIds.contains(u.email.replace(".", "_")))) {
-                            extractedUsers[u.id] = u.copy(isBanned = true)
+                banSnap.children.forEach { child ->
+                    val explicitBool = child.child("isBanned").value
+                    val statusVal = (child.child("status").value ?: child.child("accountStatus").value)?.toString()?.trim()?.uppercase().orEmpty()
+                    if (explicitBool == false || explicitBool.toString().equals("false", true) || statusVal == "UNBANNED" || statusVal == "ACTIVE") return@forEach
+                    val k = child.key?.trim().orEmpty()
+                    val uid = (child.child("uid").value ?: child.child("userId").value ?: child.child("id").value)?.toString()?.trim().orEmpty().ifBlank { k }
+                    val email = (child.child("email").value ?: child.child("userEmail").value)?.toString()?.trim().orEmpty()
+                    val gameId = (child.child("gameId").value ?: child.child("freeFireId").value)?.toString()?.trim().orEmpty()
+                    val ign = (child.child("ign").value ?: child.child("inGameName").value)?.toString()?.trim().orEmpty()
+                    val uname = (child.child("username").value ?: child.child("userName").value ?: child.child("name").value)?.toString()?.trim().orEmpty()
+                    val reason = (child.child("banReason").value ?: child.child("reason").value)?.toString()?.trim().orEmpty()
+                    val caseId = (child.child("banCaseId").value ?: child.child("sanctionId").value)?.toString()?.trim().orEmpty()
+                    val appealTicket = (child.child("activeAppealTicketId").value ?: child.child("activeAppealTicket").value ?: child.child("appealTicketId").value)?.toString()?.trim().orEmpty()
+                    if (uid.isNotBlank()) {
+                        val existing = extractedUsers[uid]
+                        if (existing != null) {
+                            extractedUsers[uid] = existing.copy(
+                                isBanned = true,
+                                banReason = existing.banReason.ifBlank { reason },
+                                banCaseId = existing.banCaseId.ifBlank { caseId },
+                                activeAppealTicketId = existing.activeAppealTicketId.ifBlank { appealTicket }
+                            )
+                        } else {
+                            val displayName = uname.ifBlank { ign.ifBlank { if (email.contains("@")) email.substringBefore("@") else "Player (${uid.take(6)})" } }
+                            extractedUsers[uid] = (child.toUserProfile() ?: UserProfile(id = uid)).copy(
+                                id = uid,
+                                username = displayName,
+                                ign = ign.ifBlank { displayName },
+                                email = email,
+                                gameId = gameId,
+                                isBanned = true,
+                                status = "BANNED",
+                                accountStatus = "BANNED",
+                                banReason = reason.ifBlank { "Violation of Fair Play Terms / Anti-Cheat & Third-Party Tool Detection" },
+                                banCaseId = caseId,
+                                activeAppealTicketId = appealTicket
+                            )
                         }
                     }
                 }
@@ -3527,8 +3817,8 @@ service cloud.firestore {
                 .filter { u ->
                     !u.isGuestSession &&
                     !u.email.equals("velorix.admin.sync@velorix.com", ignoreCase = true) &&
-                    !u.id.equals("aVdRSL6AZ2M0MGPdc83ItXF5Hec2", ignoreCase = true) &&
-                    !u.id.contains("@")
+                    !u.email.contains("@example.com") &&
+                    !u.id.startsWith("mock_", ignoreCase = true)
                 }
                 .sortedWith(compareByDescending<UserProfile> { it.isBanned }.thenBy { it.username.lowercase() })
 
@@ -3569,7 +3859,10 @@ service cloud.firestore {
     suspend fun getPendingRegistrations(): List<PlayerRegistration> {
         return try {
             val rtdbSnap = database.child("tournament_registrations").get().await()
-            val list = rtdbSnap.children.mapNotNull { it.getValue(PlayerRegistration::class.java) }
+            val list = rtdbSnap.children.mapNotNull { child ->
+                if (!child.hasChildren() || child.value !is Map<*, *>) null
+                else child.safeGetObject<PlayerRegistration>()
+            }
             val pendingFromRtdb = list.filter { it.status.equals("pending", ignoreCase = true) }
             if (pendingFromRtdb.isNotEmpty()) {
                 pendingFromRtdb
@@ -4106,59 +4399,27 @@ service cloud.firestore {
             return
         }
 
-        var rtdbSaved = false
         var firestoreSaved = false
         var lastError: Exception? = null
 
         val map = buildTournamentMap(tournament)
 
-        // Write to all primary, category, and companion RTDB paths
-        val paths = getSyncRtdbPaths(tournament.id, tournament.game, tournament.canonicalCategory)
-        for (path in paths) {
-            try {
-                database.child(path).setValue(map).await()
-                rtdbSaved = true
-            } catch (e: Exception) {
-                lastError = e
-                Log.w(TAG, "Failed writing tournament to RTDB path $path: ${e.message}")
-            }
+        // Primary write target: Firestore tournaments/{id} (Cloud Functions automatically mirror RTDB & global_app_state)
+        try {
+            firestore.collection("tournaments").document(tournament.id).set(map).await()
+            firestoreSaved = true
+        } catch (e: Exception) {
+            lastError = e
+            Log.w(TAG, "Failed writing tournament to Firestore tournaments/${tournament.id}: ${e.message}")
         }
 
-        // Write to Firestore collections (including category-specific sub-collections)
-        val fsCollections = listOf(
-            "tournaments", "matches", "active_tournaments", "all_tournaments",
-            "categories/${tournament.canonicalCategory}/matches",
-            "categories/${tournament.canonicalCategory.lowercase()}/matches",
-            "categories/${tournament.canonicalCategory}/tournaments",
-            "categories/${tournament.canonicalCategory.lowercase()}/tournaments",
-            "tournaments_by_category/${tournament.canonicalCategory}/items",
-            "tournaments_by_category/${tournament.canonicalCategory.lowercase()}/items"
-        )
-        for (col in fsCollections) {
-            try {
-                firestore.collection(col).document(tournament.id).set(map).await()
-                firestoreSaved = true
-            } catch (e: Exception) {
-                if (lastError == null) lastError = e
-                Log.w(TAG, "Failed writing tournament to Firestore col $col: ${e.message}")
-            }
-        }
-
-        if (rtdbSaved || firestoreSaved) {
-            val globalPayload = mapOf(
-                "lastChangeType" to "TOURNAMENT_UPDATED",
-                "targetId" to tournament.id,
-                "tournamentId" to tournament.id,
-                "updatedAt" to System.currentTimeMillis()
-            )
-            try { database.child("global_app_state").updateChildren(globalPayload) } catch (_: Exception) {}
-            try { firestore.collection("global_app_state").document("current").set(globalPayload, com.google.firebase.firestore.SetOptions.merge()) } catch (_: Exception) {}
+        if (firestoreSaved) {
             try {
                 dispatchAutoTournamentCampaign(tournament)
             } catch (e: Exception) {
                 Log.w(TAG, "Failed auto-dispatching campaign: ${e.message}")
             }
-            GlobalErrorManager.emitSuccess("Tournament \"${tournament.title}\" validated & synchronized live across all apps!")
+            GlobalErrorManager.emitSuccess("Tournament \"${tournament.title}\" saved to Firestore & syncing live across all apps!")
         } else {
             GlobalErrorManager.emitError("Failed to create tournament: ${lastError?.message ?: "Unknown error"}", lastError)
         }
@@ -4191,50 +4452,22 @@ service cloud.firestore {
             return
         }
 
-        var rtdbSaved = false
         var firestoreSaved = false
         var lastError: Exception? = null
 
         val map = buildTournamentMap(tournament)
 
-        val paths = getSyncRtdbPaths(tournament.id, tournament.game, tournament.canonicalCategory)
-        for (path in paths) {
-            try {
-                database.child(path).updateChildren(map).await()
-                rtdbSaved = true
-            } catch (e: Exception) {
-                lastError = e
-            }
+        // Primary write target: Firestore tournaments/{id} (Cloud Functions automatically mirror RTDB & global_app_state)
+        try {
+            firestore.collection("tournaments").document(tournament.id).set(map, SetOptions.merge()).await()
+            firestoreSaved = true
+        } catch (e: Exception) {
+            lastError = e
+            Log.w(TAG, "Failed updating tournament in Firestore tournaments/${tournament.id}: ${e.message}")
         }
 
-        val fsCollections = listOf(
-            "tournaments", "matches", "active_tournaments", "all_tournaments",
-            "categories/${tournament.canonicalCategory}/matches",
-            "categories/${tournament.canonicalCategory.lowercase()}/matches",
-            "categories/${tournament.canonicalCategory}/tournaments",
-            "categories/${tournament.canonicalCategory.lowercase()}/tournaments",
-            "tournaments_by_category/${tournament.canonicalCategory}/items",
-            "tournaments_by_category/${tournament.canonicalCategory.lowercase()}/items"
-        )
-        for (col in fsCollections) {
-            try {
-                firestore.collection(col).document(tournament.id).set(map).await()
-                firestoreSaved = true
-            } catch (e: Exception) {
-                if (lastError == null) lastError = e
-            }
-        }
-
-        if (rtdbSaved || firestoreSaved) {
-            val globalPayload = mapOf(
-                "lastChangeType" to "TOURNAMENT_UPDATED",
-                "targetId" to tournament.id,
-                "tournamentId" to tournament.id,
-                "updatedAt" to System.currentTimeMillis()
-            )
-            try { database.child("global_app_state").updateChildren(globalPayload) } catch (_: Exception) {}
-            try { firestore.collection("global_app_state").document("current").set(globalPayload, com.google.firebase.firestore.SetOptions.merge()) } catch (_: Exception) {}
-            GlobalErrorManager.emitSuccess("Tournament \"${tournament.title}\" updated across all cloud endpoints!")
+        if (firestoreSaved) {
+            GlobalErrorManager.emitSuccess("Tournament \"${tournament.title}\" updated in Firestore & syncing live!")
             
             // Dispatch live / completed / rules notification to all users
             context?.let { ctx ->
@@ -4287,42 +4520,16 @@ service cloud.firestore {
             "isActive" to false,
             "is_active" to false,
             "cancellationReason" to reason,
-            "cancelledAt" to System.currentTimeMillis()
-        )
-        val paths = (
-            getSyncRtdbPaths(tournamentId, "Free Fire", "BR") +
-            getSyncRtdbPaths(tournamentId, "Free Fire", "CS") +
-            getSyncRtdbPaths(tournamentId, "Free Fire", "LONE_WOLF") +
-            getSyncRtdbPaths(tournamentId, "Free Fire", "SCRIMS") +
-            getSyncRtdbPaths(tournamentId, "BGMI")
-        ).distinct()
-        for (path in paths) {
-            try {
-                database.child(path).updateChildren(cancelMap).await()
-            } catch (_: Exception) {}
-        }
-        val fsCollections = listOf(
-            "tournaments", "matches", "active_tournaments", "all_tournaments",
-            "categories/BR/matches", "categories/CS/matches", "categories/LONE_WOLF/matches", "categories/SCRIMS/matches",
-            "categories/br/matches", "categories/cs/matches", "categories/lone_wolf/matches", "categories/scrims/matches",
-            "categories/BR/tournaments", "categories/CS/tournaments", "categories/LONE_WOLF/tournaments", "categories/SCRIMS/tournaments",
-            "tournaments_by_category/BR/items", "tournaments_by_category/CS/items", "tournaments_by_category/LONE_WOLF/items", "tournaments_by_category/SCRIMS/items"
-        )
-        for (col in fsCollections) {
-            try {
-                firestore.collection(col).document(tournamentId).update(cancelMap).await()
-            } catch (_: Exception) {}
-        }
-        val globalPayload = mapOf(
-            "lastChangeType" to "TOURNAMENT_CANCELLED",
-            "targetId" to tournamentId,
-            "tournamentId" to tournamentId,
-            "reason" to reason,
+            "cancelledAt" to System.currentTimeMillis(),
             "updatedAt" to System.currentTimeMillis()
         )
-        try { database.child("global_app_state").updateChildren(globalPayload) } catch (_: Exception) {}
-        try { firestore.collection("global_app_state").document("current").set(globalPayload, com.google.firebase.firestore.SetOptions.merge()) } catch (_: Exception) {}
-        GlobalErrorManager.emitSuccess("Tournament cancelled: $reason")
+        // Primary write target: Firestore tournaments/{id} (Cloud Functions mirror RTDB & global_app_state)
+        try {
+            firestore.collection("tournaments").document(tournamentId).set(cancelMap, SetOptions.merge()).await()
+            GlobalErrorManager.emitSuccess("Tournament cancelled: $reason")
+        } catch (e: Exception) {
+            GlobalErrorManager.emitError("Failed to cancel tournament: ${e.message}", e)
+        }
     }
 
     suspend fun purgeOrphanAndDeletedTournamentsFromCloud() {
@@ -4394,69 +4601,24 @@ service cloud.firestore {
         var deleted = false
         var lastError: Exception? = null
 
-        val extraRtdbPaths = listOf(
-            "custom_rooms/$tournamentId",
-            "tournament/$tournamentId",
-            "Tournament/$tournamentId",
-            "match/$tournamentId",
-            "Match/$tournamentId",
-            "rooms/$tournamentId",
-            "room_credentials/$tournamentId",
-            "registrations/$tournamentId",
-            "leaderboard/$tournamentId"
-        )
-
-        val paths = (
-            getSyncRtdbPaths(tournamentId, "Free Fire", "BR") +
-            getSyncRtdbPaths(tournamentId, "Free Fire", "CS") +
-            getSyncRtdbPaths(tournamentId, "Free Fire", "LONE_WOLF") +
-            getSyncRtdbPaths(tournamentId, "Free Fire", "SCRIMS") +
-            getSyncRtdbPaths(tournamentId, "BGMI") +
-            extraRtdbPaths
-        ).distinct()
-        for (path in paths) {
-            try {
-                database.child(path).removeValue().await()
-                deleted = true
-            } catch (e: Exception) {
-                lastError = e
-            }
+        // Primary delete target: Firestore tournaments/{id} (Cloud Functions automatically clean RTDB mirrors & update global_app_state)
+        try {
+            firestore.collection("tournaments").document(tournamentId).delete().await()
+            deleted = true
+        } catch (e: Exception) {
+            lastError = e
+            Log.w(TAG, "Failed deleting Firestore tournaments/$tournamentId: ${e.message}")
         }
 
-        val fsCollections = listOf(
-            "tournaments", "Tournaments", "matches", "Matches",
-            "active_tournaments", "all_tournaments", "published_matches", "custom_rooms",
-            "categories/BR/matches", "categories/CS/matches", "categories/LONE_WOLF/matches", "categories/SCRIMS/matches",
-            "categories/br/matches", "categories/cs/matches", "categories/lone_wolf/matches", "categories/scrims/matches",
-            "categories/BR/tournaments", "categories/CS/tournaments", "categories/LONE_WOLF/tournaments", "categories/SCRIMS/tournaments",
-            "tournaments_by_category/BR/items", "tournaments_by_category/CS/items", "tournaments_by_category/LONE_WOLF/items", "tournaments_by_category/SCRIMS/items"
-        )
-        for (col in fsCollections) {
+        // Clean any legacy secondary Firestore copies if present
+        for (col in listOf("matches", "active_tournaments", "all_tournaments")) {
             try {
                 firestore.collection(col).document(tournamentId).delete().await()
-                deleted = true
-            } catch (e: Exception) {
-                if (lastError == null) lastError = e
-            }
+            } catch (_: Exception) {}
         }
 
-        // Also scan all RTDB & Firestore tournament nodes for any child/doc whose internal id matches tournamentId
-        try {
-            purgeOrphanAndDeletedTournamentsFromCloud()
-            deleted = true
-        } catch (_: Exception) {}
-
         if (deleted) {
-            val globalPayload = mapOf(
-                "lastChangeType" to "TOURNAMENT_UPDATED",
-                "targetId" to tournamentId,
-                "tournamentId" to tournamentId,
-                "deleted" to true,
-                "updatedAt" to System.currentTimeMillis()
-            )
-            try { database.child("global_app_state").updateChildren(globalPayload) } catch (_: Exception) {}
-            try { firestore.collection("global_app_state").document("current").set(globalPayload, com.google.firebase.firestore.SetOptions.merge()) } catch (_: Exception) {}
-            GlobalErrorManager.emitSuccess("Tournament permanently deleted from all cloud channels!")
+            GlobalErrorManager.emitSuccess("Tournament permanently deleted from Firestore & syncing removal across apps!")
         } else {
             GlobalErrorManager.emitError("Failed to delete tournament: ${lastError?.message ?: "Unknown error"}", lastError)
         }
@@ -4601,7 +4763,10 @@ service cloud.firestore {
     suspend fun getMatches(tournamentId: String): List<Match> {
         return try {
             val rtdbSnap = database.child("matches").child(tournamentId).get().await()
-            val list = rtdbSnap.children.mapNotNull { it.getValue(Match::class.java) }
+            val list = rtdbSnap.children.mapNotNull { child ->
+                if (!child.hasChildren() || child.value !is Map<*, *>) null
+                else child.safeGetObject<Match>()
+            }
             if (list.isNotEmpty()) list else {
                 val snapshot = firestore.collection("matches")
                     .whereEqualTo("tournament_id", tournamentId)
@@ -4615,12 +4780,14 @@ service cloud.firestore {
 
     suspend fun updateMatch(match: Match) {
         try {
-            database.child("matches").child(match.tournamentId).child(match.id).setValue(match).await()
+            firestore.collection("tournaments").document(match.tournamentId)
+                .collection("matches").document(match.id).set(match).await()
             try {
                 firestore.collection("matches").document(match.id).set(match).await()
-                firestore.collection("tournaments").document(match.tournamentId)
-                    .collection("matches").document(match.id).set(match).await()
-            } catch (ignored: Exception) {}
+            } catch (_: Exception) {}
+            try {
+                database.child("matches").child(match.tournamentId).child(match.id).setValue(match).await()
+            } catch (_: Exception) {}
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -4636,7 +4803,7 @@ service cloud.firestore {
         try {
             if (!sourceMatchId.isNullOrBlank()) {
                 val sourceSnap = database.child("matches").child(tournamentId).child(sourceMatchId).get().await()
-                val sourceMatch = sourceSnap.getValue(Match::class.java)
+                val sourceMatch = sourceSnap.safeGetObject<Match>()
                 if (sourceMatch != null) {
                     val updatedSource = sourceMatch.copy(
                         winnerId = playerId,
@@ -4647,7 +4814,7 @@ service cloud.firestore {
             }
 
             val targetSnap = database.child("matches").child(tournamentId).child(targetMatchId).get().await()
-            val targetMatch = targetSnap.getValue(Match::class.java) ?: Match(
+            val targetMatch = targetSnap.safeGetObject<Match>() ?: Match(
                 id = targetMatchId,
                 tournamentId = tournamentId,
                 status = "SCHEDULED"
@@ -4678,11 +4845,12 @@ service cloud.firestore {
             trySend(list)
         }
 
-        // 1. Observe Realtime Database
+        // 1. Observe Realtime Database (guarded against primitive/Boolean nodes)
         val rtdbListener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                snapshot.children.forEach { child ->
-                    val m = child.getValue(Match::class.java)
+                for (child in snapshot.children) {
+                    if (!child.hasChildren() || child.value !is Map<*, *>) continue
+                    val m = child.safeGetObject<Match>()
                     if (m != null && m.id.isNotBlank()) {
                         matchesMap[m.id] = m
                     }
@@ -4739,8 +4907,10 @@ service cloud.firestore {
     suspend fun getLiveLeaderboardStream(tournamentId: String): Flow<List<LeaderboardEntry>> = callbackFlow {
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                val entries = snapshot.children.mapNotNull { it.getValue(LeaderboardEntry::class.java) }
-                    .sortedByDescending { it.score }
+                val entries = snapshot.children.mapNotNull { child ->
+                    if (!child.hasChildren() || child.value !is Map<*, *>) null
+                    else child.safeGetObject<LeaderboardEntry>()
+                }.sortedByDescending { it.score }
                 trySend(entries)
             }
             override fun onCancelled(error: DatabaseError) {
@@ -4903,40 +5073,24 @@ service cloud.firestore {
                 "adminReply" to replyText,
                 "assignedTo" to ticket.assignedTo
             )
-            database.child("support_tickets").child(ticket.id).updateChildren(payload).await()
-            database.child("reports").child(ticket.id).updateChildren(payload).await()
-            database.child("problem_reports").child(ticket.id).updateChildren(payload).await()
-            database.child("complaints").child(ticket.id).updateChildren(payload).await()
-            try { database.child("admin_channels").child("support_tickets").child(ticket.id).updateChildren(payload).await() } catch (_: Exception) {}
-            try { firestore.collection("support_tickets").document(ticket.id).set(payload, com.google.firebase.firestore.SetOptions.merge()).await() } catch (_: Exception) {}
-            try { firestore.collection("reports").document(ticket.id).set(payload, com.google.firebase.firestore.SetOptions.merge()).await() } catch (_: Exception) {}
-            try { firestore.collection("problem_reports").document(ticket.id).set(payload, com.google.firebase.firestore.SetOptions.merge()).await() } catch (_: Exception) {}
-            try { firestore.collection("complaints").document(ticket.id).set(payload, com.google.firebase.firestore.SetOptions.merge()).await() } catch (_: Exception) {}
-            try { firestore.collection("admin_channels").document("support_tickets").collection("items").document(ticket.id).set(payload, com.google.firebase.firestore.SetOptions.merge()).await() } catch (_: Exception) {}
-            try {
-                val globalState = mapOf(
-                    "eventType" to "SUPPORT_TICKET_REPLIED",
-                    "source" to "ADMIN_PANEL",
-                    "tournamentId" to "",
-                    "affectedUserId" to userId,
-                    "timestamp" to now,
-                    "payload" to mapOf("ticketId" to ticket.id, "status" to ticket.status, "adminReply" to replyText)
-                )
-                database.child("global_app_state").setValue(globalState).await()
-                firestore.collection("global_app_state").document("current").set(globalState, com.google.firebase.firestore.SetOptions.merge()).await()
-            } catch (_: Exception) {}
+            // Primary write target: Firestore support_tickets & companion ticket collections (Cloud Functions mirror RTDB & global_app_state)
+            firestore.collection("support_tickets").document(ticket.id).set(payload, SetOptions.merge()).await()
+            try { firestore.collection("reports").document(ticket.id).set(payload, SetOptions.merge()).await() } catch (_: Exception) {}
+            try { firestore.collection("problem_reports").document(ticket.id).set(payload, SetOptions.merge()).await() } catch (_: Exception) {}
+            try { firestore.collection("complaints").document(ticket.id).set(payload, SetOptions.merge()).await() } catch (_: Exception) {}
+            try { firestore.collection("admin_channels").document("support_tickets").collection("items").document(ticket.id).set(payload, SetOptions.merge()).await() } catch (_: Exception) {}
 
             if (userId.isNotBlank() && replyText.isNotBlank()) {
                 val notifId = "notif_sup_${now}"
                 val notifMap = mapOf(
                     "id" to notifId,
+                    "userId" to userId,
                     "title" to "Support Ticket Update (#${ticket.id.takeLast(6)})",
                     "message" to "Admin replied: $replyText (Status: ${ticket.status})",
                     "type" to "SUPPORT",
                     "timestamp" to now,
                     "isRead" to false
                 )
-                try { database.child("notifications").child(userId).child(notifId).setValue(notifMap).await() } catch (_: Exception) {}
                 try { firestore.collection("users").document(userId).collection("notifications").document(notifId).set(notifMap).await() } catch (_: Exception) {}
             }
         } catch (e: Exception) {
@@ -4947,13 +5101,11 @@ service cloud.firestore {
 
     suspend fun deleteSupportTicket(ticketId: String) {
         try {
-            database.child("support_tickets").child(ticketId).removeValue().await()
-            database.child("problem_reports").child(ticketId).removeValue().await()
-            database.child("complaints").child(ticketId).removeValue().await()
-            try { database.child("admin_channels").child("support_tickets").child(ticketId).removeValue().await() } catch (_: Exception) {}
-            try { firestore.collection("support_tickets").document(ticketId).delete().await() } catch (_: Exception) {}
+            // Primary delete target: Firestore (Cloud Functions handle RTDB cleanup)
+            firestore.collection("support_tickets").document(ticketId).delete().await()
             try { firestore.collection("problem_reports").document(ticketId).delete().await() } catch (_: Exception) {}
             try { firestore.collection("complaints").document(ticketId).delete().await() } catch (_: Exception) {}
+            try { firestore.collection("reports").document(ticketId).delete().await() } catch (_: Exception) {}
         } catch (e: Exception) {
             e.printStackTrace()
             GlobalErrorManager.emitError("Failed to delete ticket: ${e.message}")
@@ -4999,12 +5151,13 @@ service cloud.firestore {
                 }
         } catch (_: Exception) {}
 
-        // 2. Realtime Database listener for real-time fallback/sync
+        // 2. Realtime Database listener for real-time fallback/sync (guarded against primitive/Boolean nodes)
         val rtdbRef = database.child("support_tickets").child(ticketId).child("messages")
         val rtdbListener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                snapshot.children.forEach { child ->
-                    val msg = child.getValue(TicketMessage::class.java)?.copy(id = child.key ?: "")
+                for (child in snapshot.children) {
+                    if (!child.hasChildren() || child.value !is Map<*, *>) continue
+                    val msg = child.safeGetObject<TicketMessage>()?.copy(id = child.key ?: "")
                         ?: TicketMessage(
                             id = child.key ?: "",
                             ticketId = child.child("ticketId").value?.toString() ?: ticketId,
@@ -5055,25 +5208,20 @@ service cloud.firestore {
 
         var success = false
 
-        // 1. Write to Firestore collections
+        // 1. Primary write target: Firestore support_tickets/{ticketId}/messages (Cloud Functions mirror RTDB)
         try {
             firestore.collection("support_tickets").document(ticketId).collection("messages").document(msgId).set(payload).await()
             success = true
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed writing ticket message to Firestore support_tickets: ${e.message}")
+        }
 
         try {
             firestore.collection("complaints").document(ticketId).collection("messages").document(msgId).set(payload).await()
             success = true
         } catch (_: Exception) {}
 
-        // 2. Write to RTDB nodes
-        try {
-            database.child("support_tickets").child(ticketId).child("messages").child(msgId).setValue(payload).await()
-            database.child("tickets_chat").child(ticketId).child("messages").child(msgId).setValue(payload).await()
-            success = true
-        } catch (_: Exception) {}
-
-        // 3. Update ticket metadata (updatedAt, adminNote, adminReply, repliedAt, status = in_progress)
+        // 2. Update ticket metadata primarily in Firestore (updatedAt, adminNote, adminReply, repliedAt, status = IN_PROGRESS)
         try {
             val ticketUpdates = mapOf<String, Any>(
                 "updatedAt" to now,
@@ -5082,12 +5230,9 @@ service cloud.firestore {
                 "adminReply" to cleanMsg,
                 "status" to "IN_PROGRESS"
             )
-            database.child("support_tickets").child(ticketId).updateChildren(ticketUpdates).await()
-            database.child("problem_reports").child(ticketId).updateChildren(ticketUpdates).await()
-            database.child("complaints").child(ticketId).updateChildren(ticketUpdates).await()
-            try { firestore.collection("support_tickets").document(ticketId).update(ticketUpdates).await() } catch (_: Exception) {}
-            try { firestore.collection("problem_reports").document(ticketId).update(ticketUpdates).await() } catch (_: Exception) {}
-            try { firestore.collection("complaints").document(ticketId).update(ticketUpdates).await() } catch (_: Exception) {}
+            try { firestore.collection("support_tickets").document(ticketId).set(ticketUpdates, SetOptions.merge()).await() } catch (_: Exception) {}
+            try { firestore.collection("problem_reports").document(ticketId).set(ticketUpdates, SetOptions.merge()).await() } catch (_: Exception) {}
+            try { firestore.collection("complaints").document(ticketId).set(ticketUpdates, SetOptions.merge()).await() } catch (_: Exception) {}
         } catch (_: Exception) {}
 
         return success
@@ -5992,8 +6137,9 @@ service cloud.firestore {
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 val map = mutableMapOf<String, BannedUserRecord>()
-                snapshot.children.forEach { child ->
-                    val record = child.getValue(BannedUserRecord::class.java)
+                for (child in snapshot.children) {
+                    if (!child.hasChildren() || child.value !is Map<*, *>) continue
+                    val record = child.safeGetObject<BannedUserRecord>()
                     if (record != null && record.uid.isNotBlank()) {
                         map[record.uid] = record
                     }
@@ -6078,41 +6224,7 @@ service cloud.firestore {
                 android.util.Log.w(TAG, "unban RTDB banned_users error: ${e.message}")
             }
 
-            // 2. Scan banned_users collection in Firestore
-            try {
-                val fsBanned = firestore.collection("banned_users").get().await()
-                for (doc in fsBanned.documents) {
-                    val docId = doc.id
-                    val email = doc.getString("email")?.trim()?.lowercase() ?: ""
-                    val uid = doc.getString("uid")?.trim() ?: ""
-                    val gameId = doc.getString("gameId")?.trim() ?: ""
-                    val isGuestSessionBan = docId.isBlank() ||
-                        docId.startsWith("guest", ignoreCase = true) ||
-                        docId.startsWith("anon", ignoreCase = true) ||
-                        uid.startsWith("guest", ignoreCase = true) ||
-                        uid.startsWith("anon", ignoreCase = true) ||
-                        email.contains("guest") ||
-                        email.contains("anonymous") ||
-                        (!email.contains("@") && gameId.isBlank())
-
-                    if (isGuestSessionBan) {
-                        try { doc.reference.delete().await() } catch (_: Exception) {}
-                        try { database.child("banned_users").child(docId).removeValue().await() } catch (_: Exception) {}
-                        val targetUid = uid.ifBlank { docId }
-                        if (targetUid.isNotBlank()) {
-                            try { database.child("users").child(targetUid).updateChildren(unbanUpdates).await() } catch (_: Exception) {}
-                            try { database.child("userProfiles").child(targetUid).updateChildren(unbanUpdates).await() } catch (_: Exception) {}
-                            try { database.child("players").child(targetUid).updateChildren(unbanUpdates).await() } catch (_: Exception) {}
-                            try { firestore.collection("users").document(targetUid).update(unbanUpdates).await() } catch (_: Exception) {}
-                            try { firestore.collection("userProfiles").document(targetUid).update(unbanUpdates).await() } catch (_: Exception) {}
-                            try { firestore.collection("players").document(targetUid).update(unbanUpdates).await() } catch (_: Exception) {}
-                        }
-                        unbannedCount++
-                    }
-                }
-            } catch (e: Exception) {
-                android.util.Log.w(TAG, "unban Firestore banned_users error: ${e.message}")
-            }
+            // 2. (Firestore banned_users is blocked by zero-trust firestore.rules; sanctions live on users/{uid})
 
             // 3. Scan all users in RTDB /users to sweep any banned user without a valid logged-in email
             try {
@@ -6133,13 +6245,10 @@ service cloud.firestore {
 
                         if (isAnon || (!email.contains("@") && phone.isBlank()) || uname.startsWith("guest") || uname.startsWith("player (") || uname == "player") {
                             try { database.child("banned_users").child(uid).removeValue().await() } catch (_: Exception) {}
-                            try { firestore.collection("banned_users").document(uid).delete().await() } catch (_: Exception) {}
                             try { uSnap.ref.updateChildren(unbanUpdates).await() } catch (_: Exception) {}
                             try { database.child("userProfiles").child(uid).updateChildren(unbanUpdates).await() } catch (_: Exception) {}
                             try { database.child("players").child(uid).updateChildren(unbanUpdates).await() } catch (_: Exception) {}
-                            try { firestore.collection("users").document(uid).update(unbanUpdates).await() } catch (_: Exception) {}
-                            try { firestore.collection("userProfiles").document(uid).update(unbanUpdates).await() } catch (_: Exception) {}
-                            try { firestore.collection("players").document(uid).update(unbanUpdates).await() } catch (_: Exception) {}
+                            try { firestore.collection("users").document(uid).set(unbanUpdates, SetOptions.merge()).await() } catch (_: Exception) {}
                             unbannedCount++
                         }
                     }
@@ -6163,7 +6272,6 @@ service cloud.firestore {
 
                     if (isAnon || (!email.contains("@") && phone.isBlank()) || uname.startsWith("guest") || uname.startsWith("player (") || uname == "player") {
                         try { doc.reference.update(unbanUpdates).await() } catch (_: Exception) {}
-                        try { firestore.collection("banned_users").document(uid).delete().await() } catch (_: Exception) {}
                         try { database.child("banned_users").child(uid).removeValue().await() } catch (_: Exception) {}
                         try { database.child("users").child(uid).updateChildren(unbanUpdates).await() } catch (_: Exception) {}
                         try { database.child("userProfiles").child(uid).updateChildren(unbanUpdates).await() } catch (_: Exception) {}
@@ -6240,34 +6348,29 @@ service cloud.firestore {
             "bannedBy" to effectiveBannedBy
         )
 
-        // 1. Record in banned_users table across all identity keys
+        // Primary write target: Firestore users/{uid} (Cloud Functions mirror RTDB /users, /banned_users & global_app_state)
         if (uid.isNotBlank()) {
-            try { database.child("banned_users").child(uid).setValue(banPayload).await() } catch (e: Exception) { e.printStackTrace() }
-            try { firestore.collection("banned_users").document(uid).set(banPayload).await() } catch (_: Exception) {}
-        }
-        if (email.isNotBlank()) {
-            val emailKey = email.trim().replace(".", "_").lowercase()
-            try { database.child("banned_users").child(emailKey).setValue(banPayload).await() } catch (e: Exception) { e.printStackTrace() }
-            try { firestore.collection("banned_users").document(emailKey).set(banPayload).await() } catch (_: Exception) {}
-        }
-        if (gameId.isNotBlank()) {
-            val cleanGameId = gameId.trim()
-            try { database.child("banned_users").child(cleanGameId).setValue(banPayload).await() } catch (e: Exception) { e.printStackTrace() }
-            try { firestore.collection("banned_users").document(cleanGameId).set(banPayload).await() } catch (_: Exception) {}
-        }
-
-        // 2. Update users, userProfiles, and players nodes
-        if (uid.isNotBlank()) {
-            try { database.child("users").child(uid).updateChildren(userBanUpdates).await() } catch (e: Exception) { e.printStackTrace() }
-            try { database.child("userProfiles").child(uid).updateChildren(userBanUpdates).await() } catch (e: Exception) { e.printStackTrace() }
-            try { database.child("players").child(uid).updateChildren(userBanUpdates).await() } catch (e: Exception) { e.printStackTrace() }
-            try { firestore.collection("users").document(uid).update(userBanUpdates).await() } catch (_: Exception) {}
-            try { firestore.collection("userProfiles").document(uid).update(userBanUpdates).await() } catch (_: Exception) {}
-            try { firestore.collection("players").document(uid).update(userBanUpdates).await() } catch (_: Exception) {}
+            lastExtractedUsers[uid]?.let { cached ->
+                lastExtractedUsers[uid] = cached.copy(
+                    isBanned = true,
+                    status = "BANNED",
+                    accountStatus = "BANNED",
+                    banReason = effectiveReason,
+                    bannedAt = now,
+                    updatedAt = now
+                )
+            }
+            try {
+                firestore.collection("users").document(uid).set(userBanUpdates, SetOptions.merge()).await()
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed banning user in Firestore users/$uid: ${e.message}")
+            }
+            try { firestore.collection("userProfiles").document(uid).set(userBanUpdates, SetOptions.merge()).await() } catch (_: Exception) {}
         }
     }
 
     suspend fun unbanPlayer(uid: String, email: String = "", gameId: String = "") {
+        val now = System.currentTimeMillis()
         val userUnbanUpdates = mapOf<String, Any>(
             "isBanned" to false,
             "banned" to false,
@@ -6276,49 +6379,61 @@ service cloud.firestore {
             "active" to true,
             "isAuthorized" to true,
             "walletFrozen" to false,
-            "banReason" to ""
+            "matchmakingLocked" to false,
+            "withdrawalsLocked" to false,
+            "banReason" to "",
+            "reason" to "",
+            "banType" to "",
+            "sanction" to "",
+            "sanctionType" to "",
+            "banCaseId" to "",
+            "sanctionId" to "",
+            "bannedAt" to 0L,
+            "updatedAt" to now
         )
 
-        // 1. Remove from banned_users table across all identity keys
+        // Immediately update local cache so stream emission never reverts to stale banned=true
         if (uid.isNotBlank()) {
-            try { database.child("banned_users").child(uid).removeValue().await() } catch (e: Exception) { e.printStackTrace() }
-            try { firestore.collection("banned_users").document(uid).delete().await() } catch (_: Exception) {}
+            lastExtractedUsers[uid]?.let { cached ->
+                lastExtractedUsers[uid] = cached.copy(
+                    isBanned = false,
+                    status = "ACTIVE",
+                    accountStatus = "ACTIVE",
+                    banReason = "",
+                    banCaseId = "",
+                    bannedAt = 0L,
+                    activeAppealStatus = "RESOLVED",
+                    updatedAt = now
+                )
+            }
         }
-        if (email.isNotBlank()) {
-            val emailKey = email.trim().replace(".", "_").lowercase()
-            try { database.child("banned_users").child(emailKey).removeValue().await() } catch (e: Exception) { e.printStackTrace() }
-            try { firestore.collection("banned_users").document(emailKey).delete().await() } catch (_: Exception) {}
-        }
-        if (gameId.isNotBlank()) {
-            val cleanGameId = gameId.trim()
-            try { database.child("banned_users").child(cleanGameId).removeValue().await() } catch (e: Exception) { e.printStackTrace() }
-            try { firestore.collection("banned_users").document(cleanGameId).delete().await() } catch (_: Exception) {}
-        }
-
-        // Also sweep any child in banned_users matching uid, email or gameId
-        try {
-            val banSnap = database.child("banned_users").get().await()
-            val cleanEmail = email.trim().lowercase()
-            banSnap.children.forEach { child ->
-                val cUid = child.child("uid").value?.toString()?.trim() ?: ""
-                val cEmail = child.child("email").value?.toString()?.trim()?.lowercase() ?: ""
-                val cGameId = child.child("gameId").value?.toString()?.trim() ?: ""
-                if ((uid.isNotBlank() && cUid == uid) ||
-                    (cleanEmail.isNotBlank() && cEmail == cleanEmail) ||
-                    (gameId.isNotBlank() && cGameId == gameId)) {
-                    child.ref.removeValue()
+        val cleanEmail = email.trim().lowercase()
+        if (cleanEmail.isNotBlank()) {
+            lastExtractedUsers.entries.forEach { (k, v) ->
+                if (v.email.trim().lowercase() == cleanEmail) {
+                    lastExtractedUsers[k] = v.copy(
+                        isBanned = false,
+                        status = "ACTIVE",
+                        accountStatus = "ACTIVE",
+                        banReason = "",
+                        banCaseId = "",
+                        bannedAt = 0L,
+                        activeAppealStatus = "RESOLVED",
+                        updatedAt = now
+                    )
                 }
             }
-        } catch (_: Exception) {}
+        }
 
-        // 2. Update users, userProfiles, and players nodes
+        // Primary write target: Firestore users/{uid} (Cloud Functions clean RTDB /banned_users & mirror /users + global_app_state)
         if (uid.isNotBlank()) {
-            try { database.child("users").child(uid).updateChildren(userUnbanUpdates).await() } catch (e: Exception) { e.printStackTrace() }
-            try { database.child("userProfiles").child(uid).updateChildren(userUnbanUpdates).await() } catch (e: Exception) { e.printStackTrace() }
-            try { database.child("players").child(uid).updateChildren(userUnbanUpdates).await() } catch (e: Exception) { e.printStackTrace() }
-            try { firestore.collection("users").document(uid).update(userUnbanUpdates).await() } catch (_: Exception) {}
-            try { firestore.collection("userProfiles").document(uid).update(userUnbanUpdates).await() } catch (_: Exception) {}
-            try { firestore.collection("players").document(uid).update(userUnbanUpdates).await() } catch (_: Exception) {}
+            try {
+                firestore.collection("users").document(uid).set(userUnbanUpdates, SetOptions.merge()).await()
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed unbanning user in Firestore users/$uid: ${e.message}")
+            }
+            try { firestore.collection("userProfiles").document(uid).set(userUnbanUpdates, SetOptions.merge()).await() } catch (_: Exception) {}
+            try { firestore.collection("players").document(uid).set(userUnbanUpdates, SetOptions.merge()).await() } catch (_: Exception) {}
         }
     }
 
@@ -6914,28 +7029,9 @@ service cloud.firestore {
                     "updatedAt" to now
                 )
             )
-            val targets = listOf("tournaments", "matches", "active_tournaments", "all_tournaments")
-            targets.forEach { target ->
-                try { database.child(target).child(tournamentId).updateChildren(credUpdates).await() } catch (_: Exception) {}
-                try { firestore.collection(target).document(tournamentId).set(credUpdates, com.google.firebase.firestore.SetOptions.merge()).await() } catch (_: Exception) {}
-            }
-            try {
-                val globalState = mapOf(
-                    "eventType" to "ROOM_CREDENTIALS_RELEASED",
-                    "source" to "ADMIN_PANEL",
-                    "tournamentId" to tournamentId,
-                    "affectedUserId" to "",
-                    "timestamp" to now,
-                    "payload" to mapOf(
-                        "tournamentTitle" to "Tournament #$tournamentId",
-                        "roomId" to roomId,
-                        "roomPass" to roomPassword
-                    )
-                )
-                database.child("global_app_state").setValue(globalState).await()
-                firestore.collection("global_app_state").document("current").set(globalState, com.google.firebase.firestore.SetOptions.merge()).await()
-            } catch (_: Exception) {}
-            GlobalErrorManager.emitSuccess("Room credentials updated and synchronized to players.")
+            // Primary write target: Firestore tournaments/{id} (Cloud Functions mirror RTDB & global_app_state)
+            firestore.collection("tournaments").document(tournamentId).set(credUpdates, SetOptions.merge()).await()
+            GlobalErrorManager.emitSuccess("Room credentials updated in Firestore and syncing to players.")
         } catch (e: Exception) {
             e.printStackTrace()
             GlobalErrorManager.emitError("Failed to update room credentials: ${e.message}", e)
@@ -6961,8 +7057,10 @@ service cloud.firestore {
 
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                snapshot.children.mapNotNull { it.getValue(CheckInToken::class.java) }.forEach { t ->
-                    if (t.id.isNotBlank()) tokensMap[t.id] = t
+                for (child in snapshot.children) {
+                    if (!child.hasChildren() || child.value !is Map<*, *>) continue
+                    val t = child.safeGetObject<CheckInToken>()
+                    if (t != null && t.id.isNotBlank()) tokensMap[t.id] = t
                 }
                 emitTokens()
             }
@@ -6994,25 +7092,75 @@ service cloud.firestore {
 
     suspend fun saveToken(token: CheckInToken) {
         try {
-            database.child("tokens").child(token.id).setValue(token).await()
+            firestore.collection("tokens").document(token.id).set(token).await()
+            try { database.child("tokens").child(token.id).setValue(token).await() } catch (_: Exception) {}
         } catch (e: Exception) {
             e.printStackTrace()
         }
     }
 
     suspend fun getLiveBannersStream(): Flow<List<AppAnnouncementBanner>> = callbackFlow {
+        val fsBanners = mutableMapOf<String, AppAnnouncementBanner>()
+        val rtdbBanners = mutableMapOf<String, AppAnnouncementBanner>()
+
+        fun emitCombined() {
+            val merged = LinkedHashMap<String, AppAnnouncementBanner>()
+            rtdbBanners.forEach { (k, v) -> merged[k] = v }
+            fsBanners.forEach { (k, v) -> merged[k] = v }
+            trySend(merged.values.sortedByDescending { it.createdAt })
+        }
+
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                val list = snapshot.children.mapNotNull { it.getValue(AppAnnouncementBanner::class.java) }
-                trySend(list)
+                rtdbBanners.clear()
+                for (child in snapshot.children) {
+                    if (!child.hasChildren() || child.value !is Map<*, *>) continue
+                    val banner = child.safeGetObject<AppAnnouncementBanner>()
+                    if (banner != null) {
+                        val key = banner.id.ifBlank { child.key ?: "" }
+                        if (key.isNotBlank()) rtdbBanners[key] = banner.copy(id = key)
+                    }
+                }
+                emitCombined()
             }
             override fun onCancelled(error: DatabaseError) {
-                trySend(emptyList())
+                emitCombined()
             }
         }
         val ref = database.child("banners")
         ref.addValueEventListener(listener)
-        awaitClose { ref.removeEventListener(listener) }
+
+        val fsListener = try {
+            firestore.collection("banners").addSnapshotListener { snapshot, error ->
+                if (error == null && snapshot != null) {
+                    fsBanners.clear()
+                    snapshot.documents.forEach { doc ->
+                        val banner = try {
+                            doc.toObject(AppAnnouncementBanner::class.java)?.copy(id = doc.id)
+                        } catch (_: Exception) {
+                            null
+                        } ?: AppAnnouncementBanner(
+                            id = doc.id,
+                            title = doc.getString("title") ?: "",
+                            subtitle = doc.getString("subtitle") ?: doc.getString("description") ?: doc.getString("content") ?: "",
+                            content = doc.getString("content") ?: doc.getString("description") ?: doc.getString("subtitle") ?: "",
+                            bannerType = doc.getString("bannerType") ?: doc.getString("badgeText") ?: "ANNOUNCEMENT",
+                            isActive = doc.getBoolean("isActive") ?: doc.getBoolean("active") ?: true,
+                            createdAt = safeLong(doc.get("createdAt"), System.currentTimeMillis())
+                        )
+                        if (banner.id.isNotBlank()) fsBanners[banner.id] = banner
+                    }
+                    emitCombined()
+                }
+            }
+        } catch (_: Exception) {
+            null
+        }
+
+        awaitClose {
+            ref.removeEventListener(listener)
+            fsListener?.remove()
+        }
     }
 
     suspend fun getLiveAuditLogsStream(): Flow<List<com.example.domain.model.AuditLogEntry>> = callbackFlow {
@@ -7021,16 +7169,16 @@ service cloud.firestore {
             trySend(logsMap.values.toList().sortedByDescending { it.timestamp })
         }
 
-        // Fast initial query
-        database.child("audit_logs").get().addOnSuccessListener { snapshot ->
-            snapshot.children.forEach { child ->
+        fun parseAuditSnapshot(snapshot: DataSnapshot) {
+            for (child in snapshot.children) {
+                if (!child.hasChildren() || child.value !is Map<*, *>) continue
                 val id = child.key ?: ""
-                val action = child.child("action").getValue(String::class.java) ?: ""
-                val performedBy = child.child("performedBy").getValue(String::class.java) ?: "Admin"
-                val targetUid = child.child("targetUid").getValue(String::class.java) ?: ""
-                val details = child.child("details").getValue(String::class.java) ?: ""
-                val category = child.child("category").getValue(String::class.java) ?: "SYSTEM"
-                val timestamp = child.child("timestamp").getValue(Long::class.java) ?: System.currentTimeMillis()
+                val action = child.child("action").value?.toString() ?: ""
+                val performedBy = child.child("performedBy").value?.toString() ?: "Admin"
+                val targetUid = child.child("targetUid").value?.toString() ?: ""
+                val details = child.child("details").value?.toString() ?: ""
+                val category = child.child("category").value?.toString() ?: "SYSTEM"
+                val timestamp = safeLong(child.child("timestamp").value, System.currentTimeMillis())
                 if (action.isNotBlank()) {
                     logsMap[id] = com.example.domain.model.AuditLogEntry(
                         id = id,
@@ -7046,29 +7194,14 @@ service cloud.firestore {
             emitLogs()
         }
 
+        // Fast initial query
+        database.child("audit_logs").get().addOnSuccessListener { snapshot ->
+            parseAuditSnapshot(snapshot)
+        }
+
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                snapshot.children.forEach { child ->
-                    val id = child.key ?: ""
-                    val action = child.child("action").getValue(String::class.java) ?: ""
-                    val performedBy = child.child("performedBy").getValue(String::class.java) ?: "Admin"
-                    val targetUid = child.child("targetUid").getValue(String::class.java) ?: ""
-                    val details = child.child("details").getValue(String::class.java) ?: ""
-                    val category = child.child("category").getValue(String::class.java) ?: "SYSTEM"
-                    val timestamp = child.child("timestamp").getValue(Long::class.java) ?: System.currentTimeMillis()
-                    if (action.isNotBlank()) {
-                        logsMap[id] = com.example.domain.model.AuditLogEntry(
-                            id = id,
-                            action = action,
-                            performedBy = performedBy,
-                            targetUid = targetUid,
-                            details = details,
-                            category = category,
-                            timestamp = timestamp
-                        )
-                    }
-                }
-                emitLogs()
+                parseAuditSnapshot(snapshot)
             }
             override fun onCancelled(error: DatabaseError) {
                 emitLogs()
@@ -7099,15 +7232,15 @@ service cloud.firestore {
                 category = category,
                 timestamp = System.currentTimeMillis()
             )
-            database.child("audit_logs").child(logId).setValue(entry).await()
             firestore.collection("audit_logs").document(logId).set(entry).await()
         } catch (_: Exception) {}
     }
 
     suspend fun saveBanner(banner: AppAnnouncementBanner) {
         try {
+            val bId = banner.id.ifBlank { "banner_${System.currentTimeMillis()}" }
             val bannerMap = mapOf(
-                "id" to banner.id,
+                "id" to bId,
                 "title" to banner.title,
                 "subtitle" to banner.content,
                 "description" to banner.content,
@@ -7119,11 +7252,12 @@ service cloud.firestore {
                 "isActive" to banner.isActive,
                 "order" to 1,
                 "createdAt" to banner.createdAt,
+                "updatedAt" to System.currentTimeMillis(),
                 "ctaText" to "View Details"
             )
-            database.child("banners").child(banner.id).setValue(bannerMap).await()
-            try { firestore.collection("banners").document(banner.id).set(bannerMap).await() } catch (_: Exception) {}
-            GlobalErrorManager.emitSuccess("Banner '${banner.title}' synchronized to user app.")
+            // Primary write target: Firestore banners/{id} (Cloud Functions mirror RTDB & global_app_state)
+            firestore.collection("banners").document(bId).set(bannerMap, SetOptions.merge()).await()
+            GlobalErrorManager.emitSuccess("Banner '${banner.title}' saved to Firestore & syncing to user app.")
         } catch (e: Exception) {
             e.printStackTrace()
             GlobalErrorManager.emitError("Failed to save banner: ${e.message}")
@@ -7148,11 +7282,15 @@ service cloud.firestore {
             "maintenanceUntil" to until,
             "updatedAt" to System.currentTimeMillis()
         )
-        try { database.child("system_config").updateChildren(payload).await() } catch (_: Exception) {}
-        try { database.child("app_config").updateChildren(payload).await() } catch (_: Exception) {}
-        try { database.child("maintenance").setValue(isMaintenance).await() } catch (_: Exception) {}
-        try { firestore.collection("system_config").document("app_config").set(payload).await() } catch (_: Exception) {}
-        GlobalErrorManager.emitSuccess(if (isMaintenance) "Emergency Maintenance Lock Activated" else "Maintenance Mode Disabled - App is Live")
+        // Primary write target: Firestore system_config (Cloud Functions mirror RTDB & global_app_state)
+        try {
+            firestore.collection("system_config").document("global").set(payload, SetOptions.merge()).await()
+            try { firestore.collection("system_config").document("config").set(payload, SetOptions.merge()).await() } catch (_: Exception) {}
+            try { firestore.collection("system_config").document("app_settings").set(payload, SetOptions.merge()).await() } catch (_: Exception) {}
+            GlobalErrorManager.emitSuccess(if (isMaintenance) "Emergency Maintenance Lock Activated" else "Maintenance Mode Disabled - App is Live")
+        } catch (e: Exception) {
+            GlobalErrorManager.emitError("Failed to update maintenance state: ${e.message}")
+        }
     }
 
     suspend fun updateUserProfile(user: UserProfile) {
@@ -8177,60 +8315,19 @@ service cloud.firestore {
                 "updatedAt" to now
             )
 
+            // Primary write target: Firestore tournaments/{id} (Cloud Functions mirror RTDB & global_app_state)
             var firestoreSaved = false
             try {
                 firestore.collection("tournaments").document(tournamentId).set(
                     credUpdates,
-                    com.google.firebase.firestore.SetOptions.merge()
+                    SetOptions.merge()
                 ).await()
                 firestoreSaved = true
             } catch (fe: Exception) {
                 Log.w(TAG, "Firestore credentials update: ${fe.message}")
             }
-            try {
-                firestore.collection("matches").document(tournamentId).set(
-                    credUpdates,
-                    com.google.firebase.firestore.SetOptions.merge()
-                ).await()
-            } catch (_: Exception) {}
 
-            // Sync to RTDB
-            var rtdbSaved = false
-            try {
-                database.child("tournaments").child(tournamentId).updateChildren(credUpdates).await()
-                rtdbSaved = true
-            } catch (re: Exception) {
-                Log.w(TAG, "RTDB tournaments node broadcast: ${re.message}")
-            }
-
-            try {
-                database.child("custom_rooms").child(tournamentId).updateChildren(credUpdates).await()
-                rtdbSaved = true
-            } catch (_: Exception) {}
-
-            try {
-                database.child("matches").child(tournamentId).updateChildren(credUpdates).await()
-            } catch (_: Exception) {}
-
-            // Broadcast ROOM_CREDENTIALS_RELEASED to /global_app_state (RTDB + Firestore)
-            try {
-                val globalState = mapOf(
-                    "eventType" to "ROOM_CREDENTIALS_RELEASED",
-                    "source" to "ADMIN_PANEL",
-                    "tournamentId" to tournamentId,
-                    "affectedUserId" to "",
-                    "timestamp" to now,
-                    "payload" to mapOf(
-                        "tournamentTitle" to "Tournament #$tournamentId",
-                        "roomId" to roomId.trim(),
-                        "roomPass" to roomPass.trim()
-                    )
-                )
-                database.child("global_app_state").setValue(globalState).await()
-                firestore.collection("global_app_state").document("current").set(globalState, com.google.firebase.firestore.SetOptions.merge()).await()
-            } catch (_: Exception) {}
-
-            // Dispatch instant room credentials notification to all joined players in RTDB & Firestore
+            // Dispatch instant room credentials notification to all joined players primarily in Firestore
             try {
                 val participants = getTournamentParticipants(tournamentId)
                 val notifId = "notif_room_${tournamentId}_${now}"
@@ -8248,11 +8345,9 @@ service cloud.firestore {
                 participants.forEach { p ->
                     val uid = p.userId.ifBlank { p.playerId }
                     if (uid.isNotBlank()) {
-                        try { database.child("notifications").child(uid).child(notifId).setValue(roomNotifPayload).await() } catch (_: Exception) {}
                         try { firestore.collection("users").document(uid).collection("notifications").document(notifId).set(roomNotifPayload).await() } catch (_: Exception) {}
                     }
                 }
-                try { database.child("notifications").child("global").child(notifId).setValue(roomNotifPayload).await() } catch (_: Exception) {}
             } catch (_: Exception) {}
 
             context?.let { ctx ->
@@ -8265,8 +8360,8 @@ service cloud.firestore {
                 syncNotificationToCloud(notif)
             }
 
-            if (!firestoreSaved && !rtdbSaved) {
-                GlobalErrorManager.emitError("Failed to broadcast credentials: Could not sync to Firebase backend.")
+            if (!firestoreSaved) {
+                GlobalErrorManager.emitError("Failed to broadcast credentials: Could not sync to Firestore backend.")
                 return false
             }
 
@@ -8299,7 +8394,10 @@ service cloud.firestore {
     suspend fun getMatchProofsStream(tournamentId: String? = null): Flow<List<MatchProofSubmission>> = callbackFlow {
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                val list = snapshot.children.mapNotNull { it.getValue(MatchProofSubmission::class.java) }
+                val list = snapshot.children.mapNotNull { child ->
+                    if (!child.hasChildren() || child.value !is Map<*, *>) null
+                    else child.safeGetObject<MatchProofSubmission>()
+                }
                     .filter { proof ->
                         val idLower = proof.id.trim().lowercase()
                         val playerLower = proof.username.trim().lowercase()
@@ -8327,7 +8425,7 @@ service cloud.firestore {
     ) {
         try {
             val snap = database.child("match_proofs").child(proofId).get().await()
-            val proof = snap.getValue(MatchProofSubmission::class.java)
+            val proof = snap.safeGetObject<MatchProofSubmission>()
             if (proof == null) {
                 GlobalErrorManager.emitError("Proof record not found.")
                 return
@@ -8431,7 +8529,7 @@ service cloud.firestore {
     suspend fun rejectMatchProof(proofId: String, reason: String, adminEmail: String) {
         try {
             val snap = database.child("match_proofs").child(proofId).get().await()
-            val proof = snap.getValue(MatchProofSubmission::class.java)
+            val proof = snap.safeGetObject<MatchProofSubmission>()
             val username = proof?.username ?: "Player"
             val tourneyTitle = proof?.tournamentTitle ?: "Tournament"
 
@@ -8535,8 +8633,9 @@ service cloud.firestore {
         val rtdbListener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 val currentRtdbIds = mutableSetOf<String>()
-                snapshot.children.forEach { child ->
-                    val ann = child.getValue(GlobalAnnouncement::class.java)
+                for (child in snapshot.children) {
+                    if (!child.hasChildren() || child.value !is Map<*, *>) continue
+                    val ann = child.safeGetObject<GlobalAnnouncement>()
                     val id = ann?.id?.ifBlank { null } ?: child.key ?: ""
                     val title = ann?.title ?: child.child("title").value?.toString() ?: ""
                     val message = ann?.message ?: child.child("message").value?.toString() ?: ""
@@ -8685,8 +8784,10 @@ service cloud.firestore {
     suspend fun getNotificationsStream(): Flow<List<AppNotification>> = callbackFlow {
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                val list = snapshot.children.mapNotNull { it.getValue(AppNotification::class.java) }
-                    .sortedByDescending { it.timestamp }
+                val list = snapshot.children.mapNotNull { child ->
+                    if (!child.hasChildren() || child.value !is Map<*, *>) null
+                    else child.safeGetObject<AppNotification>()
+                }.sortedByDescending { it.timestamp }
                 trySend(list)
             }
             override fun onCancelled(error: DatabaseError) {

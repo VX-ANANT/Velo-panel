@@ -119,10 +119,10 @@ fun FrostedGlassDialog(
                             spotColor = Color.Black.copy(alpha = 0.65f),
                             ambientColor = Color.Black.copy(alpha = 0.35f)
                         )
-                        // Crisp 0.5.dp Hairline Border
+                        // Crisp V14 Bento 1.dp Hairline Border
                         .border(
-                            width = 0.5.dp,
-                            color = Color.White.copy(alpha = 0.14f),
+                            width = 1.dp,
+                            color = Color(0xFF1E1E27),
                             shape = shape
                         )
                         .clip(shape)
@@ -131,24 +131,24 @@ fun FrostedGlassDialog(
                             val height = size.height
                             if (width <= 0f || height <= 0f) return@drawBehind
 
-                            // Pure AMOLED Black Modal Substrate
+                            // V14 Minimal Dark Bento Modal Substrate
                             drawRect(
                                 brush = Brush.verticalGradient(
                                     colors = listOf(
-                                        Color(0xFA000000),
-                                        Color(0xFC000000),
-                                        Color(0xFF000000)
+                                        Color(0xFF0E0E13),
+                                        Color(0xFF0A0A0E),
+                                        Color(0xFF08080B)
                                     )
                                 )
                             )
 
-                            // Subtle Top Specular Hairline
+                            // Subtle Top Hairline Highlight
                             drawLine(
                                 brush = Brush.horizontalGradient(
                                     colors = listOf(
                                         Color.Transparent,
-                                        Color.White.copy(alpha = 0.22f),
-                                        Color.White.copy(alpha = 0.22f),
+                                        Color.White.copy(alpha = 0.16f),
+                                        Color.White.copy(alpha = 0.16f),
                                         Color.Transparent
                                     )
                                 ),

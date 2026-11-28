@@ -131,14 +131,14 @@ fun BracketManagementScreen(
                             Surface(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(12.dp))
+                                    .clip(RoundedCornerShape(14.dp))
                                     .bounceClick(scaleDown = 0.97f) {
                                         activeTournamentId = tourney.id
                                         showTournamentSelectModal = false
                                     },
-                                color = if (isCurrent) Color(0xFF1E293B) else Color(0xFF141418),
-                                border = BorderStroke(1.dp, if (isCurrent) VelorixAccent else Color(0xFF27272A)),
-                                shape = RoundedCornerShape(12.dp)
+                                color = if (isCurrent) V14CardElevated else V14CardSurface,
+                                border = BorderStroke(1.dp, if (isCurrent) V14AccentBright else V14Border),
+                                shape = RoundedCornerShape(14.dp)
                             ) {
                                 Row(
                                     modifier = Modifier.padding(12.dp),
@@ -150,48 +150,34 @@ fun BracketManagementScreen(
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                                         ) {
+                                            val badgeColor = when (tourney.status.uppercase()) {
+                                                "LIVE", "ACTIVE" -> VelorixEmerald
+                                                "UPCOMING" -> V14AccentBright
+                                                else -> V14TextSecondary
+                                            }
                                             Box(
                                                 modifier = Modifier
-                                                    .background(
-                                                        when (tourney.status.uppercase()) {
-                                                            "LIVE", "ACTIVE" -> Color(0xFF10B981)
-                                                            "UPCOMING" -> Color(0xFF60A5FA)
-                                                            else -> Color(0xFF94A3B8)
-                                                        }.copy(alpha = 0.2f),
-                                                        RoundedCornerShape(4.dp)
-                                                    )
-                                                    .border(
-                                                        0.5.dp,
-                                                        when (tourney.status.uppercase()) {
-                                                            "LIVE", "ACTIVE" -> Color(0xFF10B981)
-                                                            "UPCOMING" -> Color(0xFF60A5FA)
-                                                            else -> Color(0xFF94A3B8)
-                                                        },
-                                                        RoundedCornerShape(4.dp)
-                                                    )
+                                                    .background(badgeColor.copy(alpha = 0.16f), RoundedCornerShape(4.dp))
+                                                    .border(0.5.dp, badgeColor.copy(alpha = 0.55f), RoundedCornerShape(4.dp))
                                                     .padding(horizontal = 6.dp, vertical = 2.dp)
                                             ) {
                                                 Text(
                                                     text = tourney.status.uppercase(),
-                                                    color = when (tourney.status.uppercase()) {
-                                                        "LIVE", "ACTIVE" -> Color(0xFF34D399)
-                                                        "UPCOMING" -> Color(0xFF93C5FD)
-                                                        else -> Color.White
-                                                    },
+                                                    color = badgeColor,
                                                     fontSize = 9.sp,
                                                     fontWeight = FontWeight.Bold
                                                 )
                                             }
                                             Text(
                                                 text = "${tourney.game} • ${tourney.format}",
-                                                color = Color(0xFFA1A1AA),
+                                                color = V14TextSecondary,
                                                 fontSize = 11.sp
                                             )
                                         }
                                         Spacer(modifier = Modifier.height(4.dp))
                                         Text(
                                             text = tourney.title,
-                                            color = Color.White,
+                                            color = V14TextPrimary,
                                             fontSize = 13.5.sp,
                                             fontWeight = FontWeight.Bold,
                                             maxLines = 1,
@@ -200,7 +186,7 @@ fun BracketManagementScreen(
                                         Spacer(modifier = Modifier.height(2.dp))
                                         Text(
                                             text = "Slots: ${tourney.registeredPlayers}/${tourney.maxPlayers} • ₹${tourney.prizePool.toInt()} Pool",
-                                            color = VelorixAccent,
+                                            color = V14AccentBright,
                                             fontSize = 10.5.sp
                                         )
                                     }
@@ -208,11 +194,11 @@ fun BracketManagementScreen(
                                     if (isCurrent) {
                                         Surface(
                                             shape = CircleShape,
-                                            color = VelorixAccent,
+                                            color = V14AccentPrimary,
                                             modifier = Modifier.size(24.dp)
                                         ) {
                                             Box(contentAlignment = Alignment.Center) {
-                                                Icon(Icons.Default.Check, contentDescription = "Active", tint = Color.Black, modifier = Modifier.size(14.dp))
+                                                Icon(Icons.Default.Check, contentDescription = "Active", tint = Color.White, modifier = Modifier.size(14.dp))
                                             }
                                         }
                                     }
@@ -225,199 +211,188 @@ fun BracketManagementScreen(
         }
     }
 
-    GlassBackgroundBox(accentColor = VelorixAccent) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(V14Bg)
+    ) {
         Scaffold(
-            containerColor = Color.Transparent,
+            containerColor = V14Bg,
             topBar = {
-                // Sleek Glass Header with Tournament Selector
+                // Pure AMOLED V14 Top Bar with Tournament Switcher & Underline View Selector
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .background(V14Bg)
                         .statusBarsPadding()
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
                 ) {
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(20.dp),
-                        color = Color(0xFF0E0E12).copy(alpha = 0.88f),
-                        border = BorderStroke(1.dp, GlassTokens.GlassBorderGradient)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            modifier = Modifier.weight(1f, fill = false).padding(end = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(
-                                modifier = Modifier.weight(1f, fill = false).padding(end = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(V14CardSurface)
+                                    .border(1.dp, V14Border, CircleShape)
+                                    .bounceClick(scaleDown = 0.90f) { onNavigateBack() },
+                                contentAlignment = Alignment.Center
                             ) {
-                                // Circular Glass Back Button
-                                Box(
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "Back",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f, fill = false)) {
+                                Text(
+                                    text = "Bracket Management",
+                                    fontSize = 17.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = V14TextPrimary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Row(
                                     modifier = Modifier
-                                        .size(38.dp)
-                                        .clip(CircleShape)
-                                        .background(Color.White.copy(alpha = 0.08f))
-                                        .border(1.dp, Color.White.copy(alpha = 0.22f), CircleShape)
-                                        .bounceClick(scaleDown = 0.90f) { onNavigateBack() },
-                                    contentAlignment = Alignment.Center
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .clickable { showTournamentSelectModal = true }
+                                        .padding(vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                        contentDescription = "Back",
-                                        tint = Color.White,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column(modifier = Modifier.weight(1f, fill = false)) {
                                     Text(
-                                        text = "BRACKET MANAGEMENT",
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Black,
-                                        color = Color.White,
-                                        letterSpacing = 0.5.sp,
+                                        text = activeTournament?.title ?: "Tournament: $activeTournamentId",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = V14AccentBright,
                                         maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.widthIn(max = 170.dp)
                                     )
-                                    // Interactive Tournament Selector Chip
-                                    Surface(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .bounceClick(scaleDown = 0.94f) { showTournamentSelectModal = true },
-                                        color = Color(0xFF1E222E),
-                                        border = BorderStroke(0.5.dp, VelorixAccent.copy(alpha = 0.4f)),
-                                        shape = RoundedCornerShape(6.dp)
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                text = activeTournament?.title ?: "Tournament: $activeTournamentId",
-                                                fontSize = 10.5.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = VelorixAccent,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                                modifier = Modifier.widthIn(max = 140.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(2.dp))
-                                            Icon(
-                                                Icons.Default.ArrowDropDown,
-                                                contentDescription = "Switch",
-                                                tint = VelorixAccent,
-                                                modifier = Modifier.size(14.dp)
-                                            )
-                                        }
-                                    }
+                                    Icon(
+                                        Icons.Default.ArrowDropDown,
+                                        contentDescription = "Switch",
+                                        tint = V14AccentBright,
+                                        modifier = Modifier.size(16.dp)
+                                    )
                                 }
                             }
+                        }
 
-                            // Glass View Switcher Pill (Tree vs List)
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = Color(0xFF18181B).copy(alpha = 0.75f),
-                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.14f))
+                        // Compact V14 Underline View Switcher (Tree vs List)
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            val treeSelected = viewMode == "tree"
+                            Column(
+                                modifier = Modifier
+                                    .clickable { viewMode = "tree" }
+                                    .padding(vertical = 4.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                Row(modifier = Modifier.padding(3.dp)) {
-                                    val treeSelected = viewMode == "tree"
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(9.dp))
-                                            .background(
-                                                if (treeSelected) Color.White.copy(alpha = 0.18f)
-                                                else Color.Transparent
-                                            )
-                                            .clickable { viewMode = "tree" }
-                                            .padding(horizontal = 10.dp, vertical = 6.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Icon(
-                                                Icons.Default.AccountTree,
-                                                contentDescription = "Tree View",
-                                                tint = if (treeSelected) VelorixAccent else Color(0xFF94A3B8),
-                                                modifier = Modifier.size(15.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text(
-                                                text = "Tree",
-                                                fontSize = 11.sp,
-                                                fontWeight = if (treeSelected) FontWeight.Bold else FontWeight.Medium,
-                                                color = if (treeSelected) Color.White else Color(0xFF94A3B8)
-                                            )
-                                        }
-                                    }
-
-                                    val listSelected = viewMode == "list"
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(9.dp))
-                                            .background(
-                                                if (listSelected) Color.White.copy(alpha = 0.18f)
-                                                else Color.Transparent
-                                            )
-                                            .clickable { viewMode = "list" }
-                                            .padding(horizontal = 10.dp, vertical = 6.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Icon(
-                                                Icons.Default.FormatListBulleted,
-                                                contentDescription = "List View",
-                                                tint = if (listSelected) VelorixAccent else Color(0xFF94A3B8),
-                                                modifier = Modifier.size(15.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text(
-                                                text = "List",
-                                                fontSize = 11.sp,
-                                                fontWeight = if (listSelected) FontWeight.Bold else FontWeight.Medium,
-                                                color = if (listSelected) Color.White else Color(0xFF94A3B8)
-                                            )
-                                        }
-                                    }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        Icons.Default.AccountTree,
+                                        contentDescription = "Tree View",
+                                        tint = if (treeSelected) V14AccentBright else V14TextMuted,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "Tree",
+                                        fontSize = 11.5.sp,
+                                        fontWeight = if (treeSelected) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (treeSelected) V14TextPrimary else V14TextSecondary
+                                    )
                                 }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .width(34.dp)
+                                        .height(2.dp)
+                                        .background(if (treeSelected) V14AccentPrimary else Color.Transparent)
+                                )
+                            }
+
+                            val listSelected = viewMode == "list"
+                            Column(
+                                modifier = Modifier
+                                    .clickable { viewMode = "list" }
+                                    .padding(vertical = 4.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        Icons.Default.FormatListBulleted,
+                                        contentDescription = "List View",
+                                        tint = if (listSelected) V14AccentBright else V14TextMuted,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "List",
+                                        fontSize = 11.5.sp,
+                                        fontWeight = if (listSelected) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (listSelected) V14TextPrimary else V14TextSecondary
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .width(34.dp)
+                                        .height(2.dp)
+                                        .background(if (listSelected) V14AccentPrimary else Color.Transparent)
+                                )
                             }
                         }
                     }
 
                     // Multi-Tournament Quick Switch Strip
                     if (tournaments.size > 1) {
-                        Spacer(modifier = Modifier.height(6.dp))
                         LazyRow(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             items(tournaments) { tourney ->
                                 val isSelected = tourney.id == activeTournamentId
                                 Surface(
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
+                                        .clip(RoundedCornerShape(10.dp))
                                         .bounceClick(scaleDown = 0.95f) { activeTournamentId = tourney.id },
-                                    color = if (isSelected) Color(0xFF1E293B) else Color(0xFF101014),
+                                    color = if (isSelected) V14CardElevated else V14CardSurface,
                                     border = BorderStroke(
                                         1.dp,
-                                        if (isSelected) VelorixAccent else Color(0xFF27272A)
+                                        if (isSelected) V14AccentBright else V14Border
                                     ),
-                                    shape = RoundedCornerShape(8.dp)
+                                    shape = RoundedCornerShape(10.dp)
                                 ) {
                                     Row(
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
                                         Box(
                                             modifier = Modifier
                                                 .size(6.dp)
                                                 .background(
                                                     when (tourney.status.uppercase()) {
-                                                        "LIVE", "ACTIVE" -> Color(0xFF10B981)
-                                                        "UPCOMING" -> Color(0xFF60A5FA)
-                                                        else -> Color(0xFF94A3B8)
+                                                        "LIVE", "ACTIVE" -> VelorixEmerald
+                                                        "UPCOMING" -> V14AccentBright
+                                                        else -> V14TextMuted
                                                     },
                                                     CircleShape
                                                 )
@@ -426,25 +401,21 @@ fun BracketManagementScreen(
                                             text = tourney.title.take(18),
                                             fontSize = 10.5.sp,
                                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                            color = if (isSelected) Color.White else Color(0xFFA1A1AA)
+                                            color = if (isSelected) V14TextPrimary else V14TextSecondary
                                         )
-                                        Surface(
-                                            shape = RoundedCornerShape(3.dp),
-                                            color = Color.White.copy(alpha = 0.08f)
-                                        ) {
-                                            Text(
-                                                text = "${tourney.registeredPlayers}/${tourney.maxPlayers}",
-                                                fontSize = 8.5.sp,
-                                                color = if (isSelected) VelorixAccent else Color(0xFF71717A),
-                                                fontWeight = FontWeight.Bold,
-                                                modifier = Modifier.padding(horizontal = 3.dp, vertical = 0.5.dp)
-                                            )
-                                        }
+                                        Text(
+                                            text = "${tourney.registeredPlayers}/${tourney.maxPlayers}",
+                                            fontSize = 9.sp,
+                                            color = if (isSelected) V14AccentBright else V14TextMuted,
+                                            fontWeight = FontWeight.Bold
+                                        )
                                     }
                                 }
                             }
                         }
                     }
+
+                    HorizontalDivider(thickness = 0.5.dp, color = V14Border)
                 }
             }
         ) { innerPadding ->
@@ -513,12 +484,12 @@ fun BracketManagementScreen(
                                     )
                                     Button(
                                         onClick = { viewModel.loadMatches(activeTournamentId) },
-                                        colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent),
-                                        shape = RoundedCornerShape(10.dp)
+                                        colors = ButtonDefaults.buttonColors(containerColor = V14AccentPrimary),
+                                        shape = RoundedCornerShape(12.dp)
                                     ) {
-                                        Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                                        Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
                                         Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Retry", color = Color.Black, fontWeight = FontWeight.Bold)
+                                        Text("Retry", color = Color.White, fontWeight = FontWeight.Bold)
                                     }
                                 }
                             }
@@ -903,12 +874,12 @@ fun GlassMatchCard(
                     }
                 }
             },
-            containerColor = Color(0xFF141418),
-            shape = RoundedCornerShape(18.dp),
+            containerColor = V14CardSurface,
+            shape = RoundedCornerShape(20.dp),
             confirmButton = {},
             dismissButton = {
                 TextButton(onClick = { showDialog = false }) {
-                    Text("Close", color = Color(0xFFA1A1AA), fontSize = 13.sp)
+                    Text("Close", color = V14TextSecondary, fontSize = 13.sp)
                 }
             }
         )

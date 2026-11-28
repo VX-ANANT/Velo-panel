@@ -17,6 +17,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -87,62 +88,103 @@ fun TournamentSettingsScreen(
     var isSaving by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
 
+    val v14FieldColors = OutlinedTextFieldDefaults.colors(
+        focusedTextColor = V14TextPrimary,
+        unfocusedTextColor = V14TextPrimary,
+        focusedContainerColor = Color(0xFF08080B),
+        unfocusedContainerColor = Color(0xFF08080B),
+        focusedBorderColor = V14AccentBright,
+        unfocusedBorderColor = V14Border,
+        focusedLabelColor = V14AccentBright,
+        unfocusedLabelColor = V14TextMuted,
+        cursorColor = V14AccentBright
+    )
+    val v14DangerFieldColors = OutlinedTextFieldDefaults.colors(
+        focusedTextColor = V14TextPrimary,
+        unfocusedTextColor = V14TextPrimary,
+        focusedContainerColor = Color(0xFF08080B),
+        unfocusedContainerColor = Color(0xFF08080B),
+        focusedBorderColor = V14AccentPrimary,
+        unfocusedBorderColor = V14Border,
+        focusedLabelColor = V14AccentBright,
+        unfocusedLabelColor = V14TextMuted,
+        cursorColor = V14AccentPrimary
+    )
+    val v14SwitchColors = SwitchDefaults.colors(
+        checkedThumbColor = Color.White,
+        checkedTrackColor = V14AccentPrimary,
+        checkedBorderColor = V14AccentPrimary,
+        uncheckedThumbColor = V14TextSecondary,
+        uncheckedTrackColor = V14CardElevated,
+        uncheckedBorderColor = V14Border
+    )
+
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            text = "Manage Tournament & Rules",
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = VelorixTextPrimary
-                        )
-                        Text(
-                            text = "LIVE CONFIGURATION",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = VelorixTextSecondary,
-                            letterSpacing = 1.sp
-                        )
-                    }
-                },
-                navigationIcon = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(V14Bg)
+                    .statusBarsPadding()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Box(
                         modifier = Modifier
-                            .padding(8.dp)
-                            .size(38.dp)
-                            .background(VelorixAccentLight, CircleShape)
-                            .border(1.5.dp, VelorixAccentBorder, CircleShape)
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(V14CardSurface)
+                            .border(1.dp, V14Border, CircleShape)
                             .clickable { onNavigateBack() },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back",
-                            tint = VelorixAccentDark,
-                            modifier = Modifier.size(20.dp)
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp)
                         )
                     }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
-            )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            text = "Manage Tournament & Rules",
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = V14TextPrimary
+                        )
+                        Text(
+                            text = "LIVE CONFIGURATION",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = V14TextMuted,
+                            letterSpacing = 1.sp
+                        )
+                    }
+                }
+                HorizontalDivider(thickness = 0.5.dp, color = V14Border)
+            }
         },
-        containerColor = Color.Transparent
+        containerColor = V14Bg
     ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .background(V14Bg)
                 .padding(innerPadding)
+                .navigationBarsPadding()
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // Status & Lifecycle Controller
             SettingsCard {
-                Text("Match Status Controller", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = VelorixTextPrimary, modifier = Modifier.padding(bottom = 10.dp))
-                // Status Underline Selector (no inner box-in-box)
-                HorizontalDivider(thickness = 0.5.dp, color = Color.White.copy(alpha = 0.08f))
+                Text("Match Status Controller", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = V14TextPrimary, modifier = Modifier.padding(bottom = 10.dp))
+                HorizontalDivider(thickness = 0.5.dp, color = V14Border)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -153,17 +195,17 @@ fun TournamentSettingsScreen(
                     statusOptions.forEachIndexed { idx, opt ->
                         val isSelected = status.equals(opt, ignoreCase = true)
                         val activeText = when (opt) {
-                            "LIVE" -> Color(0xFFFF6B6B)
-                            "COMPLETED" -> Color(0xFF4ADE80)
-                            "CANCELLED" -> Color(0xFFFF6B6B)
-                            else -> VelorixAccent
+                            "LIVE" -> V14AccentBright
+                            "COMPLETED" -> VelorixEmerald
+                            "CANCELLED" -> V14AccentPrimary
+                            else -> V14AccentBright
                         }
                         if (idx > 0) {
                             Box(
                                 modifier = Modifier
                                     .width(0.5.dp)
                                     .height(18.dp)
-                                    .background(Color.White.copy(alpha = 0.12f))
+                                    .background(V14Border)
                             )
                         }
                         Column(
@@ -175,7 +217,7 @@ fun TournamentSettingsScreen(
                         ) {
                             Text(
                                 text = opt,
-                                color = if (isSelected) activeText else Color(0xFFA1A1AA),
+                                color = if (isSelected) activeText else V14TextSecondary,
                                 fontSize = 10.5.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                             )
@@ -197,42 +239,43 @@ fun TournamentSettingsScreen(
                         onValueChange = { cancellationReason = it },
                         label = { Text("Cancellation Reason (Shown to Players)") },
                         modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Color(0xFFFF5252),
-                            unfocusedBorderColor = CardVerifyBorder
-                        )
+                        shape = RoundedCornerShape(12.dp),
+                        colors = v14DangerFieldColors
                     )
                 }
             }
 
             // Tournament Basic details form
             SettingsCard {
-                Text("General Match Info", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = VelorixTextPrimary, modifier = Modifier.padding(bottom = 12.dp))
+                Text("General Match Info", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = V14TextPrimary, modifier = Modifier.padding(bottom = 12.dp))
 
                 OutlinedTextField(
                     value = title,
                     onValueChange = { title = it },
                     label = { Text("Tournament Title") },
                     modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
+                    shape = RoundedCornerShape(12.dp),
+                    colors = v14FieldColors
                 )
-                
+
                 Spacer(modifier = Modifier.height(10.dp))
-                
+
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     OutlinedTextField(
                         value = game,
                         onValueChange = { game = it },
                         label = { Text("Game") },
                         modifier = Modifier.weight(1f),
-                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
+                        shape = RoundedCornerShape(12.dp),
+                        colors = v14FieldColors
                     )
                     OutlinedTextField(
                         value = mapName,
                         onValueChange = { mapName = it },
                         label = { Text("Map (e.g. Bermuda)") },
                         modifier = Modifier.weight(1f),
-                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
+                        shape = RoundedCornerShape(12.dp),
+                        colors = v14FieldColors
                     )
                 }
 
@@ -244,21 +287,23 @@ fun TournamentSettingsScreen(
                         onValueChange = { format = it },
                         label = { Text("Format (SOLO/DUO/SQUAD)") },
                         modifier = Modifier.weight(1f),
-                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
+                        shape = RoundedCornerShape(12.dp),
+                        colors = v14FieldColors
                     )
                     OutlinedTextField(
                         value = maxPlayers,
                         onValueChange = { maxPlayers = it },
                         label = { Text("Max Slots") },
                         modifier = Modifier.weight(1f),
-                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
+                        shape = RoundedCornerShape(12.dp),
+                        colors = v14FieldColors
                     )
                 }
             }
 
             // Prize Distribution & Financials
             SettingsCard {
-                Text("Prize Pool & Distribution", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = VelorixTextPrimary, modifier = Modifier.padding(bottom = 12.dp))
+                Text("Prize Pool & Distribution", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = V14TextPrimary, modifier = Modifier.padding(bottom = 12.dp))
 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     OutlinedTextField(
@@ -266,19 +311,21 @@ fun TournamentSettingsScreen(
                         onValueChange = { prizePool = it },
                         label = { Text("Total Prize Pool (₹)") },
                         modifier = Modifier.weight(1f),
-                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
+                        shape = RoundedCornerShape(12.dp),
+                        colors = v14FieldColors
                     )
                     OutlinedTextField(
                         value = entryFee,
                         onValueChange = { entryFee = it },
                         label = { Text("Entry Fee (₹)") },
                         modifier = Modifier.weight(1f),
-                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
+                        shape = RoundedCornerShape(12.dp),
+                        colors = v14FieldColors
                     )
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))
-                Text("Prize Breakdown by Rank", fontSize = 13.sp, color = VelorixAccent, fontWeight = FontWeight.SemiBold)
+                Text("Prize Breakdown by Rank", fontSize = 13.sp, color = V14AccentBright, fontWeight = FontWeight.SemiBold)
                 Spacer(modifier = Modifier.height(6.dp))
 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -287,21 +334,24 @@ fun TournamentSettingsScreen(
                         onValueChange = { firstPlacePrize = it },
                         label = { Text("1st (₹)") },
                         modifier = Modifier.weight(1f),
-                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
+                        shape = RoundedCornerShape(12.dp),
+                        colors = v14FieldColors
                     )
                     OutlinedTextField(
                         value = secondPlacePrize,
                         onValueChange = { secondPlacePrize = it },
                         label = { Text("2nd (₹)") },
                         modifier = Modifier.weight(1f),
-                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
+                        shape = RoundedCornerShape(12.dp),
+                        colors = v14FieldColors
                     )
                     OutlinedTextField(
                         value = thirdPlacePrize,
                         onValueChange = { thirdPlacePrize = it },
                         label = { Text("3rd (₹)") },
                         modifier = Modifier.weight(1f),
-                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
+                        shape = RoundedCornerShape(12.dp),
+                        colors = v14FieldColors
                     )
                 }
 
@@ -312,21 +362,21 @@ fun TournamentSettingsScreen(
                     onValueChange = { perKillPrize = it },
                     label = { Text("Per Kill Bounty (₹)") },
                     modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
+                    shape = RoundedCornerShape(12.dp),
+                    colors = v14FieldColors
                 )
             }
 
-            // Weapon & Gun Rules (USER REQUIREMENT)
+            // Weapon & Gun Rules
             SettingsCard {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Shield, contentDescription = null, tint = VelorixAccent, modifier = Modifier.size(20.dp))
+                    Icon(Icons.Default.Shield, contentDescription = null, tint = V14AccentBright, modifier = Modifier.size(20.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Gun & Weapon Regulations", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = VelorixTextPrimary)
+                    Text("Gun & Weapon Regulations", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = V14TextPrimary)
                 }
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Presets
-                Text("Quick Weapon Presets:", fontSize = 11.sp, color = VelorixTextSecondary)
+                Text("Quick Weapon Presets:", fontSize = 11.sp, color = V14TextSecondary)
                 Spacer(modifier = Modifier.height(6.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     WeaponPresetChip("All Weapons", "All Standard Weapons Allowed", "M79 Launcher, Crossbow") { a, b -> allowedGuns = a; bannedGuns = b }
@@ -341,7 +391,8 @@ fun TournamentSettingsScreen(
                     onValueChange = { allowedGuns = it },
                     label = { Text("Allowed Weapons") },
                     modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
+                    shape = RoundedCornerShape(12.dp),
+                    colors = v14FieldColors
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
@@ -351,34 +402,35 @@ fun TournamentSettingsScreen(
                     onValueChange = { bannedGuns = it },
                     label = { Text("Banned / Restricted Weapons") },
                     modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFFFF5252), unfocusedBorderColor = CardVerifyBorder)
+                    shape = RoundedCornerShape(12.dp),
+                    colors = v14DangerFieldColors
                 )
 
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("Gun Skin Attributes Allowed", fontSize = 13.sp, color = Color.White)
-                    Switch(checked = gunAttributesAllowed, onCheckedChange = { gunAttributesAllowed = it })
+                    Text("Gun Skin Attributes Allowed", fontSize = 13.sp, color = V14TextPrimary)
+                    Switch(checked = gunAttributesAllowed, onCheckedChange = { gunAttributesAllowed = it }, colors = v14SwitchColors)
                 }
 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("Limited Ammo Enabled", fontSize = 13.sp, color = Color.White)
-                    Switch(checked = limitedAmmo, onCheckedChange = { limitedAmmo = it })
+                    Text("Limited Ammo Enabled", fontSize = 13.sp, color = V14TextPrimary)
+                    Switch(checked = limitedAmmo, onCheckedChange = { limitedAmmo = it }, colors = v14SwitchColors)
                 }
             }
 
-            // Character Skills & Tactical Rules (USER REQUIREMENT)
+            // Character Skills & Tactical Rules
             SettingsCard {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.PersonOutline, contentDescription = null, tint = Color(0xFF64B5F6), modifier = Modifier.size(20.dp))
+                    Icon(Icons.Default.PersonOutline, contentDescription = null, tint = V14AccentBright, modifier = Modifier.size(20.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Character Skills & Devices", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = VelorixTextPrimary)
+                    Text("Character Skills & Devices", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = V14TextPrimary)
                 }
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("Character Skills Enabled", fontSize = 13.sp, color = Color.White)
-                    Switch(checked = characterSkillsAllowed, onCheckedChange = { characterSkillsAllowed = it })
+                    Text("Character Skills Enabled", fontSize = 13.sp, color = V14TextPrimary)
+                    Switch(checked = characterSkillsAllowed, onCheckedChange = { characterSkillsAllowed = it }, colors = v14SwitchColors)
                 }
 
                 if (characterSkillsAllowed) {
@@ -388,7 +440,8 @@ fun TournamentSettingsScreen(
                         onValueChange = { allowedSkills = it },
                         label = { Text("Allowed Character Skills") },
                         modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
+                        shape = RoundedCornerShape(12.dp),
+                        colors = v14FieldColors
                     )
 
                     Spacer(modifier = Modifier.height(10.dp))
@@ -397,31 +450,32 @@ fun TournamentSettingsScreen(
                         onValueChange = { bannedSkills = it },
                         label = { Text("Banned Character Skills (e.g. Chrono, Dimitry)") },
                         modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFFFF5252), unfocusedBorderColor = CardVerifyBorder)
+                        shape = RoundedCornerShape(12.dp),
+                        colors = v14DangerFieldColors
                     )
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("Emulator / PC Players Allowed", fontSize = 13.sp, color = Color.White)
-                    Switch(checked = emulatorAllowed, onCheckedChange = { emulatorAllowed = it })
+                    Text("Emulator / PC Players Allowed", fontSize = 13.sp, color = V14TextPrimary)
+                    Switch(checked = emulatorAllowed, onCheckedChange = { emulatorAllowed = it }, colors = v14SwitchColors)
                 }
 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("Rooftop Camping Allowed", fontSize = 13.sp, color = Color.White)
-                    Switch(checked = roofCampingAllowed, onCheckedChange = { roofCampingAllowed = it })
+                    Text("Rooftop Camping Allowed", fontSize = 13.sp, color = V14TextPrimary)
+                    Switch(checked = roofCampingAllowed, onCheckedChange = { roofCampingAllowed = it }, colors = v14SwitchColors)
                 }
 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("Airdrops & Loadouts Enabled", fontSize = 13.sp, color = Color.White)
-                    Switch(checked = airdropAllowed, onCheckedChange = { airdropAllowed = it })
+                    Text("Airdrops & Loadouts Enabled", fontSize = 13.sp, color = V14TextPrimary)
+                    Switch(checked = airdropAllowed, onCheckedChange = { airdropAllowed = it }, colors = v14SwitchColors)
                 }
             }
 
             // Description & Official Rules
             SettingsCard {
-                Text("Tournament Description & Rules", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = VelorixTextPrimary, modifier = Modifier.padding(bottom = 12.dp))
+                Text("Tournament Description & Rules", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = V14TextPrimary, modifier = Modifier.padding(bottom = 12.dp))
 
                 OutlinedTextField(
                     value = description,
@@ -430,7 +484,8 @@ fun TournamentSettingsScreen(
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 2,
                     maxLines = 4,
-                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
+                    shape = RoundedCornerShape(12.dp),
+                    colors = v14FieldColors
                 )
 
                 Spacer(modifier = Modifier.height(12.dp))
@@ -442,20 +497,22 @@ fun TournamentSettingsScreen(
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 4,
                     maxLines = 8,
-                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
+                    shape = RoundedCornerShape(12.dp),
+                    colors = v14FieldColors
                 )
             }
-            
+
             // Schedule
             SettingsCard {
-                Text("Schedule & Timings", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = VelorixTextPrimary, modifier = Modifier.padding(bottom = 12.dp))
+                Text("Schedule & Timings", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = V14TextPrimary, modifier = Modifier.padding(bottom = 12.dp))
                 OutlinedTextField(
                     value = startsAt,
                     onValueChange = { startsAt = it },
                     label = { Text("Start Date/Time") },
                     modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("e.g. 2026-08-20T18:00:00Z") },
-                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
+                    placeholder = { Text("e.g. 2026-08-20T18:00:00Z", color = V14TextMuted) },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = v14FieldColors
                 )
                 Spacer(modifier = Modifier.height(10.dp))
                 OutlinedTextField(
@@ -463,38 +520,41 @@ fun TournamentSettingsScreen(
                     onValueChange = { endsAt = it },
                     label = { Text("End Date/Time") },
                     modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("e.g. 2026-08-20T21:00:00Z") },
-                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
+                    placeholder = { Text("e.g. 2026-08-20T21:00:00Z", color = V14TextMuted) },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = v14FieldColors
                 )
             }
-            
+
             // Room Details
             SettingsCard {
-                Text("Custom Room Credentials (Instant Broadcast)", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = VelorixTextPrimary, modifier = Modifier.padding(bottom = 12.dp))
+                Text("Custom Room Credentials (Instant Broadcast)", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = V14TextPrimary, modifier = Modifier.padding(bottom = 12.dp))
                 OutlinedTextField(
                     value = roomIdInput,
                     onValueChange = { roomIdInput = it },
                     label = { Text("Room ID") },
-                    placeholder = { Text("e.g. 8492041") },
+                    placeholder = { Text("e.g. 8492041", color = V14TextMuted) },
                     modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
+                    shape = RoundedCornerShape(12.dp),
+                    colors = v14FieldColors
                 )
                 Spacer(modifier = Modifier.height(10.dp))
                 OutlinedTextField(
                     value = roomPasswordInput,
                     onValueChange = { roomPasswordInput = it },
                     label = { Text("Room Password") },
-                    placeholder = { Text("e.g. 1234") },
+                    placeholder = { Text("e.g. 1234", color = V14TextMuted) },
                     modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = VelorixAccent, unfocusedBorderColor = CardVerifyBorder)
+                    shape = RoundedCornerShape(12.dp),
+                    colors = v14FieldColors
                 )
             }
-            
+
             Spacer(modifier = Modifier.height(12.dp))
 
             // Save Changes Button
             Button(
-                onClick = { 
+                onClick = {
                     coroutineScope.launch {
                         isSaving = true
                         val updatedRoomDetails = if (roomIdInput.isNotBlank() || roomPasswordInput.isNotBlank()) {
@@ -542,13 +602,13 @@ fun TournamentSettingsScreen(
                 },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(48.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = VelorixAccent),
-                shape = RoundedCornerShape(12.dp),
+                    .height(50.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = V14AccentPrimary),
+                shape = RoundedCornerShape(14.dp),
                 enabled = !isSaving
             ) {
                 if (isSaving) {
-                    CircularProgressIndicator(color = Color.White, modifier = Modifier.size(20.dp))
+                    CircularProgressIndicator(color = Color.White, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                 } else {
                     Icon(Icons.Default.Save, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
@@ -570,16 +630,16 @@ fun TournamentSettingsScreen(
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.Cancel, contentDescription = null, modifier = Modifier.size(15.dp), tint = Color(0xFFFBBF24))
+                        Icon(Icons.Default.Cancel, contentDescription = null, modifier = Modifier.size(15.dp), tint = VelorixAmber)
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Cancel Match", fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = Color(0xFFFBBF24))
+                        Text("Cancel Match", fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = VelorixAmber)
                     }
 
                     Box(
                         modifier = Modifier
                             .width(0.5.dp)
                             .height(20.dp)
-                            .background(Color.White.copy(alpha = 0.14f))
+                            .background(V14Border)
                     )
 
                     Row(
@@ -590,13 +650,13 @@ fun TournamentSettingsScreen(
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(15.dp), tint = Color(0xFFF87171))
+                        Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(15.dp), tint = V14AccentBright)
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Delete Match", fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = Color(0xFFF87171))
+                        Text("Delete Match", fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = V14AccentBright)
                     }
                 }
             }
-            
+
             Spacer(modifier = Modifier.height(24.dp))
         }
     }
@@ -605,16 +665,18 @@ fun TournamentSettingsScreen(
     if (showCancelConfirmDialog) {
         AlertDialog(
             onDismissRequest = { showCancelConfirmDialog = false },
-            title = { Text("Cancel Tournament?", color = VelorixTextPrimary, fontWeight = FontWeight.Bold) },
+            title = { Text("Cancel Tournament?", color = V14TextPrimary, fontWeight = FontWeight.Bold) },
             text = {
                 Column {
-                    Text("Manually cancel this tournament (e.g. if joined players are not sufficient).", fontSize = 13.sp, color = VelorixTextSecondary)
+                    Text("Manually cancel this tournament (e.g. if joined players are not sufficient).", fontSize = 13.sp, color = V14TextSecondary)
                     Spacer(modifier = Modifier.height(10.dp))
                     OutlinedTextField(
                         value = cancellationReason,
                         onValueChange = { cancellationReason = it },
                         label = { Text("Cancellation Reason") },
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = v14DangerFieldColors
                     )
                 }
             },
@@ -625,15 +687,17 @@ fun TournamentSettingsScreen(
                         showCancelConfirmDialog = false
                         onNavigateBack()
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF5252))
+                    colors = ButtonDefaults.buttonColors(containerColor = V14AccentPrimary),
+                    shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text("Confirm Cancel", fontWeight = FontWeight.Bold)
+                    Text("Confirm Cancel", color = Color.White, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showCancelConfirmDialog = false }) { Text("Dismiss", color = VelorixTextSecondary) }
+                TextButton(onClick = { showCancelConfirmDialog = false }) { Text("Dismiss", color = V14TextSecondary) }
             },
-            containerColor = CardVerifyBg
+            containerColor = V14CardSurface,
+            shape = RoundedCornerShape(20.dp)
         )
     }
 
@@ -641,8 +705,8 @@ fun TournamentSettingsScreen(
     if (showDeleteConfirmDialog) {
         AlertDialog(
             onDismissRequest = { showDeleteConfirmDialog = false },
-            title = { Text("Delete Tournament?", color = VelorixTextPrimary, fontWeight = FontWeight.Bold) },
-            text = { Text("Permanently delete \"${tournament.title}\"? This action is irreversible.", fontSize = 13.sp, color = VelorixTextSecondary) },
+            title = { Text("Delete Tournament?", color = V14TextPrimary, fontWeight = FontWeight.Bold) },
+            text = { Text("Permanently delete \"${tournament.title}\"? This action is irreversible.", fontSize = 13.sp, color = V14TextSecondary) },
             confirmButton = {
                 Button(
                     onClick = {
@@ -650,15 +714,17 @@ fun TournamentSettingsScreen(
                         showDeleteConfirmDialog = false
                         onNavigateBack()
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF5252))
+                    colors = ButtonDefaults.buttonColors(containerColor = V14AccentPrimary),
+                    shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text("Delete Permanently", fontWeight = FontWeight.Bold)
+                    Text("Delete Permanently", color = Color.White, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showDeleteConfirmDialog = false }) { Text("Dismiss", color = VelorixTextSecondary) }
+                TextButton(onClick = { showDeleteConfirmDialog = false }) { Text("Dismiss", color = V14TextSecondary) }
             },
-            containerColor = CardVerifyBg
+            containerColor = V14CardSurface,
+            shape = RoundedCornerShape(20.dp)
         )
     }
 }
@@ -670,9 +736,9 @@ private fun SettingsCard(
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        color = Color(0xFF09090D),
-        border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.10f))
+        shape = RoundedCornerShape(18.dp),
+        color = V14CardSurface,
+        border = BorderStroke(1.dp, V14Border)
     ) {
         Column(
             modifier = Modifier
@@ -694,15 +760,15 @@ private fun WeaponPresetChip(label: String, allowed: String, banned: String, onA
         Text(
             text = label,
             fontSize = 11.sp,
-            color = Color.White,
+            color = V14TextPrimary,
             fontWeight = FontWeight.SemiBold
         )
         Spacer(modifier = Modifier.height(3.dp))
         Box(
             modifier = Modifier
                 .width(18.dp)
-                .height(1.dp)
-                .background(Color.White.copy(alpha = 0.35f))
+                .height(1.5.dp)
+                .background(V14AccentBright.copy(alpha = 0.7f))
         )
     }
 }

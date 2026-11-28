@@ -46,8 +46,8 @@ import com.example.ui.theme.ThemeManager
 
 data class FluidSettingsState(
     val isDark: Boolean = true,
-    val themeColorName: String = "Violet",
-    val themeColorHex: Long = 0xFF8B5CF6,
+    val themeColorName: String = "Crimson",
+    val themeColorHex: Long = 0xFFFF0033,
     val textSize: String = "Default", // Small, Default, Large, Extra large
     val uiStyle: String = "Rounded",  // Rounded, Soft, Crisp
     val language: String = "English",
@@ -69,12 +69,10 @@ data class ThemeColorOption(
 )
 
 val THEME_COLOR_OPTIONS = listOf(
-    ThemeColorOption("Violet", Color(0xFF8B5CF6), HyperOSTheme.NEBULA_PURPLE),
-    ThemeColorOption("Rose", Color(0xFFEC4899), HyperOSTheme.ELECTRIC_ROSE),
-    ThemeColorOption("Emerald", Color(0xFF10B981), HyperOSTheme.AURORA_EMERALD),
-    ThemeColorOption("Ocean", Color(0xFF06B6D4), HyperOSTheme.GLACIER_CYAN),
-    ThemeColorOption("Amber", Color(0xFFF59E0B), HyperOSTheme.TURBO_AMBER),
-    ThemeColorOption("Blue", Color(0xFF3B82F6), HyperOSTheme.GLACIER_CYAN)
+    ThemeColorOption("Crimson", Color(0xFFFF0033), HyperOSTheme.ELECTRIC_ROSE),
+    ThemeColorOption("Emerald", Color(0xFF34D399), HyperOSTheme.AURORA_EMERALD),
+    ThemeColorOption("Amber", Color(0xFFFBBF24), HyperOSTheme.TURBO_AMBER),
+    ThemeColorOption("Rose", Color(0xFFFF2E5B), HyperOSTheme.ELECTRIC_ROSE)
 )
 
 val LANGUAGE_OPTIONS = listOf(
@@ -499,7 +497,7 @@ private fun SettingsHubContent(
                     title = "Language",
                     subtitle = stagedState.language,
                     icon = Icons.Default.Translate,
-                    iconTint = Color(0xFF38BDF8),
+                    iconTint = accentColor,
                     onClick = { onNavigateSubScreen("language") }
                 )
             }

@@ -293,7 +293,7 @@ fun AdminChatbotScreen(
 
         if (isDisputeLogging) {
             val currUser = FirebaseAuth.getInstance().currentUser
-            val userEmail = currUser?.email?.ifBlank { null } ?: "anantisback47@gmail.com"
+            val userEmail = currUser?.email?.ifBlank { null } ?: tournamentRepository.activeAdminEmail
             val disputeRateCheck = UserRateLimiter.checkAndRecord(UserRateLimiter.ActionType.SUPPORT_TICKET_SUBMISSION, userEmail)
             if (disputeRateCheck.isAllowed) {
                 val ticketId = "TK-CB-${System.currentTimeMillis().toString().takeLast(5)}"
@@ -395,16 +395,16 @@ fun AdminChatbotScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Column {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            GeminiLogo(size = 20.dp)
+                            GeminiLogo(size = 18.dp)
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Gemini Helper Bot",
-                                color = VelorixTextPrimary,
+                                text = "Velorix AI",
+                                color = Color.White,
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
@@ -415,13 +415,13 @@ fun AdminChatbotScreen(
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
+                                .clip(RoundedCornerShape(6.dp))
                                 .clickable { showModelBottomSheet = true }
-                                .padding(vertical = 2.dp)
+                                .padding(vertical = 1.dp)
                         ) {
                             Text(
-                                text = "${selectedModel.displayName}${if (enableThinking) " • Thinking" else ""}",
-                                color = VelorixAccentLight,
+                                text = selectedModel.displayName,
+                                color = Color(0xFFFF2E5B),
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
@@ -431,7 +431,7 @@ fun AdminChatbotScreen(
                             Icon(
                                 imageVector = Icons.Default.KeyboardArrowDown,
                                 contentDescription = "Change Model",
-                                tint = VelorixAccentLight,
+                                tint = Color(0xFFFF2E5B),
                                 modifier = Modifier.size(14.dp)
                             )
                         }
@@ -439,73 +439,16 @@ fun AdminChatbotScreen(
                 },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = VelorixTextPrimary)
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White)
                     }
                 },
                 actions = {
-                    // Live Database Inspector button
-                    IconButton(
-                        onClick = { showLiveInspectorSheet = true },
-                        modifier = Modifier.padding(end = 2.dp)
-                    ) {
+                    // Live Database Inspector
+                    IconButton(onClick = { showLiveInspectorSheet = true }) {
                         Icon(
                             imageVector = Icons.Default.Info,
                             contentDescription = "Inspect Live System Context",
-                            tint = VelorixAccent
-                        )
-                    }
-                    // Toggle Thinking mode
-                    IconButton(
-                        onClick = { enableThinking = !enableThinking },
-                        modifier = Modifier.padding(end = 2.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Psychology,
-                            contentDescription = "Toggle Thinking Mode",
-                            tint = if (enableThinking) VelorixAccent else Color.Gray
-                        )
-                    }
-                    // SFX Audio Lab Tester
-                    IconButton(
-                        onClick = {
-                            soundManager.playBeatTap()
-                            showAudioLabDialog = true
-                        }
-                    ) {
-                        Icon(
-                            Icons.Default.Headphones,
-                            contentDescription = "SFX Audio Lab",
-                            tint = Color(0xFFD49A3D)
-                        )
-                    }
-                    // Gemini API Key Config
-                    IconButton(
-                        onClick = {
-                            soundManager.playSnapPop()
-                            showApiKeyDialog = true
-                        }
-                    ) {
-                        Icon(
-                            Icons.Default.VpnKey,
-                            contentDescription = "Configure Gemini API Key",
-                            tint = if (ApiKeyManager.hasValidCustomKey()) Color(0xFF60A5FA) else Color.Gray
-                        )
-                    }
-                    // Toggle Audio SFX
-                    IconButton(
-                        onClick = {
-                            isAudioMuted = !isAudioMuted
-                            soundManager.isMuted = isAudioMuted
-                            if (!isAudioMuted) soundManager.playSnapPop()
-                            val stateMsg = if (isAudioMuted) "Sound FX Muted" else "Sound FX Enabled"
-                            android.widget.Toast.makeText(context, stateMsg, android.widget.Toast.LENGTH_SHORT).show()
-                        },
-                        modifier = Modifier.padding(end = 2.dp)
-                    ) {
-                        Icon(
-                            imageVector = if (isAudioMuted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
-                            contentDescription = "Toggle Audio SFX",
-                            tint = if (!isAudioMuted) Color(0xFFD49A3D) else Color.Gray
+                            tint = Color(0xFFFF2E5B)
                         )
                     }
                     // Clear conversation
@@ -514,13 +457,13 @@ fun AdminChatbotScreen(
                         messages = listOf(initialMessage)
                         android.widget.Toast.makeText(context, "Chat history reset", android.widget.Toast.LENGTH_SHORT).show()
                     }) {
-                        Icon(Icons.Default.DeleteSweep, contentDescription = "Clear Chat", tint = Color.Gray)
+                        Icon(Icons.Default.DeleteSweep, contentDescription = "Clear Chat", tint = Color(0xFF9A9AA6))
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF0F0F12))
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF09090D))
             )
         },
-        containerColor = Color(0xFF0B0B0E)
+        containerColor = Color.Black
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -692,11 +635,11 @@ fun AdminChatbotScreen(
                 }
             }
 
-            // Bottom Input Bar
+            // Bottom Input Bar (V14 AMOLED)
             Surface(
-                color = Color(0xFF141418),
+                color = Color(0xFF0B0B0F),
                 shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF26262E)),
+                border = androidx.compose.foundation.BorderStroke(0.75.dp, Color(0xFF1E1E27)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
@@ -704,15 +647,15 @@ fun AdminChatbotScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(Color(0xFF1F1F2C))
+                                .background(Color(0xFF16161F))
                                 .padding(horizontal = 16.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Default.AccessTime, contentDescription = null, tint = VelorixAccent, modifier = Modifier.size(14.dp))
+                            Icon(Icons.Default.AccessTime, contentDescription = null, tint = Color(0xFFFF2E5B), modifier = Modifier.size(14.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = "Rate Limit Protection Active: Next prompt in ${chatCooldownSeconds}s",
-                                color = VelorixAccent,
+                                color = Color(0xFFFF2E5B),
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Medium
                             )
@@ -730,18 +673,18 @@ fun AdminChatbotScreen(
                             modifier = Modifier.weight(1f),
                             placeholder = {
                                 Text(
-                                    "Query tournaments, logs, tickets (${selectedModel.displayName})...",
-                                    color = Color.Gray,
+                                    "Ask Velorix AI about tournaments, payouts, tickets...",
+                                    color = Color(0xFF7A7A88),
                                     fontSize = 13.sp
                                 )
                             },
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = VelorixAccent,
-                                unfocusedBorderColor = Color(0xFF33333F),
-                                focusedTextColor = VelorixTextPrimary,
-                                unfocusedTextColor = VelorixTextPrimary,
-                                focusedContainerColor = Color(0xFF1A1A22),
-                                unfocusedContainerColor = Color(0xFF1A1A22)
+                                focusedBorderColor = Color(0xFFFF2E5B),
+                                unfocusedBorderColor = Color(0xFF22222C),
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedContainerColor = Color(0xFF111118),
+                                unfocusedContainerColor = Color(0xFF111118)
                             ),
                             shape = RoundedCornerShape(20.dp),
                             maxLines = 4
@@ -757,15 +700,15 @@ fun AdminChatbotScreen(
                             modifier = Modifier
                                 .size(46.dp)
                                 .background(
-                                    if (chatCooldownSeconds > 0L) Brush.linearGradient(listOf(Color(0xFF374151), Color(0xFF1F2937)))
-                                    else Brush.linearGradient(listOf(VelorixAccent, Color(0xFF6366F1))),
+                                    if (chatCooldownSeconds > 0L || currentInput.isBlank()) Color(0xFF23232E)
+                                    else Color(0xFFFF2E5B),
                                     CircleShape
                                 )
                         ) {
                             if (chatCooldownSeconds > 0L) {
-                                Text("${chatCooldownSeconds}s", color = Color(0xFF9CA3AF), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text("${chatCooldownSeconds}s", color = Color(0xFF9A9AA6), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             } else {
-                                Icon(Icons.AutoMirrored.Filled.Send, "Send", tint = Color.Black, modifier = Modifier.size(20.dp))
+                                Icon(Icons.AutoMirrored.Filled.Send, "Send", tint = Color.White, modifier = Modifier.size(20.dp))
                             }
                         }
                     }
@@ -1186,14 +1129,14 @@ fun EnhancedChatBubble(
 ) {
     val alignment = if (message.isUser) Alignment.CenterEnd else Alignment.CenterStart
     val bgColor = when {
-        message.isUser -> Color(0xFF222838)
-        message.isError -> Color(0xFF26191E)
-        else -> Color(0xFF141722)
+        message.isUser -> Color(0xFF1A1016)
+        message.isError -> Color(0xFF261217)
+        else -> Color(0xFF0D0D12)
     }
     val textColor = when {
-        message.isUser -> Color(0xFFF1F5F9)
-        message.isError -> Color(0xFFE28B96)
-        else -> Color(0xFFE2E8F0)
+        message.isUser -> Color(0xFFF5F5F7)
+        message.isError -> Color(0xFFFFB4C2)
+        else -> Color(0xFFE4E4EC)
     }
 
     Box(
@@ -1216,10 +1159,10 @@ fun EnhancedChatBubble(
                         )
                     )
                     .border(
-                        1.dp,
-                        if (message.isError) Color(0xFF5E2B33)
-                        else if (message.isUser) Color(0xFF333C52)
-                        else Color(0xFF242A38),
+                        0.75.dp,
+                        if (message.isError) Color(0xFF7A283A)
+                        else if (message.isUser) Color(0xFFFF2E5B).copy(alpha = 0.4f)
+                        else Color(0xFF1E1E27),
                         RoundedCornerShape(14.dp)
                     )
                     .padding(14.dp)
@@ -1227,7 +1170,7 @@ fun EnhancedChatBubble(
                 if (message.isLoading) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(
-                            color = VelorixAccent,
+                            color = Color(0xFFFF2E5B),
                             modifier = Modifier.size(16.dp),
                             strokeWidth = 2.dp
                         )
@@ -1248,14 +1191,14 @@ fun EnhancedChatBubble(
                             ) {
                                 Text(
                                     text = message.modelUsed,
-                                    color = if (message.isError) Color(0xFFFFAB91) else VelorixAccentLight,
+                                    color = if (message.isError) Color(0xFFFF8BA3) else Color(0xFFFF2E5B),
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold
                                 )
                                 if (message.queryCategory != null) {
                                     Text(
                                         text = message.queryCategory,
-                                        color = Color.LightGray,
+                                        color = Color(0xFF9A9AA6),
                                         fontSize = 9.sp,
                                         fontWeight = FontWeight.Medium
                                     )
@@ -1263,8 +1206,9 @@ fun EnhancedChatBubble(
                             }
                             Spacer(modifier = Modifier.height(6.dp))
                         }
+                        val formattedBody = remember(message.text) { formatChatMarkdown(message.text) }
                         Text(
-                            text = message.text,
+                            text = formattedBody,
                             color = textColor,
                             fontSize = 13.5.sp,
                             lineHeight = 20.sp,
@@ -1318,6 +1262,55 @@ fun EnhancedChatBubble(
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * Lightweight Markdown renderer for AI responses: converts **bold**, *italic*, and bullet markers
+ * into clean styled Compose AnnotatedString without leaving raw asterisks visible.
+ */
+private fun formatChatMarkdown(raw: String): AnnotatedString {
+    val normalized = raw
+        .replace(Regex("(?m)^\\s*\\*\\s+"), "• ")
+        .replace(Regex("(?m)^###\\s+"), "")
+        .replace(Regex("(?m)^##\\s+"), "")
+    return androidx.compose.ui.text.buildAnnotatedString {
+        var i = 0
+        val n = normalized.length
+        while (i < n) {
+            if (i + 1 < n && normalized[i] == '*' && normalized[i + 1] == '*') {
+                val end = normalized.indexOf("**", i + 2)
+                if (end != -1) {
+                    pushStyle(
+                        androidx.compose.ui.text.SpanStyle(
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    )
+                    append(normalized.substring(i + 2, end))
+                    pop()
+                    i = end + 2
+                    continue
+                }
+            }
+            if (normalized[i] == '*') {
+                val end = normalized.indexOf('*', i + 1)
+                if (end != -1 && !normalized.substring(i + 1, end).contains('\n')) {
+                    pushStyle(
+                        androidx.compose.ui.text.SpanStyle(
+                            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                            color = Color(0xFFD4D4DC)
+                        )
+                    )
+                    append(normalized.substring(i + 1, end))
+                    pop()
+                    i = end + 1
+                    continue
+                }
+            }
+            append(normalized[i])
+            i++
         }
     }
 }

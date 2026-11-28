@@ -121,6 +121,7 @@ fun WalletUpiVoucherModuleSection(
         else wOnly.filter { it.status.equals(filterStatus, ignoreCase = true) }
     }
 
+    val allWithdrawalsCount = remember(withdrawals) { withdrawals.count { !it.isDeposit } }
     val pendingDepositsCount = remember(depositRequests) { depositRequests.count { it.status.equals("PENDING", true) } }
     val pendingWithdrawalsCount = remember(withdrawals) { withdrawals.count { !it.isDeposit && it.status.equals("PENDING", true) } }
 
@@ -197,10 +198,13 @@ fun WalletUpiVoucherModuleSection(
                 .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            val v14Crimson = Color(0xFFFF2E5B)
+            val withdrawPillLabel = if (pendingWithdrawalsCount > 0) "Withdrawals ($allWithdrawalsCount · $pendingWithdrawalsCount pending)" else "Withdrawals ($allWithdrawalsCount)"
+            val depositPillLabel = if (pendingDepositsCount > 0) "Deposits (${depositRequests.size} · $pendingDepositsCount pending)" else "Deposits (${depositRequests.size})"
             listOf(
-                Triple("WITHDRAWALS", "Withdrawals ($pendingWithdrawalsCount)", AmberAccent),
-                Triple("DEPOSITS", "Deposits ($pendingDepositsCount)", GreenAccent),
-                Triple("PRE_UTR", "Pre-Verify UTR (${verifiedUtrs.size})", BlueAccent)
+                Triple("WITHDRAWALS", withdrawPillLabel, AmberAccent),
+                Triple("DEPOSITS", depositPillLabel, GreenAccent),
+                Triple("PRE_UTR", "Pre-Verify UTR (${verifiedUtrs.size})", v14Crimson)
             ).forEach { (key, label, accent) ->
                 val selected = activeSubTab == key
                 Box(
@@ -435,17 +439,18 @@ fun WalletUpiVoucherModuleSection(
                                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                                     modifier = Modifier.weight(1f)
                                 ) {
+                                    val badgeColor = if (isVoucher) AmberAccent else Color(0xFFFF2E5B)
                                     Box(
                                         modifier = Modifier
                                             .background(
-                                                (if (isVoucher) AmberAccent else BlueAccent).copy(alpha = 0.16f),
+                                                badgeColor.copy(alpha = 0.16f),
                                                 RoundedCornerShape(6.dp)
                                             )
                                             .padding(horizontal = 6.dp, vertical = 2.dp)
                                     ) {
                                         Text(
                                             text = if (isVoucher) "REDEEM VOUCHER" else "UPI PAYOUT",
-                                            color = if (isVoucher) AmberAccent else BlueAccent,
+                                            color = badgeColor,
                                             fontSize = 9.5.sp,
                                             fontWeight = FontWeight.Bold,
                                             fontFamily = FontFamily.Monospace
@@ -478,11 +483,12 @@ fun WalletUpiVoucherModuleSection(
                                 fontFamily = FontFamily.Monospace
                             )
 
+                            val resolvedUpiId = wReq.paymentId.ifBlank { wReq.upiId?.ifBlank { "Not provided" } ?: "Not provided" }
                             Text(
                                 text = if (isVoucher) {
                                     "Voucher: ${wReq.voucherSpec.ifBlank { wReq.paymentId.ifBlank { "Google Play" } }} • ID: ${wReq.id} • ${formatShortTs(wReq.requestedAt)}"
                                 } else {
-                                    "UPI ID: ${wReq.paymentId} • ID: ${wReq.id} • ${formatShortTs(wReq.requestedAt)}"
+                                    "UPI ID: $resolvedUpiId • ID: ${wReq.id} • ${formatShortTs(wReq.requestedAt)}"
                                 },
                                 color = SecondaryText,
                                 fontSize = 10.5.sp,
@@ -571,6 +577,8 @@ fun WalletUpiVoucherModuleSection(
                 }
             }
         }
+
+        Spacer(modifier = Modifier.height(140.dp))
     }
 }
 
@@ -1007,7 +1015,7 @@ fun UnifiedRequestHubModuleSection(
                     }
 
                     Text(
-                        text = "${req.username} (${req.userId.take(10)}) • ${req.userEmail.ifBlank { req.freeFireId.ifBlank { req.id } }} • ${formatShortTs(req.createdAt)}",
+                        text = "${req.username} (${req.userId.take(10).ifBlank { "N/A" }}) • IGN: ${req.inGameName.ifBlank { req.username }} • Ticket: ${req.id}${if (req.relatedId.isNotBlank()) " • Sanction: ${req.relatedId}" else ""} • ${formatShortTs(req.createdAt)}",
                         color = SecondaryText,
                         fontSize = 10.sp,
                         fontFamily = FontFamily.Monospace
@@ -1074,9 +1082,58 @@ fun UnifiedRequestHubModuleSection(
                         )
                     }
 
+                    if (req.isBanAppeal) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Box(modifier = Modifier.weight(1f)) {
+                                PillActionButton(
+                                    label = "Approve & Unban",
+                                    color = GreenAccent,
+                                    icon = Icons.Default.CheckCircle,
+                                    onClick = {
+                                        viewModel.approveBanAppealAndUnban(
+                                            req = req,
+                                            adminNote = draftReply
+                                        )
+                                    }
+                                )
+                            }
+                            Box(modifier = Modifier.weight(1f)) {
+                                PillActionButton(
+                                    label = "Reject Appeal",
+                                    color = RedAccent,
+                                    icon = Icons.Default.Cancel,
+                                    onClick = {
+                                        viewModel.rejectBanAppeal(
+                                            req = req,
+                                            adminNote = draftReply
+                                        )
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    if (ch == UnifiedRequestChannel.ACCOUNT_DELETION && !req.status.equals("RESOLVED", true)) {
+                        PillActionButton(
+                            label = "Approve & Permanently Delete User",
+                            color = RedAccent,
+                            icon = Icons.Default.DeleteForever,
+                            modifier = Modifier.testTag("approve_account_deletion_btn_${req.id}"),
+                            onClick = {
+                                viewModel.approveAccountDeletionFromUnifiedTicket(
+                                    req = req,
+                                    adminNote = draftReply
+                                )
+                            }
+                        )
+                    }
+
                     PillActionButton(
                         label = "Send Reply & Update Ticket",
-                        color = GreenAccent,
+                        color = BlueAccent,
                         icon = Icons.Default.Send,
                         onClick = {
                             viewModel.replyAndUpdateUnifiedTicket(
@@ -1095,14 +1152,48 @@ fun UnifiedRequestHubModuleSection(
 }
 
 // ============================================================================
-// MODULE 6: BANNERS & GLOBAL BROADCASTS
+// MODULE 6: MANUAL NOTIFICATION STUDIO (CLOUD FUNCTION FCM PUSH) & BANNERS
 // ============================================================================
 @Composable
 fun BannersAndBroadcastsModuleSection(
     viewModel: TournamentDashboardViewModel,
     systemConfig: SystemConfig,
-    banners: List<AppAnnouncementBanner>
+    banners: List<AppAnnouncementBanner>,
+    users: List<UserProfile> = emptyList(),
+    tournaments: List<Tournament> = emptyList(),
+    manualNotifications: List<ManualNotificationRecord> = emptyList(),
+    prefillUserId: String? = null,
+    onClearPrefillUser: () -> Unit = {}
 ) {
+    // Sub-tab inside Module 6: STUDIO | HISTORY | BANNERS
+    var activeSubTab by remember { mutableStateOf("STUDIO") }
+
+    // Manual Notification Composer state
+    var targetType by remember { mutableStateOf("ALL") } // ALL | USER | USERS | TOURNAMENT | TOPIC
+    var notifType by remember { mutableStateOf("MANUAL") }
+    var notifTitle by remember { mutableStateOf("") }
+    var notifMessage by remember { mutableStateOf("") }
+    var targetUserLookup by remember { mutableStateOf("") } // UID, Email, or Username
+    var multiUserIdsInput by remember { mutableStateOf("") }
+    var selectedTournamentId by remember { mutableStateOf("") }
+    var selectedTopic by remember { mutableStateOf("all_users") }
+    var imageUrlInput by remember { mutableStateOf("") }
+    var roomIdInput by remember { mutableStateOf("") }
+    var roomPasswordInput by remember { mutableStateOf("") }
+    var isSendingNotif by remember { mutableStateOf(false) }
+    var lastResult by remember { mutableStateOf<ManualNotificationResult?>(null) }
+
+    // Handle quick "Notify User" jump from Module 5 Players Directory
+    LaunchedEffect(prefillUserId) {
+        if (!prefillUserId.isNullOrBlank()) {
+            activeSubTab = "STUDIO"
+            targetType = "USER"
+            targetUserLookup = prefillUserId
+            onClearPrefillUser()
+        }
+    }
+
+    // Banner state
     var bannerTitle by remember { mutableStateOf("") }
     var bannerSubtitle by remember { mutableStateOf("") }
     var bannerBadge by remember { mutableStateOf("OFFICIAL") }
@@ -1112,8 +1203,30 @@ fun BannersAndBroadcastsModuleSection(
     var bannerTargetId by remember { mutableStateOf("") }
     var bannerOrder by remember { mutableStateOf("1") }
 
-    var broadcastTitle by remember { mutableStateOf("") }
-    var broadcastMessage by remember { mutableStateOf("") }
+    val targetTypes = remember {
+        listOf(
+            "ALL" to "All Users",
+            "USER" to "Single User",
+            "USERS" to "Multi Users",
+            "TOURNAMENT" to "Tournament",
+            "TOPIC" to "FCM Topic"
+        )
+    }
+    val notifCategories = remember {
+        listOf(
+            "MANUAL",
+            "ANNOUNCEMENT",
+            "ADMIN_BROADCAST",
+            "URGENT",
+            "PROMO",
+            "MAINTENANCE",
+            "PRIZE_ANNOUNCEMENT",
+            "TOURNAMENT_UPDATE",
+            "WALLET_UPDATE",
+            "ROOM_CREDENTIALS"
+        )
+    }
+    val topicPresets = remember { listOf("all_users", "announcements", "manual_notifications") }
 
     Column(
         modifier = Modifier
@@ -1123,175 +1236,595 @@ fun BannersAndBroadcastsModuleSection(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Master showBanners Toggle
+        // Module 6 Sub-Tab Strip
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(SurfaceSubtle, RoundedCornerShape(10.dp))
-                .border(0.5.dp, if (systemConfig.showBanners) GreenAccent.copy(alpha = 0.5f) else DividerHairline, RoundedCornerShape(10.dp))
-                .clickable { viewModel.toggleMasterShowBanners(!systemConfig.showBanners) }
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text("Master Home Banners Toggle (showBanners)", color = PrimaryText, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
-                Text("Synced to /app_config, /system_config & app_config/global", color = SecondaryText, fontSize = 10.sp)
-            }
-            Icon(
-                imageVector = if (systemConfig.showBanners) Icons.Default.ToggleOn else Icons.Default.ToggleOff,
-                contentDescription = "Toggle Home Banners",
-                tint = if (systemConfig.showBanners) GreenAccent else SecondaryText,
-                modifier = Modifier.size(28.dp)
-            )
-        }
-
-        // Global Push Broadcast
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(SurfaceSubtle, RoundedCornerShape(10.dp))
-                .border(0.5.dp, DividerHairline, RoundedCornerShape(10.dp))
-                .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Icon(Icons.Default.Campaign, contentDescription = null, tint = AmberAccent, modifier = Modifier.size(16.dp))
-                Text("Global Push Broadcast (/notifications)", color = PrimaryText, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
-            }
-            OutlinedTextField(
-                value = broadcastTitle,
-                onValueChange = { broadcastTitle = it },
-                label = { Text("Notification Title", fontSize = 10.sp) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
-            OutlinedTextField(
-                value = broadcastMessage,
-                onValueChange = { broadcastMessage = it },
-                label = { Text("Notification Message", fontSize = 10.sp) },
-                singleLine = false,
-                maxLines = 3,
-                modifier = Modifier.fillMaxWidth()
-            )
-            PillActionButton(
-                label = "Send Global Broadcast",
-                color = BlueAccent,
-                icon = Icons.Default.Send,
-                modifier = Modifier.testTag("send_global_broadcast_btn"),
-                onClick = {
-                    if (broadcastTitle.isNotBlank() && broadcastMessage.isNotBlank()) {
-                        viewModel.sendGlobalBroadcastNotification(broadcastTitle.trim(), broadcastMessage.trim(), "ANNOUNCEMENT")
-                        broadcastTitle = ""
-                        broadcastMessage = ""
-                    }
-                }
-            )
-        }
-
-        HorizontalDivider(thickness = 0.5.dp, color = DividerHairline)
-
-        // Banner Creator
-        Text("Promotional Banners (/banners)", color = PrimaryText, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-        Row(
-            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            listOf("ANNOUNCEMENT", "MATCH", "WALLET", "SUPPORT", "LEADERBOARD").forEach { act ->
-                val sel = bannerActionType == act
+            listOf(
+                "STUDIO" to "Notification Studio",
+                "HISTORY" to "Sent History (${manualNotifications.size})",
+                "BANNERS" to "Home Banners (${banners.size})"
+            ).forEach { (key, label) ->
+                val sel = activeSubTab == key
                 Box(
                     modifier = Modifier
-                        .background(if (sel) BlueAccent.copy(alpha = 0.16f) else SurfaceSubtle, RoundedCornerShape(8.dp))
-                        .border(0.6.dp, if (sel) BlueAccent else DividerHairline, RoundedCornerShape(8.dp))
-                        .clickable { bannerActionType = act }
-                        .padding(horizontal = 9.dp, vertical = 5.dp)
+                        .background(if (sel) BlueAccent.copy(alpha = 0.16f) else SurfaceSubtle, RoundedCornerShape(10.dp))
+                        .border(0.75.dp, if (sel) BlueAccent else DividerHairline, RoundedCornerShape(10.dp))
+                        .clickable { activeSubTab = key }
+                        .padding(horizontal = 12.dp, vertical = 7.dp)
                 ) {
-                    Text(act, color = if (sel) BlueAccent else SecondaryText, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                }
-            }
-        }
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(value = bannerTitle, onValueChange = { bannerTitle = it }, label = { Text("Banner Title", fontSize = 10.sp) }, singleLine = true, modifier = Modifier.weight(1f))
-            OutlinedTextField(value = bannerSubtitle, onValueChange = { bannerSubtitle = it }, label = { Text("Subtitle", fontSize = 10.sp) }, singleLine = true, modifier = Modifier.weight(1f))
-        }
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(value = bannerBadge, onValueChange = { bannerBadge = it }, label = { Text("Badge", fontSize = 10.sp) }, singleLine = true, modifier = Modifier.weight(0.35f))
-            OutlinedTextField(value = bannerCta, onValueChange = { bannerCta = it }, label = { Text("CTA", fontSize = 10.sp) }, singleLine = true, modifier = Modifier.weight(0.35f))
-            OutlinedTextField(value = bannerOrder, onValueChange = { bannerOrder = it }, label = { Text("Order", fontSize = 10.sp) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(0.3f))
-        }
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(value = bannerImageUrl, onValueChange = { bannerImageUrl = it }, label = { Text("Image URL", fontSize = 10.sp) }, singleLine = true, modifier = Modifier.weight(0.55f))
-            OutlinedTextField(value = bannerTargetId, onValueChange = { bannerTargetId = it }, label = { Text("Target ID / URL", fontSize = 10.sp) }, singleLine = true, modifier = Modifier.weight(0.45f))
-        }
-        PillActionButton(
-            label = "Publish Banner",
-            color = GreenAccent,
-            icon = Icons.Default.Add,
-            onClick = {
-                if (bannerTitle.isNotBlank()) {
-                    viewModel.savePromotionalBanner(
-                        AppAnnouncementBanner(
-                            id = "banner_${System.currentTimeMillis()}",
-                            title = bannerTitle.trim(),
-                            subtitle = bannerSubtitle.trim(),
-                            message = bannerSubtitle.trim(),
-                            badgeText = bannerBadge.trim().ifBlank { "OFFICIAL" },
-                            ctaText = bannerCta.trim().ifBlank { "OPEN" },
-                            actionType = bannerActionType,
-                            targetId = bannerTargetId.trim(),
-                            imageUrl = bannerImageUrl.trim(),
-                            actionUrl = bannerTargetId.trim(),
-                            targetUrl = bannerTargetId.trim(),
-                            isActive = true,
-                            priority = bannerOrder.toIntOrNull() ?: 1
-                        )
+                    Text(
+                        text = label,
+                        color = if (sel) PrimaryText else SecondaryText,
+                        fontSize = 11.5.sp,
+                        fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium,
+                        maxLines = 1,
+                        softWrap = false
                     )
-                    bannerTitle = ""
-                    bannerSubtitle = ""
-                    bannerImageUrl = ""
-                    bannerTargetId = ""
                 }
             }
-        )
+        }
 
         HorizontalDivider(thickness = 0.5.dp, color = DividerHairline)
 
-        banners.forEach { b ->
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
+        when (activeSubTab) {
+            "STUDIO" -> {
+                // Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Icon(Icons.Default.NotificationsActive, contentDescription = null, tint = AmberAccent, modifier = Modifier.size(18.dp))
+                        Text("Manual Notification Studio", color = PrimaryText, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    }
                     Text(
-                        text = "[${b.actionType}] ${b.title} (#${b.priority})",
-                        color = PrimaryText,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = "${b.subtitle.ifBlank { b.message }} • ${if (b.isActive) "ACTIVE" else "HIDDEN"}",
-                        color = if (b.isActive) SecondaryText else RedAccent,
-                        fontSize = 10.5.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        text = "sendManualNotification()",
+                        color = GreenAccent,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace
                     )
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    PillActionButton(
-                        label = if (b.isActive) "Hide" else "Show",
-                        color = AmberAccent,
-                        onClick = { viewModel.savePromotionalBanner(b.copy(isActive = !b.isActive)) }
+
+                // Target Audience Selector
+                Text("1. Target Audience (targetType)", color = SecondaryText, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    targetTypes.forEach { (code, label) ->
+                        val sel = targetType == code
+                        Box(
+                            modifier = Modifier
+                                .background(if (sel) BlueAccent.copy(alpha = 0.18f) else SurfaceSubtle, RoundedCornerShape(8.dp))
+                                .border(0.7.dp, if (sel) BlueAccent else DividerHairline, RoundedCornerShape(8.dp))
+                                .clickable { targetType = code }
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = label,
+                                color = if (sel) BlueAccent else SecondaryText,
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
+                // Target-Specific Inputs
+                when (targetType) {
+                    "USER" -> {
+                        OutlinedTextField(
+                            value = targetUserLookup,
+                            onValueChange = { targetUserLookup = it },
+                            label = { Text("User UID, Email, or Username", fontSize = 10.sp) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        val quickMatches = remember(users, targetUserLookup) {
+                            if (targetUserLookup.isBlank()) users.take(6)
+                            else users.filter {
+                                it.id.contains(targetUserLookup, true) ||
+                                    it.email.contains(targetUserLookup, true) ||
+                                    it.username.contains(targetUserLookup, true)
+                            }.take(6)
+                        }
+                        if (quickMatches.isNotEmpty()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                quickMatches.forEach { u ->
+                                    val picked = targetUserLookup.equals(u.id, true)
+                                    Box(
+                                        modifier = Modifier
+                                            .background(if (picked) GreenAccent.copy(alpha = 0.18f) else SurfaceSubtle, RoundedCornerShape(8.dp))
+                                            .border(0.6.dp, if (picked) GreenAccent else DividerHairline, RoundedCornerShape(8.dp))
+                                            .clickable { targetUserLookup = u.id }
+                                            .padding(horizontal = 8.dp, vertical = 5.dp)
+                                    ) {
+                                        Text(
+                                            text = "${u.username.ifBlank { u.id.take(8) }}${if (u.fcmToken.isNotBlank()) " • Push" else ""}",
+                                            color = if (picked) GreenAccent else PrimaryText,
+                                            fontSize = 10.sp
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    "USERS" -> {
+                        OutlinedTextField(
+                            value = multiUserIdsInput,
+                            onValueChange = { multiUserIdsInput = it },
+                            label = { Text("Target User UIDs (comma-separated)", fontSize = 10.sp) },
+                            singleLine = false,
+                            maxLines = 2,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        if (users.isNotEmpty()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                users.take(10).forEach { u ->
+                                    val currentList = multiUserIdsInput.split(",").map { it.trim() }.filter { it.isNotBlank() }
+                                    val included = currentList.contains(u.id)
+                                    Box(
+                                        modifier = Modifier
+                                            .background(if (included) GreenAccent.copy(alpha = 0.18f) else SurfaceSubtle, RoundedCornerShape(8.dp))
+                                            .border(0.6.dp, if (included) GreenAccent else DividerHairline, RoundedCornerShape(8.dp))
+                                            .clickable {
+                                                val updated = if (included) currentList - u.id else currentList + u.id
+                                                multiUserIdsInput = updated.joinToString(", ")
+                                            }
+                                            .padding(horizontal = 8.dp, vertical = 5.dp)
+                                    ) {
+                                        Text(
+                                            text = "${if (included) "✓ " else "+ "}${u.username.ifBlank { u.id.take(8) }}",
+                                            color = if (included) GreenAccent else SecondaryText,
+                                            fontSize = 10.sp
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    "TOURNAMENT" -> {
+                        OutlinedTextField(
+                            value = selectedTournamentId,
+                            onValueChange = { selectedTournamentId = it },
+                            label = { Text("Tournament ID (notifies all joined players)", fontSize = 10.sp) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        if (tournaments.isNotEmpty()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                tournaments.take(10).forEach { t ->
+                                    val picked = selectedTournamentId == t.id
+                                    Box(
+                                        modifier = Modifier
+                                            .background(if (picked) AmberAccent.copy(alpha = 0.18f) else SurfaceSubtle, RoundedCornerShape(8.dp))
+                                            .border(0.6.dp, if (picked) AmberAccent else DividerHairline, RoundedCornerShape(8.dp))
+                                            .clickable { selectedTournamentId = t.id }
+                                            .padding(horizontal = 8.dp, vertical = 5.dp)
+                                    ) {
+                                        Text(
+                                            text = "${t.title.take(18)} (${t.registeredPlayers}/${t.maxPlayers})",
+                                            color = if (picked) AmberAccent else PrimaryText,
+                                            fontSize = 10.sp
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    "TOPIC" -> {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            topicPresets.forEach { preset ->
+                                val picked = selectedTopic == preset
+                                Box(
+                                    modifier = Modifier
+                                        .background(if (picked) GreenAccent.copy(alpha = 0.16f) else SurfaceSubtle, RoundedCornerShape(8.dp))
+                                        .border(0.6.dp, if (picked) GreenAccent else DividerHairline, RoundedCornerShape(8.dp))
+                                        .clickable { selectedTopic = preset }
+                                        .padding(horizontal = 9.dp, vertical = 5.dp)
+                                ) {
+                                    Text(preset, color = if (picked) GreenAccent else SecondaryText, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                                }
+                            }
+                        }
+                        OutlinedTextField(
+                            value = selectedTopic,
+                            onValueChange = { selectedTopic = it },
+                            label = { Text("FCM Topic Name", fontSize = 10.sp) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+
+                // Category Selector
+                Text("2. Notification Category (type)", color = SecondaryText, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    notifCategories.forEach { cat ->
+                        val sel = notifType == cat
+                        val accent = when (cat) {
+                            "URGENT", "MAINTENANCE" -> RedAccent
+                            "PRIZE_ANNOUNCEMENT", "PROMO" -> AmberAccent
+                            "ROOM_CREDENTIALS", "WALLET_UPDATE" -> GreenAccent
+                            else -> BlueAccent
+                        }
+                        Box(
+                            modifier = Modifier
+                                .background(if (sel) accent.copy(alpha = 0.18f) else SurfaceSubtle, RoundedCornerShape(8.dp))
+                                .border(0.6.dp, if (sel) accent else DividerHairline, RoundedCornerShape(8.dp))
+                                .clickable { notifType = cat }
+                                .padding(horizontal = 9.dp, vertical = 5.dp)
+                        ) {
+                            Text(cat, color = if (sel) accent else SecondaryText, fontSize = 9.5.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                // Composer Fields
+                OutlinedTextField(
+                    value = notifTitle,
+                    onValueChange = { if (it.length <= 140) notifTitle = it },
+                    label = { Text("Title * (${notifTitle.length}/140)", fontSize = 10.sp) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().testTag("manual_notif_title_input")
+                )
+                OutlinedTextField(
+                    value = notifMessage,
+                    onValueChange = { if (it.length <= 1000) notifMessage = it },
+                    label = { Text("Message * (${notifMessage.length}/1000)", fontSize = 10.sp) },
+                    singleLine = false,
+                    maxLines = 4,
+                    modifier = Modifier.fillMaxWidth().testTag("manual_notif_message_input")
+                )
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = imageUrlInput,
+                        onValueChange = { imageUrlInput = it },
+                        label = { Text("Optional Image URL (BigPicture)", fontSize = 10.sp) },
+                        singleLine = true,
+                        modifier = Modifier.weight(0.58f)
                     )
-                    PillActionButton(
-                        label = "Delete",
-                        color = RedAccent,
-                        icon = Icons.Default.DeleteOutline,
-                        onClick = { viewModel.deletePromotionalBanner(b.id) }
-                    )
+                    if (targetType != "TOURNAMENT") {
+                        OutlinedTextField(
+                            value = selectedTournamentId,
+                            onValueChange = { selectedTournamentId = it },
+                            label = { Text("Deep-Link Match ID", fontSize = 10.sp) },
+                            singleLine = true,
+                            modifier = Modifier.weight(0.42f)
+                        )
+                    }
+                }
+
+                if (notifType == "ROOM_CREDENTIALS") {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = roomIdInput,
+                            onValueChange = { roomIdInput = it },
+                            label = { Text("Room ID", fontSize = 10.sp) },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f)
+                        )
+                        OutlinedTextField(
+                            value = roomPasswordInput,
+                            onValueChange = { roomPasswordInput = it },
+                            label = { Text("Room Password", fontSize = 10.sp) },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+
+                // Live Preview Card
+                if (notifTitle.isNotBlank() || notifMessage.isNotBlank()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF0E1014), RoundedCornerShape(10.dp))
+                            .border(0.5.dp, AmberAccent.copy(alpha = 0.45f), RoundedCornerShape(10.dp))
+                            .padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("LIVE ANDROID PUSH PREVIEW", color = AmberAccent, fontSize = 9.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                            Text("$notifType • $targetType", color = SecondaryText, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+                        }
+                        Text(notifTitle.ifBlank { "Notification Title" }, color = PrimaryText, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                        Text(notifMessage.ifBlank { "Message body..." }, color = SecondaryText, fontSize = 11.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+
+                // Dispatch Button
+                PillActionButton(
+                    label = if (isSendingNotif) "Dispatching Push via Cloud Function..." else "Send Manual Notification ($targetType)",
+                    color = if (isSendingNotif) AmberAccent else GreenAccent,
+                    icon = Icons.Default.Send,
+                    modifier = Modifier.testTag("send_global_broadcast_btn"),
+                    onClick = {
+                        if (isSendingNotif || notifTitle.isBlank() || notifMessage.isBlank()) return@PillActionButton
+                        val trimmedLookup = targetUserLookup.trim()
+                        val resolvedUid = if (targetType == "USER" && !trimmedLookup.contains("@") && !trimmedLookup.startsWith("@")) trimmedLookup else ""
+                        val resolvedEmail = if (targetType == "USER" && trimmedLookup.contains("@")) trimmedLookup else ""
+                        val resolvedUsername = if (targetType == "USER" && trimmedLookup.startsWith("@")) trimmedLookup.removePrefix("@") else ""
+                        val multiIds = if (targetType == "USERS") {
+                            multiUserIdsInput.split(",").map { it.trim() }.filter { it.isNotBlank() }
+                        } else emptyList()
+
+                        isSendingNotif = true
+                        viewModel.sendManualNotification(
+                            title = notifTitle.trim(),
+                            message = notifMessage.trim(),
+                            type = notifType,
+                            targetType = targetType,
+                            targetUserId = resolvedUid,
+                            targetEmail = resolvedEmail,
+                            targetUsername = resolvedUsername,
+                            targetUserIds = multiIds,
+                            tournamentId = selectedTournamentId.trim(),
+                            topic = if (targetType == "TOPIC") selectedTopic.trim() else "",
+                            imageUrl = imageUrlInput.trim(),
+                            roomId = if (notifType == "ROOM_CREDENTIALS") roomIdInput.trim() else "",
+                            roomPassword = if (notifType == "ROOM_CREDENTIALS") roomPasswordInput.trim() else ""
+                        ) { res ->
+                            isSendingNotif = false
+                            lastResult = res
+                            if (res.success) {
+                                notifTitle = ""
+                                notifMessage = ""
+                                imageUrlInput = ""
+                                roomIdInput = ""
+                                roomPasswordInput = ""
+                            }
+                        }
+                    }
+                )
+
+                lastResult?.let { res ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF0E1014), RoundedCornerShape(8.dp))
+                            .border(0.5.dp, if (res.success) GreenAccent.copy(alpha = 0.5f) else RedAccent.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                            .padding(10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (res.success) {
+                                if (res.viaFallback) "Queued via Firestore Trigger • ID: ${res.notificationId.takeLast(10)}"
+                                else "Delivered • Recipients: ${res.recipientCount} • FCM OK: ${res.fcmSuccessCount} / Fail: ${res.fcmFailureCount}"
+                            } else {
+                                "Failed: ${res.errorMessage ?: "Unknown error"}"
+                            },
+                            color = if (res.success) GreenAccent else RedAccent,
+                            fontSize = 10.5.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
                 }
             }
-            HorizontalDivider(thickness = 0.5.dp, color = DividerHairline)
+
+            "HISTORY" -> {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Sent Notification History (manual_notifications)", color = PrimaryText, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text("${manualNotifications.size} logs", color = SecondaryText, fontSize = 10.5.sp, fontFamily = FontFamily.Monospace)
+                }
+
+                if (manualNotifications.isEmpty()) {
+                    Text("No manual notifications dispatched yet.", color = SecondaryText, fontSize = 11.5.sp)
+                } else {
+                    manualNotifications.forEach { rec ->
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color(0xFF0E1014), RoundedCornerShape(10.dp))
+                                .border(0.5.dp, DividerHairline, RoundedCornerShape(10.dp))
+                                .padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = rec.title.ifBlank { "Untitled" },
+                                    color = PrimaryText,
+                                    fontSize = 12.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "${rec.type} • ${rec.targetType}",
+                                    color = AmberAccent,
+                                    fontSize = 9.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                            Text(rec.message, color = SecondaryText, fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(
+                                text = "Recipients: ${rec.recipientCount} • FCM: ${rec.fcmSuccessCount} OK / ${rec.fcmFailureCount} Fail • By: ${rec.sentBy} • ${formatShortTs(rec.timestamp)}",
+                                color = GreenAccent,
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                            PillActionButton(
+                                label = "Resend / Duplicate",
+                                color = BlueAccent,
+                                icon = Icons.Default.Replay,
+                                onClick = {
+                                    notifTitle = rec.title
+                                    notifMessage = rec.message
+                                    notifType = rec.type.ifBlank { "MANUAL" }
+                                    targetType = rec.targetType.ifBlank { "ALL" }
+                                    targetUserLookup = rec.targetUserId.ifBlank { rec.targetEmail.ifBlank { rec.targetUsername } }
+                                    multiUserIdsInput = rec.targetUserIds.joinToString(", ")
+                                    selectedTournamentId = rec.tournamentId
+                                    if (rec.topic.isNotBlank()) selectedTopic = rec.topic
+                                    imageUrlInput = rec.imageUrl
+                                    roomIdInput = rec.roomId
+                                    roomPasswordInput = rec.roomPassword
+                                    activeSubTab = "STUDIO"
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+
+            else -> {
+                // Master showBanners Toggle
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(SurfaceSubtle, RoundedCornerShape(10.dp))
+                        .border(0.5.dp, if (systemConfig.showBanners) GreenAccent.copy(alpha = 0.5f) else DividerHairline, RoundedCornerShape(10.dp))
+                        .clickable { viewModel.toggleMasterShowBanners(!systemConfig.showBanners) }
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Master Home Banners Toggle (showBanners)", color = PrimaryText, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                        Text("Synced to Firestore system_config/config & global_app_state/latest", color = SecondaryText, fontSize = 10.sp)
+                    }
+                    Icon(
+                        imageVector = if (systemConfig.showBanners) Icons.Default.ToggleOn else Icons.Default.ToggleOff,
+                        contentDescription = "Toggle Home Banners",
+                        tint = if (systemConfig.showBanners) GreenAccent else SecondaryText,
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+
+                // Banner Creator
+                Text("Home Screen Banners CRUD (banners/{id})", color = PrimaryText, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    listOf("ANNOUNCEMENT", "MATCH", "WALLET", "SUPPORT", "LEADERBOARD").forEach { act ->
+                        val sel = bannerActionType == act
+                        Box(
+                            modifier = Modifier
+                                .background(if (sel) BlueAccent.copy(alpha = 0.16f) else SurfaceSubtle, RoundedCornerShape(8.dp))
+                                .border(0.6.dp, if (sel) BlueAccent else DividerHairline, RoundedCornerShape(8.dp))
+                                .clickable { bannerActionType = act }
+                                .padding(horizontal = 9.dp, vertical = 5.dp)
+                        ) {
+                            Text(act, color = if (sel) BlueAccent else SecondaryText, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(value = bannerTitle, onValueChange = { bannerTitle = it }, label = { Text("Banner Title", fontSize = 10.sp) }, singleLine = true, modifier = Modifier.weight(1f))
+                    OutlinedTextField(value = bannerSubtitle, onValueChange = { bannerSubtitle = it }, label = { Text("Subtitle", fontSize = 10.sp) }, singleLine = true, modifier = Modifier.weight(1f))
+                }
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(value = bannerBadge, onValueChange = { bannerBadge = it }, label = { Text("Badge", fontSize = 10.sp) }, singleLine = true, modifier = Modifier.weight(0.35f))
+                    OutlinedTextField(value = bannerCta, onValueChange = { bannerCta = it }, label = { Text("CTA", fontSize = 10.sp) }, singleLine = true, modifier = Modifier.weight(0.35f))
+                    OutlinedTextField(value = bannerOrder, onValueChange = { bannerOrder = it }, label = { Text("Order", fontSize = 10.sp) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(0.3f))
+                }
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(value = bannerImageUrl, onValueChange = { bannerImageUrl = it }, label = { Text("Image URL", fontSize = 10.sp) }, singleLine = true, modifier = Modifier.weight(0.55f))
+                    OutlinedTextField(value = bannerTargetId, onValueChange = { bannerTargetId = it }, label = { Text("Target ID / URL", fontSize = 10.sp) }, singleLine = true, modifier = Modifier.weight(0.45f))
+                }
+                PillActionButton(
+                    label = "Publish Banner",
+                    color = GreenAccent,
+                    icon = Icons.Default.Add,
+                    onClick = {
+                        if (bannerTitle.isNotBlank()) {
+                            viewModel.savePromotionalBanner(
+                                AppAnnouncementBanner(
+                                    id = "banner_${System.currentTimeMillis()}",
+                                    title = bannerTitle.trim(),
+                                    subtitle = bannerSubtitle.trim(),
+                                    message = bannerSubtitle.trim(),
+                                    badgeText = bannerBadge.trim().ifBlank { "OFFICIAL" },
+                                    ctaText = bannerCta.trim().ifBlank { "OPEN" },
+                                    actionType = bannerActionType,
+                                    targetId = bannerTargetId.trim(),
+                                    imageUrl = bannerImageUrl.trim(),
+                                    actionUrl = bannerTargetId.trim(),
+                                    targetUrl = bannerTargetId.trim(),
+                                    isActive = true,
+                                    priority = bannerOrder.toIntOrNull() ?: 1
+                                )
+                            )
+                            bannerTitle = ""
+                            bannerSubtitle = ""
+                            bannerImageUrl = ""
+                            bannerTargetId = ""
+                        }
+                    }
+                )
+
+                HorizontalDivider(thickness = 0.5.dp, color = DividerHairline)
+
+                banners.forEach { b ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "[${b.actionType}] ${b.title} (#${b.priority})",
+                                color = PrimaryText,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "${b.subtitle.ifBlank { b.message }} • ${if (b.isActive) "ACTIVE" else "HIDDEN"}",
+                                color = if (b.isActive) SecondaryText else RedAccent,
+                                fontSize = 10.5.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            PillActionButton(
+                                label = if (b.isActive) "Hide" else "Show",
+                                color = AmberAccent,
+                                onClick = { viewModel.savePromotionalBanner(b.copy(isActive = !b.isActive)) }
+                            )
+                            PillActionButton(
+                                label = "Delete",
+                                color = RedAccent,
+                                icon = Icons.Default.DeleteOutline,
+                                onClick = { viewModel.deletePromotionalBanner(b.id) }
+                            )
+                        }
+                    }
+                    HorizontalDivider(thickness = 0.5.dp, color = DividerHairline)
+                }
+            }
         }
     }
 }

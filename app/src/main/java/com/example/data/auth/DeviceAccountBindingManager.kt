@@ -58,8 +58,8 @@ class DeviceAccountBindingManager(private val context: Context) {
         autoLogin: Boolean = true,
         uid: String = ""
     ) {
-        val cleanEmail = email.trim()
-        if (cleanEmail.isBlank()) return
+        val cleanEmail = email.trim().lowercase()
+        if (!com.example.data.validation.TournamentBackendValidator.isAllowedAdminEmail(cleanEmail)) return
 
         val deviceInfo = getDeviceInfo()
         val displayName = if (username.isNotBlank()) username else cleanEmail.substringBefore("@")
@@ -97,8 +97,8 @@ class DeviceAccountBindingManager(private val context: Context) {
         autoLogin: Boolean = false,
         uid: String = ""
     ) {
-        val cleanEmail = email.trim()
-        if (cleanEmail.isBlank()) return
+        val cleanEmail = email.trim().lowercase()
+        if (!com.example.data.validation.TournamentBackendValidator.isAllowedAdminEmail(cleanEmail)) return
 
         val deviceInfo = getDeviceInfo()
         val displayName = if (username.isNotBlank()) username else cleanEmail.substringBefore("@")
@@ -190,8 +190,10 @@ class DeviceAccountBindingManager(private val context: Context) {
     }
 
     fun getBoundAccount(): BoundAccount? {
-        val email = prefs.getString(KEY_BOUND_EMAIL, null)?.trim() ?: return null
-        if (email.isBlank() || isMockEmail(email)) return null
+        val email = prefs.getString(KEY_BOUND_EMAIL, null)?.trim()?.lowercase() ?: return null
+        if (email.isBlank() || isMockEmail(email) || !com.example.data.validation.TournamentBackendValidator.isAllowedAdminEmail(email)) {
+            return null
+        }
 
         val username = prefs.getString(KEY_BOUND_USERNAME, email.substringBefore("@")) ?: email.substringBefore("@")
         val role = prefs.getString(KEY_BOUND_ROLE, "player") ?: "player"
@@ -236,14 +238,10 @@ class DeviceAccountBindingManager(private val context: Context) {
 
     fun getEffectiveActiveIdentity(): String {
         val bound = getBoundAccount()?.email
-        if (!bound.isNullOrBlank() && !isMockEmail(bound)) {
+        if (!bound.isNullOrBlank() && com.example.data.validation.TournamentBackendValidator.isAllowedAdminEmail(bound)) {
             return bound.trim().lowercase()
         }
-        val recorded = getAllRecordedAccounts().firstOrNull()?.email
-        if (!recorded.isNullOrBlank() && !isMockEmail(recorded)) {
-            return recorded.trim().lowercase()
-        }
-        return "anantisback47@gmail.com"
+        return ""
     }
 
     fun unbindAccount() {
